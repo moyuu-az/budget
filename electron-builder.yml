@@ -1,0 +1,41 @@
+appId: com.moyuu.balance-forecast
+productName: Balance Forecast
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!{.claude,.playwright-mcp}'
+  - '!{.env,.env.*,.npmrc}'
+asarUnpack:
+  - resources/**
+  - node_modules/better-sqlite3/**
+mac:
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: false
+  target:
+    - dmg
+    - zip
+  artifactName: ${name}-${version}-${arch}.${ext}
+dmg:
+  artifactName: ${name}-${version}.${ext}
+win:
+  executableName: balance-forecast
+  target:
+    - nsis
+nsis:
+  artifactName: ${name}-${version}-setup.${ext}
+  shortcutName: Balance Forecast
+  uninstallDisplayName: Balance Forecast
+linux:
+  target:
+    - AppImage
+  category: Finance
+publish:
+  provider: github
+  owner: moyuu-az
+  repo: budget
+npmRebuild: true

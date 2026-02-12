@@ -44,6 +44,13 @@ export interface ForecastPoint {
   isMinimum?: boolean;
 }
 
+export interface UpdateStatus {
+  status: 'checking' | 'available' | 'up-to-date' | 'downloading' | 'downloaded' | 'error';
+  version?: string;
+  percent?: number;
+  message?: string;
+}
+
 export interface ElectronAPI {
   getBalance: () => Promise<number>;
   setBalance: (balance: number) => Promise<void>;
@@ -60,6 +67,11 @@ export interface ElectronAPI {
   getSnapshots: () => Promise<BalanceSnapshot[]>;
   addSnapshot: (snapshot: BalanceSnapshotInput) => Promise<BalanceSnapshot>;
   deleteSnapshot: (id: number) => Promise<void>;
+  checkForUpdates: () => Promise<void>;
+  downloadUpdate: () => Promise<void>;
+  installUpdate: () => Promise<void>;
+  getAppVersion: () => Promise<string>;
+  onUpdateStatus: (callback: (status: UpdateStatus) => void) => () => void;
 }
 
 declare global {

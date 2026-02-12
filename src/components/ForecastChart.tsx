@@ -1,6 +1,7 @@
+import { motion } from 'framer-motion';
 import {
-  LineChart,
-  Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -23,11 +24,19 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
   const label = `${date.getMonth() + 1}/${date.getDate()}`;
 
   return (
-    <div className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 shadow-xl">
-      <p className="text-slate-300 text-xs mb-1">{label}</p>
-      <p className="text-white font-bold">¥{point.balance.toLocaleString()}</p>
+    <div
+      className="rounded-xl px-4 py-3 shadow-2xl"
+      style={{
+        background: 'rgba(30, 41, 72, 0.9)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+        border: '1px solid rgba(100, 116, 170, 0.2)',
+      }}
+    >
+      <p className="text-slate-400 text-xs mb-1">{label}</p>
+      <p className="text-white font-bold text-lg">¥{point.balance.toLocaleString()}</p>
       {point.events.length > 0 && (
-        <div className="mt-1 border-t border-slate-700 pt-1">
+        <div className="mt-2 border-t border-white/10 pt-2">
           {point.events.map((e, i) => (
             <p key={i} className="text-xs text-blue-300">{e}</p>
           ))}
@@ -56,32 +65,70 @@ function ForecastChart({ data, minimumPoint }: ForecastChartProps) {
     : '#22c55e';
 
   return (
-    <div className="bg-slate-900 rounded-2xl p-6 border border-slate-800">
-      <h2 className="text-lg font-semibold text-white mb-4">60-Day Forecast</h2>
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.2 }}
+      className="glass rounded-2xl p-6"
+    >
+      <h2 className="text-lg font-semibold text-white mb-4">60日間予測</h2>
       <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={data} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+        <AreaChart data={data} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
+          <defs>
+            <linearGradient id="forecastGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.25} />
+              <stop offset="50%" stopColor="#8b5cf6" stopOpacity={0.1} />
+              <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
+            </linearGradient>
+            <linearGradient id="forecastStroke" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#3b82f6" />
+              <stop offset="100%" stopColor="#8b5cf6" />
+            </linearGradient>
+            <filter id="glow">
+              <feGaussianBlur stdDeviation="3" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+          <CartesianGrid
+            strokeDasharray="3 3"
+            stroke="rgba(100, 116, 170, 0.08)"
+            vertical={false}
+          />
           <XAxis
             dataKey="date"
             tickFormatter={formatXAxis}
-            stroke="#64748b"
-            tick={{ fontSize: 11 }}
+            stroke="#4a5580"
+            tick={{ fontSize: 11, fill: '#64748b' }}
             interval={6}
+            axisLine={{ stroke: 'rgba(100, 116, 170, 0.12)' }}
+            tickLine={false}
           />
           <YAxis
             tickFormatter={formatYAxisTick}
-            stroke="#64748b"
-            tick={{ fontSize: 11 }}
+            stroke="#4a5580"
+            tick={{ fontSize: 11, fill: '#64748b' }}
             domain={[minBalance - padding, maxBalance + padding]}
+            axisLine={false}
+            tickLine={false}
           />
           <Tooltip content={<CustomTooltip />} />
-          <Line
+          <Area
             type="stepAfter"
             dataKey="balance"
-            stroke="#3b82f6"
-            strokeWidth={2}
+            stroke="url(#forecastStroke)"
+            strokeWidth={2.5}
+            fill="url(#forecastGradient)"
             dot={false}
-            activeDot={{ r: 4, fill: '#3b82f6' }}
+            activeDot={{
+              r: 5,
+              fill: '#3b82f6',
+              stroke: 'rgba(59, 130, 246, 0.3)',
+              strokeWidth: 8,
+              filter: 'url(#glow)',
+            }}
           />
           {minimumPoint && (
             <ReferenceDot
@@ -91,23 +138,28 @@ function ForecastChart({ data, minimumPoint }: ForecastChartProps) {
               fill={dotColor}
               stroke="white"
               strokeWidth={2}
+              filter="url(#glow)"
             />
           )}
-        </LineChart>
+        </AreaChart>
       </ResponsiveContainer>
       {minimumPoint && (
-        <div className="mt-3 flex items-center gap-2">
+        <motion.div
+          className="mt-3 flex items-center gap-2"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
+        >
           <span
-            className="w-3 h-3 rounded-full"
+            className="w-3 h-3 rounded-full chart-glow"
             style={{ backgroundColor: dotColor }}
           />
           <span className="text-sm text-slate-400">
-            Minimum: ¥{minimumPoint.balance.toLocaleString()} on{' '}
-            {new Date(minimumPoint.date).toLocaleDateString('ja-JP')}
+            最低残高: ¥{minimumPoint.balance.toLocaleString()} ({new Date(minimumPoint.date).toLocaleDateString('ja-JP')})
           </span>
-        </div>
+        </motion.div>
       )}
-    </div>
+    </motion.div>
   );
 }
 

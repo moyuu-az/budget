@@ -4,3 +4,5 @@ dist/
 .env
 *.db
 .claude/
+.playwright-mcp/
+dev-app-update.yml

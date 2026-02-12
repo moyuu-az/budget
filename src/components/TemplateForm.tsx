@@ -43,40 +43,59 @@ function TemplateForm({ editingTemplate, onSave, onCancel }: TemplateFormProps) 
     }
   };
 
+  const selectedDay = parseInt(dayOfMonth, 10);
+
+  const inputClass = 'w-full rounded-lg px-3 py-2 text-sm text-white outline-none transition-colors focus:border-blue-500/60';
+  const inputStyle = {
+    background: 'rgba(100, 116, 170, 0.08)',
+    border: '1px solid var(--border-subtle)',
+  };
+
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
       <div>
-        <label className="block text-xs text-slate-400 mb-1">Name</label>
+        <label className="block text-xs text-slate-400 mb-1">名前</label>
         <input
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Salary, Rent"
-          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+          placeholder="例: 給料, 家賃"
+          className={inputClass}
+          style={inputStyle}
         />
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Day of Month</label>
+          <label className="block text-xs text-slate-400 mb-1">支払日</label>
           <select
             value={dayOfMonth}
             onChange={(e) => setDayOfMonth(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+            className={inputClass}
+            style={inputStyle}
           >
-            {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-              <option key={d} value={d}>{d}</option>
+            {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+              <option key={d} value={d}>{d}日</option>
             ))}
+            <option value="29">29日</option>
+            <option value="30">30日</option>
+            <option value="31">月末 (末日)</option>
           </select>
+          {selectedDay >= 29 && (
+            <p className="text-xs text-amber-400/80 mt-1">
+              ※ 日数が少ない月は自動的に月末日になります
+            </p>
+          )}
         </div>
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Type</label>
+          <label className="block text-xs text-slate-400 mb-1">種類</label>
           <select
             value={type}
             onChange={(e) => setType(e.target.value as 'income' | 'expense')}
-            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+            className={inputClass}
+            style={inputStyle}
           >
-            <option value="income">Income</option>
-            <option value="expense">Expense</option>
+            <option value="income">収入</option>
+            <option value="expense">支出</option>
           </select>
         </div>
       </div>
@@ -84,16 +103,17 @@ function TemplateForm({ editingTemplate, onSave, onCancel }: TemplateFormProps) 
         <button
           type="submit"
           disabled={saving || !name.trim()}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded-lg transition-colors"
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded-lg transition-colors font-medium"
         >
-          {saving ? 'Saving...' : editingTemplate ? 'Update' : 'Add'}
+          {saving ? '保存中...' : editingTemplate ? '更新' : '追加'}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-sm rounded-lg transition-colors"
+          className="px-4 py-2 text-slate-400 hover:text-white text-sm rounded-lg transition-colors"
+          style={{ background: 'rgba(100, 116, 170, 0.1)', border: '1px solid var(--border-subtle)' }}
         >
-          Cancel
+          キャンセル
         </button>
       </div>
     </form>

@@ -21,5 +21,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('copy-monthly-amounts', fromMonth, toMonth),
   getSnapshots: () => ipcRenderer.invoke('get-snapshots'),
   addSnapshot: (snapshot: { date: string; balance: number }) => ipcRenderer.invoke('add-snapshot', snapshot),
-  deleteSnapshot: (id: number) => ipcRenderer.invoke('delete-snapshot', id)
+  deleteSnapshot: (id: number) => ipcRenderer.invoke('delete-snapshot', id),
+
+  // Auto-update
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  downloadUpdate: () => ipcRenderer.invoke('download-update'),
+  installUpdate: () => ipcRenderer.invoke('install-update'),
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  onUpdateStatus: (callback: (status: unknown) => void) => {
+    const handler = (_event: unknown, status: unknown) => callback(status);
+    ipcRenderer.on('update-status', handler);
+    return () => {
+      ipcRenderer.removeListener('update-status', handler);
+    };
+  }
 });

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
+import { initAutoUpdater } from './updater';
 import {
   initDatabase,
   getBalance,
@@ -19,7 +20,7 @@ import {
   deleteSnapshot
 } from './database';
 
-function createWindow(): void {
+function createWindow(): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -38,6 +39,8 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
+
+  return mainWindow;
 }
 
 function mapTemplate(row: {
@@ -88,6 +91,8 @@ function mapSnapshot(row: { id: number; date: string; balance: number; created_a
 }
 
 function registerIpcHandlers(): void {
+  ipcMain.handle('get-app-version', () => app.getVersion());
+
   ipcMain.handle('get-balance', () => getBalance());
 
   ipcMain.handle('set-balance', (_event, balance: number) => {
@@ -157,7 +162,12 @@ function registerIpcHandlers(): void {
 app.whenReady().then(() => {
   initDatabase();
   registerIpcHandlers();
-  createWindow();
+  const mainWindow = createWindow();
+
+  // Only enable auto-updater in production (no dev server URL)
+  if (!process.env.ELECTRON_RENDERER_URL) {
+    initAutoUpdater(mainWindow);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import type { EntryTemplate } from '../types';
+import { formatWithCommas, parseCommaNumber, handleCurrencyInput } from '../utils/currency';
 
 interface MonthlyAmountRowProps {
   template: EntryTemplate;
@@ -21,13 +22,13 @@ function MonthlyAmountRow({ template, amount, onAmountChange, onToggle }: Monthl
   }, [editing]);
 
   const handleStartEdit = () => {
-    setInputValue(amount != null && amount > 0 ? String(amount) : '');
+    setInputValue(amount != null && amount > 0 ? formatWithCommas(amount) : '');
     setEditing(true);
   };
 
   const handleSave = () => {
     setEditing(false);
-    const parsed = parseFloat(inputValue);
+    const parsed = parseCommaNumber(inputValue);
     if (!isNaN(parsed) && parsed >= 0) {
       onAmountChange(template.id, parsed);
     }
@@ -44,9 +45,15 @@ function MonthlyAmountRow({ template, amount, onAmountChange, onToggle }: Monthl
   const hasAmount = amount != null && amount > 0;
 
   return (
-    <div className={`flex items-center justify-between bg-slate-800 rounded-lg px-4 py-3 transition-opacity ${
-      template.enabled ? '' : 'opacity-50'
-    }`}>
+    <div
+      className={`flex items-center justify-between rounded-lg px-4 py-3 transition-all ${
+        template.enabled ? '' : 'opacity-50'
+      }`}
+      style={{
+        background: 'rgba(100, 116, 170, 0.06)',
+        border: '1px solid transparent',
+      }}
+    >
       <div className="flex items-center gap-3">
         <button
           onClick={() => onToggle(template.id, !template.enabled)}
@@ -64,7 +71,9 @@ function MonthlyAmountRow({ template, amount, onAmountChange, onToggle }: Monthl
         </button>
         <div>
           <p className="text-sm text-white font-medium">{template.name}</p>
-          <p className="text-xs text-slate-500">Day {template.dayOfMonth}</p>
+          <p className="text-xs text-slate-500">
+            {template.dayOfMonth >= 29 ? `毎月${template.dayOfMonth}日 (月末)` : `毎月${template.dayOfMonth}日`}
+          </p>
         </div>
       </div>
       <div className="flex items-center gap-2">
@@ -74,21 +83,25 @@ function MonthlyAmountRow({ template, amount, onAmountChange, onToggle }: Monthl
         {editing ? (
           <input
             ref={inputRef}
-            type="number"
+            type="text"
+            inputMode="numeric"
             value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
+            onChange={(e) => setInputValue(handleCurrencyInput(e.target.value))}
             onBlur={handleSave}
             onKeyDown={handleKeyDown}
-            min="0"
-            className="w-28 bg-slate-900 border border-blue-500 rounded px-2 py-1 text-sm text-white text-right outline-none"
+            className="w-28 rounded px-2 py-1 text-sm text-white text-right outline-none transition-colors"
+            style={{
+              background: 'rgba(100, 116, 170, 0.08)',
+              border: '1px solid rgba(59, 130, 246, 0.4)',
+            }}
           />
         ) : (
           <button
             onClick={handleStartEdit}
             className={`w-28 text-right px-2 py-1 rounded text-sm transition-colors ${
               hasAmount
-                ? 'text-white hover:bg-slate-700'
-                : 'text-slate-600 hover:bg-slate-700 hover:text-slate-400'
+                ? 'text-white hover:bg-white/5'
+                : 'text-slate-600 hover:bg-white/5 hover:text-slate-400'
             }`}
           >
             {hasAmount ? amount.toLocaleString() : '0'}

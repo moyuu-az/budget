@@ -1,9 +1,17 @@
 import { ReactNode } from 'react';
+import { motion } from 'framer-motion';
+import UpdateNotification from './UpdateNotification';
+import { UpdateStatus } from '../types';
 
 interface LayoutProps {
   currentView: 'dashboard' | 'entries' | 'history';
   onNavigate: (view: 'dashboard' | 'entries' | 'history') => void;
   children: ReactNode;
+  appVersion?: string;
+  updateStatus?: UpdateStatus | null;
+  onDownloadUpdate?: () => void;
+  onInstallUpdate?: () => void;
+  onDismissUpdate?: () => void;
 }
 
 const navIcons = {
@@ -25,38 +33,64 @@ const navIcons = {
 };
 
 const navItems = [
-  { id: 'dashboard' as const, label: 'Dashboard' },
-  { id: 'entries' as const, label: 'Entries' },
-  { id: 'history' as const, label: 'History' }
+  { id: 'dashboard' as const, label: 'ダッシュボード' },
+  { id: 'entries' as const, label: '収支管理' },
+  { id: 'history' as const, label: '履歴' }
 ];
 
-function Layout({ currentView, onNavigate, children }: LayoutProps) {
+function Layout({
+  currentView,
+  onNavigate,
+  children,
+  appVersion,
+  updateStatus,
+  onDownloadUpdate,
+  onInstallUpdate,
+  onDismissUpdate
+}: LayoutProps) {
   return (
     <div className="flex h-screen">
-      <nav className="w-56 bg-slate-900 border-r border-slate-700 flex flex-col pt-12">
-        <div className="px-6 pb-6 border-b border-slate-700">
-          <h1 className="text-xl font-bold text-white">Balance Forecast</h1>
-          <p className="text-xs text-slate-400 mt-1">60-day projection</p>
+      <nav className="w-56 glass-strong flex flex-col pt-12" style={{ borderRight: '1px solid var(--border-subtle)' }}>
+        <div className="px-6 pb-6" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+          <h1 className="text-xl font-bold text-white tracking-tight">バランス予測</h1>
+          <p className="text-xs text-slate-400 mt-1">60日間の収支予測</p>
         </div>
         <ul className="flex-1 py-4">
           {navItems.map((item) => (
-            <li key={item.id}>
+            <li key={item.id} className="relative">
               <button
                 onClick={() => onNavigate(item.id)}
-                className={`w-full text-left px-6 py-3 flex items-center gap-3 transition-colors ${
+                className={`w-full text-left px-6 py-3 flex items-center gap-3 transition-all duration-200 ${
                   currentView === item.id
-                    ? 'bg-slate-800 text-white border-r-2 border-blue-500'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                    ? 'text-white'
+                    : 'text-slate-400 hover:text-white hover:bg-white/5'
                 }`}
               >
-                <span>{navIcons[item.id]}</span>
-                <span className="text-sm font-medium">{item.label}</span>
+                {currentView === item.id && (
+                  <motion.div
+                    layoutId="nav-active"
+                    className="absolute inset-0 border-r-2 border-blue-400"
+                    style={{ background: 'rgba(59, 130, 246, 0.08)' }}
+                    transition={{ type: 'spring', stiffness: 350, damping: 30 }}
+                  />
+                )}
+                <span className="relative z-10">{navIcons[item.id]}</span>
+                <span className="relative z-10 text-sm font-medium">{item.label}</span>
               </button>
             </li>
           ))}
         </ul>
+        {appVersion && (
+          <UpdateNotification
+            appVersion={appVersion}
+            updateStatus={updateStatus ?? null}
+            onDownload={onDownloadUpdate ?? (() => {})}
+            onInstall={onInstallUpdate ?? (() => {})}
+            onDismiss={onDismissUpdate ?? (() => {})}
+          />
+        )}
       </nav>
-      <main className="flex-1 overflow-y-auto bg-slate-950 p-6">
+      <main className="flex-1 overflow-y-auto p-6" style={{ background: 'var(--bg-primary)' }}>
         {children}
       </main>
     </div>

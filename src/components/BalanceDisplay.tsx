@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { formatCurrency } from '../utils/forecast';
+import CountUp from 'react-countup';
+import { motion } from 'framer-motion';
+import { formatWithCommas, parseCommaNumber, handleCurrencyInput } from '../utils/currency';
 
 interface BalanceDisplayProps {
   balance: number;
@@ -9,15 +11,17 @@ interface BalanceDisplayProps {
 function BalanceDisplay({ balance, onUpdate }: BalanceDisplayProps) {
   const [editing, setEditing] = useState(false);
   const [inputValue, setInputValue] = useState('');
+  const [prevBalance, setPrevBalance] = useState(balance);
 
   const handleStartEdit = () => {
-    setInputValue(String(balance));
+    setInputValue(formatWithCommas(balance));
     setEditing(true);
   };
 
   const handleSave = async () => {
-    const parsed = parseFloat(inputValue);
+    const parsed = parseCommaNumber(inputValue);
     if (!isNaN(parsed)) {
+      setPrevBalance(balance);
       await onUpdate(parsed);
     }
     setEditing(false);
@@ -29,19 +33,32 @@ function BalanceDisplay({ balance, onUpdate }: BalanceDisplayProps) {
   };
 
   return (
-    <div className="bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl p-6 shadow-lg">
-      <p className="text-blue-200 text-sm font-medium mb-1">Current Balance</p>
+    <motion.div
+      className="relative overflow-hidden rounded-2xl p-6 glow-blue card-hover"
+      style={{
+        background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(139, 92, 246, 0.1) 100%)',
+        border: '1px solid rgba(59, 130, 246, 0.2)',
+      }}
+      whileHover={{ scale: 1.02 }}
+      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+    >
+      <div
+        className="absolute -top-10 -right-10 w-40 h-40 rounded-full opacity-20 blur-3xl"
+        style={{ background: 'radial-gradient(circle, #3b82f6, transparent)' }}
+      />
+      <p className="text-blue-300/80 text-sm font-medium mb-1">現在の残高</p>
       {editing ? (
         <div className="flex items-center gap-2">
           <span className="text-white text-2xl">¥</span>
           <input
-            type="number"
+            type="text"
+            inputMode="numeric"
             value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
+            onChange={(e) => setInputValue(handleCurrencyInput(e.target.value))}
             onKeyDown={handleKeyDown}
             onBlur={handleSave}
             autoFocus
-            className="bg-blue-900/50 border border-blue-400/50 rounded-lg px-3 py-2 text-2xl font-bold text-white w-full outline-none focus:border-blue-300"
+            className="bg-white/5 border border-blue-400/30 rounded-lg px-3 py-2 text-2xl font-bold text-white w-full outline-none focus:border-blue-400/60 transition-colors"
           />
         </div>
       ) : (
@@ -49,15 +66,21 @@ function BalanceDisplay({ balance, onUpdate }: BalanceDisplayProps) {
           onClick={handleStartEdit}
           className="text-left w-full group"
         >
-          <p className="text-3xl font-bold text-white">
-            ¥{balance.toLocaleString()}
+          <p className="text-3xl font-bold text-white tabular-nums">
+            ¥<CountUp
+              start={prevBalance}
+              end={balance}
+              duration={0.8}
+              separator=","
+              preserveValue
+            />
           </p>
-          <p className="text-blue-300 text-xs mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            Click to edit
+          <p className="text-blue-300/50 text-xs mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            クリックして編集
           </p>
         </button>
       )}
-    </div>
+    </motion.div>
   );
 }
 

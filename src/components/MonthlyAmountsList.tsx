@@ -1,3 +1,4 @@
+import { motion } from 'framer-motion';
 import type { EntryTemplate } from '../types';
 import MonthlyAmountRow from './MonthlyAmountRow';
 
@@ -15,7 +16,7 @@ function MonthlyAmountsList({ templates, amountsForMonth, onAmountChange, onTogg
   if (templates.length === 0) {
     return (
       <p className="text-slate-500 text-sm py-8 text-center">
-        No templates yet. Use "Manage Templates" to add one.
+        テンプレートがありません。「テンプレート管理」から追加してください。
       </p>
     );
   }
@@ -24,32 +25,44 @@ function MonthlyAmountsList({ templates, amountsForMonth, onAmountChange, onTogg
     <div className="space-y-6">
       {incomeTemplates.length > 0 && (
         <div>
-          <h3 className="text-xs font-semibold text-green-400 uppercase tracking-wider mb-2">Income</h3>
+          <h3 className="text-xs font-semibold text-green-400 uppercase tracking-wider mb-2">収入</h3>
           <div className="space-y-2">
-            {incomeTemplates.map((t) => (
-              <MonthlyAmountRow
+            {incomeTemplates.map((t, index) => (
+              <motion.div
                 key={t.id}
-                template={t}
-                amount={amountsForMonth?.get(t.id)}
-                onAmountChange={onAmountChange}
-                onToggle={onToggle}
-              />
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: index * 0.05 }}
+              >
+                <MonthlyAmountRow
+                  template={t}
+                  amount={amountsForMonth?.get(t.id)}
+                  onAmountChange={onAmountChange}
+                  onToggle={onToggle}
+                />
+              </motion.div>
             ))}
           </div>
         </div>
       )}
       {expenseTemplates.length > 0 && (
         <div>
-          <h3 className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-2">Expenses</h3>
+          <h3 className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-2">支出</h3>
           <div className="space-y-2">
-            {expenseTemplates.map((t) => (
-              <MonthlyAmountRow
+            {expenseTemplates.map((t, index) => (
+              <motion.div
                 key={t.id}
-                template={t}
-                amount={amountsForMonth?.get(t.id)}
-                onAmountChange={onAmountChange}
-                onToggle={onToggle}
-              />
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: index * 0.05 }}
+              >
+                <MonthlyAmountRow
+                  template={t}
+                  amount={amountsForMonth?.get(t.id)}
+                  onAmountChange={onAmountChange}
+                  onToggle={onToggle}
+                />
+              </motion.div>
             ))}
           </div>
         </div>
