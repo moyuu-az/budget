@@ -2,6 +2,14 @@ import { useMemo } from 'react';
 import type { EntryTemplate, MonthlyAmountsMap, ForecastPoint } from '../types';
 import { generateForecast } from '../utils/forecast';
 
+export interface UpcomingEvent {
+  date: string;
+  name: string;
+  amount: number;
+  type: 'income' | 'expense';
+  balanceAfter: number;
+}
+
 export function useForecast(
   balance: number,
   templates: EntryTemplate[],
@@ -17,15 +25,28 @@ export function useForecast(
   }, [forecast]);
 
   const upcomingEvents = useMemo(() => {
-    return forecast
-      .slice(0, 14)
-      .filter((p) => p.events.length > 0)
-      .map((p) => ({
-        date: p.date,
-        events: p.events,
-        balanceAfter: p.balance
-      }));
-  }, [forecast]);
+    const events: UpcomingEvent[] = [];
+    let runningBalance = balance;
+
+    for (const point of forecast.slice(0, 14)) {
+      for (const detail of point.eventDetails) {
+        if (detail.type === 'income') {
+          runningBalance += detail.amount;
+        } else {
+          runningBalance -= detail.amount;
+        }
+        events.push({
+          date: point.date,
+          name: detail.name,
+          amount: detail.amount,
+          type: detail.type,
+          balanceAfter: runningBalance,
+        });
+      }
+    }
+
+    return events;
+  }, [forecast, balance]);
 
   return { forecast, minimumPoint, upcomingEvents };
 }

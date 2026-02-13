@@ -15,6 +15,7 @@ asarUnpack:
   - node_modules/better-sqlite3/**
 mac:
   entitlementsInherit: build/entitlements.mac.plist
+  identity: null
   notarize: false
   target:
     - dmg

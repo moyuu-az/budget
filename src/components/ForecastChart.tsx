@@ -35,10 +35,15 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
     >
       <p className="text-slate-400 text-xs mb-1">{label}</p>
       <p className="text-white font-bold text-lg">¥{point.balance.toLocaleString()}</p>
-      {point.events.length > 0 && (
-        <div className="mt-2 border-t border-white/10 pt-2">
-          {point.events.map((e, i) => (
-            <p key={i} className="text-xs text-blue-300">{e}</p>
+      {point.eventDetails.length > 0 && (
+        <div className="mt-2 border-t border-white/10 pt-2 space-y-1">
+          {point.eventDetails.map((detail, i) => (
+            <div key={i} className="flex items-center justify-between gap-4">
+              <span className="text-xs text-slate-300">{detail.name}</span>
+              <span className={`text-xs font-medium tabular-nums ${detail.type === 'income' ? 'text-emerald-400' : 'text-red-400'}`}>
+                {detail.type === 'income' ? '+' : '-'}¥{detail.amount.toLocaleString()}
+              </span>
+            </div>
           ))}
         </div>
       )}

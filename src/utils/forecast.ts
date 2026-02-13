@@ -1,4 +1,4 @@
-import type { EntryTemplate, MonthlyAmountsMap, ForecastPoint } from '../types';
+import type { EntryTemplate, MonthlyAmountsMap, ForecastPoint, ForecastEventDetail } from '../types';
 
 function getLastDayOfMonth(year: number, month: number): number {
   return new Date(year, month + 1, 0).getDate();
@@ -37,6 +37,7 @@ export function generateForecast(
 
     const monthAmounts = monthlyAmountsMap.get(yearMonth);
     const dayEvents: string[] = [];
+    const dayEventDetails: ForecastEventDetail[] = [];
 
     for (const template of enabledTemplates) {
       const effectiveDay = template.dayOfMonth > lastDay ? lastDay : template.dayOfMonth;
@@ -49,6 +50,11 @@ export function generateForecast(
             balance -= amount;
           }
           dayEvents.push(template.name);
+          dayEventDetails.push({
+            name: template.name,
+            amount,
+            type: template.type,
+          });
         }
       }
     }
@@ -56,7 +62,8 @@ export function generateForecast(
     points.push({
       date: formatDate(date),
       balance,
-      events: dayEvents
+      events: dayEvents,
+      eventDetails: dayEventDetails,
     });
   }
 

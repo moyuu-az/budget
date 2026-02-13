@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ParticleBackground from './components/ParticleBackground';
 import Layout from './components/Layout';
@@ -34,6 +34,12 @@ function App() {
     addSnapshot,
     deleteSnapshot
   } = useDatabase();
+
+  const handleUpdateBalance = useCallback(async (newBalance: number) => {
+    await setBalance(newBalance);
+    const today = new Date().toISOString().split('T')[0];
+    await addSnapshot({ date: today, balance: newBalance });
+  }, [setBalance, addSnapshot]);
 
   if (loading) {
     return (
@@ -96,7 +102,7 @@ function App() {
                   balance={balance}
                   templates={templates}
                   monthlyAmountsMap={monthlyAmountsMap}
-                  onUpdateBalance={setBalance}
+                  onUpdateBalance={handleUpdateBalance}
                 />
               </motion.div>
             )}
@@ -134,6 +140,7 @@ function App() {
                   currentBalance={balance}
                   onAdd={addSnapshot}
                   onDelete={deleteSnapshot}
+                  onSetBalance={setBalance}
                 />
               </motion.div>
             )}

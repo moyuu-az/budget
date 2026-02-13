@@ -35,7 +35,7 @@ const navIcons = {
 const navItems = [
   { id: 'dashboard' as const, label: 'ダッシュボード' },
   { id: 'entries' as const, label: '収支管理' },
-  { id: 'history' as const, label: '履歴' }
+  { id: 'history' as const, label: '残高の推移' }
 ];
 
 function Layout({

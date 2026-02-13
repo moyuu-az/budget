@@ -1,8 +1,16 @@
-import { BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 
 export function initAutoUpdater(mainWindow: BrowserWindow): void {
+  // Skip auto-update in development mode
+  if (!app.isPackaged) {
+    ipcMain.handle('check-for-updates', async () => {});
+    ipcMain.handle('download-update', async () => {});
+    ipcMain.handle('install-update', () => {});
+    return;
+  }
+
   log.transports.file.level = 'info';
   autoUpdater.logger = log;
 

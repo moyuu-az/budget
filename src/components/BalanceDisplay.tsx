@@ -9,8 +9,8 @@ interface BalanceDisplayProps {
 }
 
 function BalanceDisplay({ balance, onUpdate }: BalanceDisplayProps) {
-  const [editing, setEditing] = useState(false);
-  const [inputValue, setInputValue] = useState('');
+  const [editing, setEditing] = useState(balance === 0);
+  const [inputValue, setInputValue] = useState(balance === 0 ? '' : formatWithCommas(balance));
   const [prevBalance, setPrevBalance] = useState(balance);
 
   const handleStartEdit = () => {
@@ -58,7 +58,8 @@ function BalanceDisplay({ balance, onUpdate }: BalanceDisplayProps) {
             onKeyDown={handleKeyDown}
             onBlur={handleSave}
             autoFocus
-            className="bg-white/5 border border-blue-400/30 rounded-lg px-3 py-2 text-2xl font-bold text-white w-full outline-none focus:border-blue-400/60 transition-colors"
+            placeholder="残高を入力してください"
+            className="bg-white/5 border border-blue-400/30 rounded-lg px-3 py-2 text-2xl font-bold text-white w-full outline-none focus:border-blue-400/60 transition-colors placeholder:text-blue-300/30 placeholder:text-base placeholder:font-normal"
           />
         </div>
       ) : (

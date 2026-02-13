@@ -73,10 +73,10 @@ function UpdateNotification({
   }
 
   if (status === 'error') {
+    // Silently show version only (e.g. no GitHub Releases published yet)
     return (
       <div className="px-4 py-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>
         <p className="text-xs text-slate-500">v{appVersion}</p>
-        <p className="text-xs text-red-400/70 mt-0.5">更新確認に失敗</p>
       </div>
     );
   }

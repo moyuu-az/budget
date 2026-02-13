@@ -37,10 +37,17 @@ export interface BalanceSnapshotInput {
   balance: number;
 }
 
+export interface ForecastEventDetail {
+  name: string;
+  amount: number;
+  type: 'income' | 'expense';
+}
+
 export interface ForecastPoint {
   date: string;
   balance: number;
   events: string[];
+  eventDetails: ForecastEventDetail[];
   isMinimum?: boolean;
 }
 

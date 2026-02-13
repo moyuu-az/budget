@@ -9,9 +9,10 @@ interface HistoryViewProps {
   currentBalance: number;
   onAdd: (snapshot: BalanceSnapshotInput) => Promise<BalanceSnapshot>;
   onDelete: (id: number) => Promise<void>;
+  onSetBalance: (balance: number) => Promise<void>;
 }
 
-function HistoryView({ snapshots, currentBalance, onAdd, onDelete }: HistoryViewProps) {
+function HistoryView({ snapshots, currentBalance, onAdd, onDelete, onSetBalance }: HistoryViewProps) {
   const [date, setDate] = useState(() => {
     const today = new Date();
     return today.toISOString().split('T')[0];
@@ -19,12 +20,13 @@ function HistoryView({ snapshots, currentBalance, onAdd, onDelete }: HistoryView
   const [balance, setBalance] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const handleAdd = async (e: React.FormEvent) => {
+  const handleUpdateBalance = async (e: React.FormEvent) => {
     e.preventDefault();
     const parsed = parseCommaNumber(balance);
     if (!date || isNaN(parsed)) return;
 
     setSaving(true);
+    await onSetBalance(parsed);
     await onAdd({ date, balance: parsed });
     setBalance('');
     setSaving(false);
@@ -71,8 +73,8 @@ function HistoryView({ snapshots, currentBalance, onAdd, onDelete }: HistoryView
         transition={{ duration: 0.3, delay: 0.1 }}
         className="glass rounded-2xl p-6"
       >
-        <h2 className="text-lg font-semibold text-white mb-4">スナップショット追加</h2>
-        <form onSubmit={handleAdd} className="flex items-end gap-3">
+        <h2 className="text-lg font-semibold text-white mb-4">残高を更新</h2>
+        <form onSubmit={handleUpdateBalance} className="flex items-end gap-3">
           <div>
             <label className="block text-xs text-slate-400 mb-1">日付</label>
             <input
@@ -104,7 +106,7 @@ function HistoryView({ snapshots, currentBalance, onAdd, onDelete }: HistoryView
               border: '1px solid rgba(139, 92, 246, 0.3)',
             }}
           >
-            追加
+            更新
           </button>
         </form>
       </motion.div>
@@ -115,7 +117,7 @@ function HistoryView({ snapshots, currentBalance, onAdd, onDelete }: HistoryView
         transition={{ duration: 0.3, delay: 0.2 }}
         className="glass rounded-2xl p-6"
       >
-        <h2 className="text-lg font-semibold text-white mb-4">記録一覧</h2>
+        <h2 className="text-lg font-semibold text-white mb-4">更新履歴</h2>
         {snapshots.length === 0 ? (
           <p className="text-slate-500 text-sm">記録がありません</p>
         ) : (
