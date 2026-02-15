@@ -50,6 +50,8 @@ function Layout({
 }: LayoutProps) {
   return (
     <div className="flex h-screen">
+      {/* Draggable titlebar region for macOS hiddenInset titleBarStyle */}
+      <div className="fixed top-0 left-0 right-0 h-12 z-50" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
       <nav className="w-56 glass-strong flex flex-col pt-12" style={{ borderRight: '1px solid var(--border-subtle)' }}>
         <div className="px-6 pb-6" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
           <h1 className="text-xl font-bold text-white tracking-tight">バランス予測</h1>
@@ -90,7 +92,7 @@ function Layout({
           />
         )}
       </nav>
-      <main className="flex-1 overflow-y-auto p-6" style={{ background: 'var(--bg-primary)' }}>
+      <main className="flex-1 overflow-y-auto p-6" style={{ background: 'var(--bg-primary)', WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         {children}
       </main>
     </div>
