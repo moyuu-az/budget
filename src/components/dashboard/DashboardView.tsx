@@ -1,0 +1,107 @@
+import { useMemo, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { useBalanceStore } from '../../stores/useBalanceStore';
+import { useTemplateStore } from '../../stores/useTemplateStore';
+import { useMonthlyStore } from '../../stores/useMonthlyStore';
+import { useCategoryStore } from '../../stores/useCategoryStore';
+import { generateForecast, toYearMonth } from '../../utils/forecast';
+import BalanceDisplay from '../BalanceDisplay';
+import ForecastChart from './ForecastChart';
+import MinBalanceCard from './MinBalanceCard';
+import SankeyChart from './SankeyChart';
+import UpcomingEvents from './UpcomingEvents';
+
+function DashboardView() {
+  const balance = useBalanceStore((s) => s.balance);
+  const setBalance = useBalanceStore((s) => s.setBalance);
+  const fetchBalance = useBalanceStore((s) => s.fetchBalance);
+  const templates = useTemplateStore((s) => s.templates);
+  const fetchTemplates = useTemplateStore((s) => s.fetchTemplates);
+  const monthlyAmountsMap = useMonthlyStore((s) => s.monthlyAmountsMap);
+  const fetchMonthlyAmountsRange = useMonthlyStore((s) => s.fetchMonthlyAmountsRange);
+  const fetchCategories = useCategoryStore((s) => s.fetchCategories);
+
+  // Fetch data on mount
+  useEffect(() => {
+    fetchBalance();
+    fetchTemplates();
+    fetchCategories();
+
+    // Fetch monthly amounts for forecast range (current + next 2 months)
+    const now = new Date();
+    const startMonth = toYearMonth(now);
+    const endDate = new Date(now.getFullYear(), now.getMonth() + 3, 0);
+    const endMonth = toYearMonth(endDate);
+    fetchMonthlyAmountsRange(startMonth, endMonth);
+  }, [fetchBalance, fetchTemplates, fetchCategories, fetchMonthlyAmountsRange]);
+
+  // Compute forecast data
+  const forecast = useMemo(
+    () => generateForecast(balance, templates, monthlyAmountsMap, 60),
+    [balance, templates, monthlyAmountsMap]
+  );
+
+  const minimumPoint = useMemo(
+    () => forecast.find((p) => p.isMinimum) ?? null,
+    [forecast]
+  );
+
+  const daysUntilMinimum = useMemo(() => {
+    if (!minimumPoint) return 0;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const minDate = new Date(minimumPoint.date);
+    return Math.round((minDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  }, [minimumPoint]);
+
+  const handleUpdateBalance = async (newBalance: number) => {
+    await setBalance(newBalance);
+    // Auto-snapshot on balance update
+    const today = new Date().toISOString().split('T')[0];
+    try {
+      await window.electronAPI.addSnapshot(today, newBalance);
+    } catch {
+      // Snapshot creation is best-effort
+    }
+  };
+
+  return (
+    <motion.div
+      className="space-y-6"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.4 }}
+    >
+      {/* Row 1: Balance Display */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+      >
+        <BalanceDisplay balance={balance} onUpdate={handleUpdateBalance} />
+      </motion.div>
+
+      {/* Row 2: Forecast Chart - full width */}
+      <ForecastChart data={forecast} minimumPoint={minimumPoint} />
+
+      {/* Row 3: MinBalanceCard (1/3) + SankeyChart (2/3) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <MinBalanceCard point={minimumPoint} daysUntil={daysUntilMinimum} />
+        <div className="lg:col-span-2">
+          <SankeyChart />
+        </div>
+      </div>
+
+      {/* Row 4: Upcoming Events - full width */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, delay: 0.4 }}
+      >
+        <UpcomingEvents events={forecast} />
+      </motion.div>
+    </motion.div>
+  );
+}
+
+export default DashboardView;

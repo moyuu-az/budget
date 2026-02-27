@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ParticleBackground from './components/ParticleBackground';
 import Layout from './components/Layout';
-import Dashboard from './components/Dashboard';
+import DashboardView from './components/dashboard/DashboardView';
 import EntriesManager from './components/EntriesManager';
 import HistoryView from './components/HistoryView';
 import { useDatabase } from './hooks/useDatabase';
@@ -27,12 +27,6 @@ function App() {
     addSnapshot,
     deleteSnapshot
   } = useDatabase();
-
-  const handleUpdateBalance = useCallback(async (newBalance: number) => {
-    await setBalance(newBalance);
-    const today = new Date().toISOString().split('T')[0];
-    await addSnapshot(today, newBalance);
-  }, [setBalance, addSnapshot]);
 
   if (loading) {
     return (
@@ -81,12 +75,7 @@ function App() {
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.3, ease: 'easeOut' }}
               >
-                <Dashboard
-                  balance={balance}
-                  templates={templates}
-                  monthlyAmountsMap={monthlyAmountsMap}
-                  onUpdateBalance={handleUpdateBalance}
-                />
+                <DashboardView />
               </motion.div>
             )}
             {currentView === 'entries' && (
