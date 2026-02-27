@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import type { BalanceSnapshot, BalanceSnapshotInput } from '../types';
+import type { BalanceSnapshot } from '../types';
 import HistoryChart from './HistoryChart';
 import { parseCommaNumber, handleCurrencyInput } from '../utils/currency';
 
 interface HistoryViewProps {
   snapshots: BalanceSnapshot[];
   currentBalance: number;
-  onAdd: (snapshot: BalanceSnapshotInput) => Promise<BalanceSnapshot>;
+  onAdd: (date: string, balance: number) => Promise<BalanceSnapshot>;
   onDelete: (id: number) => Promise<void>;
   onSetBalance: (balance: number) => Promise<void>;
 }
@@ -27,7 +27,7 @@ function HistoryView({ snapshots, currentBalance, onAdd, onDelete, onSetBalance 
 
     setSaving(true);
     await onSetBalance(parsed);
-    await onAdd({ date, balance: parsed });
+    await onAdd(date, parsed);
     setBalance('');
     setSaving(false);
   };
@@ -35,7 +35,7 @@ function HistoryView({ snapshots, currentBalance, onAdd, onDelete, onSetBalance 
   const handleRecordCurrent = async () => {
     const today = new Date().toISOString().split('T')[0];
     setSaving(true);
-    await onAdd({ date: today, balance: currentBalance });
+    await onAdd(today, currentBalance);
     setSaving(false);
   };
 

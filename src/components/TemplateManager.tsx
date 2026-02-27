@@ -6,7 +6,7 @@ import TemplateForm from './TemplateForm';
 interface TemplateManagerProps {
   templates: EntryTemplate[];
   onAdd: (template: EntryTemplateInput) => Promise<EntryTemplate>;
-  onUpdate: (id: number, template: EntryTemplateInput) => Promise<EntryTemplate>;
+  onUpdate: (id: number, template: Partial<EntryTemplateInput>) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
   onClose: () => void;
 }

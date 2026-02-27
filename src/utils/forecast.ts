@@ -54,6 +54,7 @@ export function generateForecast(
             name: template.name,
             amount,
             type: template.type,
+            categoryId: template.categoryId,
           });
         }
       }

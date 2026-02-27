@@ -38,7 +38,7 @@ function App() {
   const handleUpdateBalance = useCallback(async (newBalance: number) => {
     await setBalance(newBalance);
     const today = new Date().toISOString().split('T')[0];
-    await addSnapshot({ date: today, balance: newBalance });
+    await addSnapshot(today, newBalance);
   }, [setBalance, addSnapshot]);
 
   if (loading) {

@@ -11,7 +11,7 @@ interface EntriesManagerProps {
   templates: EntryTemplate[];
   monthlyAmountsMap: MonthlyAmountsMap;
   onAddTemplate: (template: EntryTemplateInput) => Promise<EntryTemplate>;
-  onUpdateTemplate: (id: number, template: EntryTemplateInput) => Promise<EntryTemplate>;
+  onUpdateTemplate: (id: number, template: Partial<EntryTemplateInput>) => Promise<void>;
   onDeleteTemplate: (id: number) => Promise<void>;
   onToggleTemplate: (id: number, enabled: boolean) => Promise<void>;
   onSetMonthlyAmount: (templateId: number, yearMonth: string, amount: number) => Promise<unknown>;

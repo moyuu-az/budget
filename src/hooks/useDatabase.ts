@@ -4,8 +4,7 @@ import type {
   EntryTemplateInput,
   MonthlyAmount,
   MonthlyAmountsMap,
-  BalanceSnapshot,
-  BalanceSnapshotInput
+  BalanceSnapshot
 } from '../types';
 import { toYearMonth } from '../utils/forecast';
 
@@ -71,10 +70,9 @@ export function useDatabase() {
     return created;
   }, []);
 
-  const updateTemplate = useCallback(async (id: number, template: EntryTemplateInput) => {
-    const updated = await window.electronAPI.updateTemplate(id, template);
-    setTemplates((prev) => prev.map((t) => (t.id === id ? updated : t)));
-    return updated;
+  const updateTemplate = useCallback(async (id: number, template: Partial<EntryTemplateInput>) => {
+    await window.electronAPI.updateTemplate(id, template);
+    setTemplates((prev) => prev.map((t) => (t.id === id ? { ...t, ...template } : t)));
   }, []);
 
   const deleteTemplate = useCallback(async (id: number) => {
@@ -164,8 +162,8 @@ export function useDatabase() {
   }, []);
 
   // Snapshot operations
-  const addSnapshot = useCallback(async (snapshot: BalanceSnapshotInput) => {
-    const created = await window.electronAPI.addSnapshot(snapshot);
+  const addSnapshot = useCallback(async (date: string, balance: number) => {
+    const created = await window.electronAPI.addSnapshot(date, balance);
     setSnapshots((prev) => {
       const filtered = prev.filter((s) => s.date !== created.date);
       return [created, ...filtered].sort((a, b) => b.date.localeCompare(a.date));
