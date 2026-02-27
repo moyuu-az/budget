@@ -53,7 +53,7 @@ export function initDatabase(): void {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       template_id INTEGER NOT NULL,
       year_month TEXT NOT NULL CHECK(length(year_month) = 7),
-      actual_amount REAL NOT NULL,
+      actual_amount REAL NOT NULL CHECK(actual_amount >= 0),
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (template_id) REFERENCES entry_templates(id) ON DELETE CASCADE,
       UNIQUE(template_id, year_month)
