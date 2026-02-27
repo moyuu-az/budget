@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import ParticleBackground from './components/ParticleBackground';
 import Layout from './components/Layout';
 import DashboardView from './components/dashboard/DashboardView';
-import EntriesManager from './components/EntriesManager';
+import EntriesView from './components/entries/EntriesView';
 import HistoryView from './components/HistoryView';
 import { useDatabase } from './hooks/useDatabase';
 import type { ViewType } from './types';
@@ -86,17 +86,7 @@ function App() {
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.3, ease: 'easeOut' }}
               >
-                <EntriesManager
-                  templates={templates}
-                  monthlyAmountsMap={monthlyAmountsMap}
-                  onAddTemplate={addTemplate}
-                  onUpdateTemplate={updateTemplate}
-                  onDeleteTemplate={deleteTemplate}
-                  onToggleTemplate={toggleTemplate}
-                  onSetMonthlyAmount={setMonthlyAmount}
-                  onCopyMonthlyAmounts={copyMonthlyAmounts}
-                  onLoadMonth={getMonthlyAmountsForMonth}
-                />
+                <EntriesView />
               </motion.div>
             )}
             {currentView === 'history' && (
