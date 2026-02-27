@@ -17,6 +17,14 @@ export function initDatabase(): void {
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL CHECK(type IN ('income', 'expense')),
+      color TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+
     CREATE TABLE IF NOT EXISTS entry_templates (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -24,8 +32,11 @@ export function initDatabase(): void {
       type TEXT NOT NULL CHECK(type IN ('income', 'expense')),
       enabled INTEGER NOT NULL DEFAULT 1,
       sort_order INTEGER NOT NULL DEFAULT 0,
+      category_id INTEGER DEFAULT NULL,
+      default_amount REAL NOT NULL DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
     );
 
     CREATE TABLE IF NOT EXISTS monthly_amounts (
@@ -33,6 +44,16 @@ export function initDatabase(): void {
       template_id INTEGER NOT NULL,
       year_month TEXT NOT NULL CHECK(length(year_month) = 7),
       amount REAL NOT NULL CHECK(amount >= 0),
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (template_id) REFERENCES entry_templates(id) ON DELETE CASCADE,
+      UNIQUE(template_id, year_month)
+    );
+
+    CREATE TABLE IF NOT EXISTS monthly_actuals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      template_id INTEGER NOT NULL,
+      year_month TEXT NOT NULL CHECK(length(year_month) = 7),
+      actual_amount REAL NOT NULL,
       created_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (template_id) REFERENCES entry_templates(id) ON DELETE CASCADE,
       UNIQUE(template_id, year_month)
@@ -46,11 +67,32 @@ export function initDatabase(): void {
     );
   `);
 
+  // Migration: add category_id column to entry_templates if it doesn't exist
+  migrateEntryTemplates();
+
+  // Migration from legacy recurring_entries table
   migrateFromRecurringEntries();
 
+  // Seed preset categories if categories table is empty
+  seedPresetCategories();
+
+  // Ensure current_balance setting exists
   const existing = db.prepare('SELECT value FROM settings WHERE key = ?').get('current_balance');
   if (!existing) {
     db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('current_balance', '0');
+  }
+}
+
+function migrateEntryTemplates(): void {
+  const columns = db.prepare('PRAGMA table_info(entry_templates)').all() as Array<{ name: string }>;
+  const columnNames = columns.map((c) => c.name);
+
+  if (!columnNames.includes('category_id')) {
+    db.exec('ALTER TABLE entry_templates ADD COLUMN category_id INTEGER DEFAULT NULL REFERENCES categories(id) ON DELETE SET NULL');
+  }
+
+  if (!columnNames.includes('default_amount')) {
+    db.exec('ALTER TABLE entry_templates ADD COLUMN default_amount REAL NOT NULL DEFAULT 0');
   }
 }
 
@@ -100,7 +142,41 @@ function migrateFromRecurringEntries(): void {
   db.exec('DROP TABLE recurring_entries');
 }
 
-// Settings
+function seedPresetCategories(): void {
+  const count = db.prepare('SELECT COUNT(*) as cnt FROM categories').get() as { cnt: number };
+  if (count.cnt > 0) return;
+
+  const presets: Array<{ name: string; type: string; color: string; sortOrder: number }> = [
+    // Expense categories
+    { name: '住居費', type: 'expense', color: '#EF4444', sortOrder: 0 },
+    { name: '食費', type: 'expense', color: '#F97316', sortOrder: 1 },
+    { name: '光熱費', type: 'expense', color: '#EAB308', sortOrder: 2 },
+    { name: '通信費', type: 'expense', color: '#22C55E', sortOrder: 3 },
+    { name: '保険', type: 'expense', color: '#06B6D4', sortOrder: 4 },
+    { name: '交通費', type: 'expense', color: '#3B82F6', sortOrder: 5 },
+    { name: '娯楽', type: 'expense', color: '#8B5CF6', sortOrder: 6 },
+    { name: 'その他', type: 'expense', color: '#6B7280', sortOrder: 7 },
+    // Income categories
+    { name: '給与', type: 'income', color: '#10B981', sortOrder: 0 },
+    { name: '副収入', type: 'income', color: '#14B8A6', sortOrder: 1 },
+    { name: '投資収入', type: 'income', color: '#6366F1', sortOrder: 2 },
+    { name: 'その他収入', type: 'income', color: '#A3A3A3', sortOrder: 3 },
+  ];
+
+  const insert = db.prepare(
+    'INSERT INTO categories (name, type, color, sort_order) VALUES (?, ?, ?, ?)'
+  );
+
+  const seed = db.transaction(() => {
+    for (const preset of presets) {
+      insert.run(preset.name, preset.type, preset.color, preset.sortOrder);
+    }
+  });
+  seed();
+}
+
+// --- Settings ---
+
 export function getBalance(): number {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('current_balance') as { value: string } | undefined;
   return row ? parseFloat(row.value) : 0;
@@ -112,7 +188,66 @@ export function setBalance(balance: number): void {
   ).run('current_balance', String(balance));
 }
 
-// Templates
+// --- Categories ---
+
+interface CategoryRow {
+  id: number;
+  name: string;
+  type: string;
+  color: string | null;
+  sort_order: number;
+}
+
+export function getCategories(): CategoryRow[] {
+  return db.prepare('SELECT * FROM categories ORDER BY type ASC, sort_order ASC').all() as CategoryRow[];
+}
+
+export function addCategory(input: { name: string; type: string; color?: string; sortOrder?: number }): CategoryRow {
+  const maxOrder = db.prepare(
+    'SELECT COALESCE(MAX(sort_order), -1) as max_order FROM categories WHERE type = ?'
+  ).get(input.type) as { max_order: number };
+  const sortOrder = input.sortOrder ?? maxOrder.max_order + 1;
+  const result = db.prepare(
+    'INSERT INTO categories (name, type, color, sort_order) VALUES (?, ?, ?, ?)'
+  ).run(input.name, input.type, input.color ?? null, sortOrder);
+  return db.prepare('SELECT * FROM categories WHERE id = ?').get(result.lastInsertRowid) as CategoryRow;
+}
+
+export function updateCategory(id: number, input: { name?: string; type?: string; color?: string; sortOrder?: number }): void {
+  const sets: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (input.name !== undefined) {
+    sets.push('name = ?');
+    params.push(input.name);
+  }
+  if (input.type !== undefined) {
+    sets.push('type = ?');
+    params.push(input.type);
+  }
+  if (input.color !== undefined) {
+    sets.push('color = ?');
+    params.push(input.color);
+  }
+  if (input.sortOrder !== undefined) {
+    sets.push('sort_order = ?');
+    params.push(input.sortOrder);
+  }
+
+  if (sets.length === 0) return;
+
+  params.push(id);
+  db.prepare(`UPDATE categories SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+}
+
+export function deleteCategory(id: number): void {
+  // Set related templates' category_id to null before deleting
+  db.prepare('UPDATE entry_templates SET category_id = NULL WHERE category_id = ?').run(id);
+  db.prepare('DELETE FROM categories WHERE id = ?').run(id);
+}
+
+// --- Templates ---
+
 interface TemplateRow {
   id: number;
   name: string;
@@ -120,6 +255,8 @@ interface TemplateRow {
   type: string;
   enabled: number;
   sort_order: number;
+  category_id: number | null;
+  default_amount: number;
   created_at: string;
   updated_at: string;
 }
@@ -128,19 +265,53 @@ export function getTemplates(): TemplateRow[] {
   return db.prepare('SELECT * FROM entry_templates ORDER BY sort_order ASC, day_of_month ASC').all() as TemplateRow[];
 }
 
-export function addTemplate(name: string, dayOfMonth: number, type: string): TemplateRow {
+export function addTemplate(
+  name: string,
+  dayOfMonth: number,
+  type: string,
+  categoryId?: number | null,
+  defaultAmount?: number
+): TemplateRow {
   const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) as max_order FROM entry_templates').get() as { max_order: number };
   const result = db.prepare(
-    'INSERT INTO entry_templates (name, day_of_month, type, sort_order) VALUES (?, ?, ?, ?)'
-  ).run(name, dayOfMonth, type, maxOrder.max_order + 1);
+    'INSERT INTO entry_templates (name, day_of_month, type, sort_order, category_id, default_amount) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(name, dayOfMonth, type, maxOrder.max_order + 1, categoryId ?? null, defaultAmount ?? 0);
   return db.prepare('SELECT * FROM entry_templates WHERE id = ?').get(result.lastInsertRowid) as TemplateRow;
 }
 
-export function updateTemplate(id: number, name: string, dayOfMonth: number, type: string): TemplateRow {
-  db.prepare(
-    'UPDATE entry_templates SET name = ?, day_of_month = ?, type = ?, updated_at = datetime(\'now\') WHERE id = ?'
-  ).run(name, dayOfMonth, type, id);
-  return db.prepare('SELECT * FROM entry_templates WHERE id = ?').get(id) as TemplateRow;
+export function updateTemplate(
+  id: number,
+  input: { name?: string; dayOfMonth?: number; type?: string; categoryId?: number | null; defaultAmount?: number }
+): void {
+  const sets: string[] = [];
+  const params: (string | number | null)[] = [];
+
+  if (input.name !== undefined) {
+    sets.push('name = ?');
+    params.push(input.name);
+  }
+  if (input.dayOfMonth !== undefined) {
+    sets.push('day_of_month = ?');
+    params.push(input.dayOfMonth);
+  }
+  if (input.type !== undefined) {
+    sets.push('type = ?');
+    params.push(input.type);
+  }
+  if (input.categoryId !== undefined) {
+    sets.push('category_id = ?');
+    params.push(input.categoryId);
+  }
+  if (input.defaultAmount !== undefined) {
+    sets.push('default_amount = ?');
+    params.push(input.defaultAmount);
+  }
+
+  if (sets.length === 0) return;
+
+  sets.push('updated_at = datetime(\'now\')');
+  params.push(id);
+  db.prepare(`UPDATE entry_templates SET ${sets.join(', ')} WHERE id = ?`).run(...params);
 }
 
 export function deleteTemplate(id: number): void {
@@ -151,7 +322,8 @@ export function toggleTemplate(id: number, enabled: boolean): void {
   db.prepare('UPDATE entry_templates SET enabled = ?, updated_at = datetime(\'now\') WHERE id = ?').run(enabled ? 1 : 0, id);
 }
 
-// Monthly Amounts
+// --- Monthly Amounts ---
+
 interface MonthlyAmountRow {
   id: number;
   template_id: number;
@@ -196,7 +368,33 @@ export function copyMonthlyAmounts(fromMonth: string, toMonth: string): MonthlyA
   return db.prepare('SELECT * FROM monthly_amounts WHERE year_month = ?').all(toMonth) as MonthlyAmountRow[];
 }
 
-// Snapshots
+// --- Monthly Actuals ---
+
+interface MonthlyActualRow {
+  id: number;
+  template_id: number;
+  year_month: string;
+  actual_amount: number;
+  created_at: string;
+}
+
+export function getMonthlyActuals(yearMonth: string): MonthlyActualRow[] {
+  return db.prepare('SELECT * FROM monthly_actuals WHERE year_month = ?').all(yearMonth) as MonthlyActualRow[];
+}
+
+export function setMonthlyActual(templateId: number, yearMonth: string, amount: number): MonthlyActualRow {
+  db.prepare(
+    'INSERT INTO monthly_actuals (template_id, year_month, actual_amount) VALUES (?, ?, ?) ON CONFLICT(template_id, year_month) DO UPDATE SET actual_amount = excluded.actual_amount'
+  ).run(templateId, yearMonth, amount);
+  return db.prepare('SELECT * FROM monthly_actuals WHERE template_id = ? AND year_month = ?').get(templateId, yearMonth) as MonthlyActualRow;
+}
+
+export function deleteMonthlyActual(templateId: number, yearMonth: string): void {
+  db.prepare('DELETE FROM monthly_actuals WHERE template_id = ? AND year_month = ?').run(templateId, yearMonth);
+}
+
+// --- Snapshots ---
+
 export function getSnapshots(): Array<{
   id: number;
   date: string;
