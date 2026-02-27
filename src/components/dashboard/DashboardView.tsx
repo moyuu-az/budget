@@ -5,7 +5,6 @@ import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useMonthlyStore } from '../../stores/useMonthlyStore';
 import { useCategoryStore } from '../../stores/useCategoryStore';
 import { generateForecast, toYearMonth } from '../../utils/forecast';
-import BalanceDisplay from '../BalanceDisplay';
 import ForecastChart from './ForecastChart';
 import MinBalanceCard from './MinBalanceCard';
 import SankeyChart from './SankeyChart';
@@ -13,7 +12,6 @@ import UpcomingEvents from './UpcomingEvents';
 
 function DashboardView() {
   const balance = useBalanceStore((s) => s.balance);
-  const setBalance = useBalanceStore((s) => s.setBalance);
   const fetchBalance = useBalanceStore((s) => s.fetchBalance);
   const templates = useTemplateStore((s) => s.templates);
   const fetchTemplates = useTemplateStore((s) => s.fetchTemplates);
@@ -54,17 +52,6 @@ function DashboardView() {
     return Math.round((minDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   }, [minimumPoint]);
 
-  const handleUpdateBalance = async (newBalance: number) => {
-    await setBalance(newBalance);
-    // Auto-snapshot on balance update
-    const today = new Date().toISOString().split('T')[0];
-    try {
-      await window.electronAPI.addSnapshot(today, newBalance);
-    } catch {
-      // Snapshot creation is best-effort
-    }
-  };
-
   return (
     <motion.div
       className="space-y-6"
@@ -72,19 +59,10 @@ function DashboardView() {
       animate={{ opacity: 1 }}
       transition={{ duration: 0.4 }}
     >
-      {/* Row 1: Balance Display */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        <BalanceDisplay balance={balance} onUpdate={handleUpdateBalance} />
-      </motion.div>
-
-      {/* Row 2: Forecast Chart - full width */}
+      {/* Forecast Chart - full width */}
       <ForecastChart data={forecast} minimumPoint={minimumPoint} />
 
-      {/* Row 3: MinBalanceCard (1/3) + SankeyChart (2/3) */}
+      {/* MinBalanceCard (1/3) + SankeyChart (2/3) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <MinBalanceCard point={minimumPoint} daysUntil={daysUntilMinimum} />
         <div className="lg:col-span-2">
@@ -92,7 +70,7 @@ function DashboardView() {
         </div>
       </div>
 
-      {/* Row 4: Upcoming Events - full width */}
+      {/* Upcoming Events - full width */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
