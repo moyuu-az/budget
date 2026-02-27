@@ -5,6 +5,10 @@ import {
   initDatabase,
   getBalance,
   setBalance,
+  getCategories,
+  addCategory,
+  updateCategory,
+  deleteCategory,
   getTemplates,
   addTemplate,
   updateTemplate,
@@ -15,6 +19,9 @@ import {
   setMonthlyAmount,
   deleteMonthlyAmount,
   copyMonthlyAmounts,
+  getMonthlyActuals,
+  setMonthlyActual,
+  deleteMonthlyActual,
   getSnapshots,
   addSnapshot,
   deleteSnapshot
@@ -43,6 +50,22 @@ function createWindow(): BrowserWindow {
   return mainWindow;
 }
 
+function mapCategory(row: {
+  id: number;
+  name: string;
+  type: string;
+  color: string | null;
+  sort_order: number;
+}) {
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type as 'income' | 'expense',
+    color: row.color,
+    sortOrder: row.sort_order
+  };
+}
+
 function mapTemplate(row: {
   id: number;
   name: string;
@@ -50,6 +73,8 @@ function mapTemplate(row: {
   type: string;
   enabled: number;
   sort_order: number;
+  category_id: number | null;
+  default_amount: number;
   created_at: string;
   updated_at: string;
 }) {
@@ -60,6 +85,8 @@ function mapTemplate(row: {
     type: row.type as 'income' | 'expense',
     enabled: row.enabled === 1,
     sortOrder: row.sort_order,
+    categoryId: row.category_id,
+    defaultAmount: row.default_amount,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -77,6 +104,22 @@ function mapMonthlyAmount(row: {
     templateId: row.template_id,
     yearMonth: row.year_month,
     amount: row.amount,
+    createdAt: row.created_at
+  };
+}
+
+function mapMonthlyActual(row: {
+  id: number;
+  template_id: number;
+  year_month: string;
+  actual_amount: number;
+  created_at: string;
+}) {
+  return {
+    id: row.id,
+    templateId: row.template_id,
+    yearMonth: row.year_month,
+    actualAmount: row.actual_amount,
     createdAt: row.created_at
   };
 }
@@ -99,19 +142,36 @@ function registerIpcHandlers(): void {
     setBalance(balance);
   });
 
+  // Categories
+  ipcMain.handle('get-categories', () => {
+    return getCategories().map(mapCategory);
+  });
+
+  ipcMain.handle('add-category', (_event, input: { name: string; type: string; color?: string; sortOrder?: number }) => {
+    const row = addCategory(input);
+    return mapCategory(row);
+  });
+
+  ipcMain.handle('update-category', (_event, id: number, input: { name?: string; type?: string; color?: string; sortOrder?: number }) => {
+    updateCategory(id, input);
+  });
+
+  ipcMain.handle('delete-category', (_event, id: number) => {
+    deleteCategory(id);
+  });
+
   // Templates
   ipcMain.handle('get-templates', () => {
     return getTemplates().map(mapTemplate);
   });
 
-  ipcMain.handle('add-template', (_event, template: { name: string; dayOfMonth: number; type: string }) => {
-    const row = addTemplate(template.name, template.dayOfMonth, template.type);
+  ipcMain.handle('add-template', (_event, template: { name: string; dayOfMonth: number; type: string; categoryId?: number | null; defaultAmount?: number }) => {
+    const row = addTemplate(template.name, template.dayOfMonth, template.type, template.categoryId, template.defaultAmount);
     return mapTemplate(row);
   });
 
-  ipcMain.handle('update-template', (_event, id: number, template: { name: string; dayOfMonth: number; type: string }) => {
-    const row = updateTemplate(id, template.name, template.dayOfMonth, template.type);
-    return mapTemplate(row);
+  ipcMain.handle('update-template', (_event, id: number, template: { name?: string; dayOfMonth?: number; type?: string; categoryId?: number | null; defaultAmount?: number }) => {
+    updateTemplate(id, template);
   });
 
   ipcMain.handle('delete-template', (_event, id: number) => {
@@ -144,13 +204,27 @@ function registerIpcHandlers(): void {
     return copyMonthlyAmounts(fromMonth, toMonth).map(mapMonthlyAmount);
   });
 
+  // Monthly Actuals
+  ipcMain.handle('get-monthly-actuals', (_event, yearMonth: string) => {
+    return getMonthlyActuals(yearMonth).map(mapMonthlyActual);
+  });
+
+  ipcMain.handle('set-monthly-actual', (_event, templateId: number, yearMonth: string, amount: number) => {
+    const row = setMonthlyActual(templateId, yearMonth, amount);
+    return mapMonthlyActual(row);
+  });
+
+  ipcMain.handle('delete-monthly-actual', (_event, templateId: number, yearMonth: string) => {
+    deleteMonthlyActual(templateId, yearMonth);
+  });
+
   // Snapshots
   ipcMain.handle('get-snapshots', () => {
     return getSnapshots().map(mapSnapshot);
   });
 
-  ipcMain.handle('add-snapshot', (_event, snapshot: { date: string; balance: number }) => {
-    const row = addSnapshot(snapshot.date, snapshot.balance);
+  ipcMain.handle('add-snapshot', (_event, date: string, balance: number) => {
+    const row = addSnapshot(date, balance);
     return mapSnapshot(row);
   });
 
