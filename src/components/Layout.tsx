@@ -1,98 +1,68 @@
 import { ReactNode } from 'react';
-import { motion } from 'framer-motion';
+import { ViewType } from '../types';
+import BalanceInput from './sidebar/BalanceInput';
+import Navigation from './sidebar/Navigation';
+import MonthlySummary from './sidebar/MonthlySummary';
 import UpdateNotification from './UpdateNotification';
-import { UpdateStatus } from '../types';
+import { useAutoUpdate } from '../hooks/useAutoUpdate';
 
-interface LayoutProps {
-  currentView: 'dashboard' | 'entries' | 'history';
-  onNavigate: (view: 'dashboard' | 'entries' | 'history') => void;
+interface Props {
+  currentView: ViewType;
+  onNavigate: (view: ViewType) => void;
   children: ReactNode;
-  appVersion?: string;
-  updateStatus?: UpdateStatus | null;
-  onDownloadUpdate?: () => void;
-  onInstallUpdate?: () => void;
-  onDismissUpdate?: () => void;
 }
 
-const navIcons = {
-  dashboard: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-    </svg>
-  ),
-  entries: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-    </svg>
-  ),
-  history: (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
-    </svg>
-  )
-};
+function Layout({ currentView, onNavigate, children }: Props) {
+  const {
+    updateStatus,
+    appVersion,
+    downloadUpdate,
+    installUpdate,
+    dismissUpdate,
+  } = useAutoUpdate();
 
-const navItems = [
-  { id: 'dashboard' as const, label: 'ダッシュボード' },
-  { id: 'entries' as const, label: '収支管理' },
-  { id: 'history' as const, label: '残高の推移' }
-];
-
-function Layout({
-  currentView,
-  onNavigate,
-  children,
-  appVersion,
-  updateStatus,
-  onDownloadUpdate,
-  onInstallUpdate,
-  onDismissUpdate
-}: LayoutProps) {
   return (
-    <div className="flex h-screen">
-      {/* Draggable titlebar region for macOS hiddenInset titleBarStyle */}
-      <div className="fixed top-0 left-0 right-0 h-12 z-50" style={{ WebkitAppRegion: 'drag' } as React.CSSProperties} />
-      <nav className="w-56 glass-strong flex flex-col pt-12" style={{ borderRight: '1px solid var(--border-subtle)' }}>
-        <div className="px-6 pb-6" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-          <h1 className="text-xl font-bold text-white tracking-tight">バランス予測</h1>
-          <p className="text-xs text-slate-400 mt-1">60日間の収支予測</p>
+    <div className="flex h-screen relative z-10">
+      {/* Sidebar */}
+      <aside className="w-64 flex flex-col border-r border-slate-700/50 bg-slate-900/80 backdrop-blur-sm">
+        {/* Drag region for Electron window */}
+        <div
+          className="h-8 shrink-0"
+          style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+        />
+
+        {/* Balance Input */}
+        <div className="px-4 py-3">
+          <BalanceInput />
         </div>
-        <ul className="flex-1 py-4">
-          {navItems.map((item) => (
-            <li key={item.id} className="relative">
-              <button
-                onClick={() => onNavigate(item.id)}
-                className={`w-full text-left px-6 py-3 flex items-center gap-3 transition-all duration-200 ${
-                  currentView === item.id
-                    ? 'text-white'
-                    : 'text-slate-400 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                {currentView === item.id && (
-                  <motion.div
-                    layoutId="nav-active"
-                    className="absolute inset-0 border-r-2 border-blue-400"
-                    style={{ background: 'rgba(59, 130, 246, 0.08)' }}
-                    transition={{ type: 'spring', stiffness: 350, damping: 30 }}
-                  />
-                )}
-                <span className="relative z-10">{navIcons[item.id]}</span>
-                <span className="relative z-10 text-sm font-medium">{item.label}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
+
+        {/* Navigation */}
+        <nav className="flex-1 px-2 py-2">
+          <Navigation currentView={currentView} onNavigate={onNavigate} />
+        </nav>
+
+        {/* Monthly Summary */}
+        <div className="px-4 py-3 border-t border-slate-700/50">
+          <MonthlySummary />
+        </div>
+
+        {/* Update Notification */}
         {appVersion && (
           <UpdateNotification
             appVersion={appVersion}
-            updateStatus={updateStatus ?? null}
-            onDownload={onDownloadUpdate ?? (() => {})}
-            onInstall={onInstallUpdate ?? (() => {})}
-            onDismiss={onDismissUpdate ?? (() => {})}
+            updateStatus={updateStatus}
+            onDownload={downloadUpdate}
+            onInstall={installUpdate}
+            onDismiss={dismissUpdate}
           />
         )}
-      </nav>
-      <main className="flex-1 overflow-y-auto p-6" style={{ background: 'var(--bg-primary)', WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+      </aside>
+
+      {/* Main Content */}
+      <main
+        className="flex-1 overflow-y-auto p-6"
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      >
         {children}
       </main>
     </div>

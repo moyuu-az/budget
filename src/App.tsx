@@ -6,17 +6,10 @@ import Dashboard from './components/Dashboard';
 import EntriesManager from './components/EntriesManager';
 import HistoryView from './components/HistoryView';
 import { useDatabase } from './hooks/useDatabase';
-import { useAutoUpdate } from './hooks/useAutoUpdate';
+import type { ViewType } from './types';
 
 function App() {
-  const [currentView, setCurrentView] = useState<'dashboard' | 'entries' | 'history'>('dashboard');
-  const {
-    updateStatus,
-    appVersion,
-    downloadUpdate,
-    installUpdate,
-    dismissUpdate
-  } = useAutoUpdate();
+  const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const {
     balance,
     templates,
@@ -47,14 +40,9 @@ function App() {
         <ParticleBackground />
         <div className="relative z-10">
           <Layout
-          currentView={currentView}
-          onNavigate={setCurrentView}
-          appVersion={appVersion}
-          updateStatus={updateStatus}
-          onDownloadUpdate={downloadUpdate}
-          onInstallUpdate={installUpdate}
-          onDismissUpdate={dismissUpdate}
-        >
+            currentView={currentView}
+            onNavigate={setCurrentView}
+          >
             <div className="flex items-center justify-center h-full">
               <motion.div
                 className="flex flex-col items-center gap-4"
@@ -83,11 +71,6 @@ function App() {
         <Layout
           currentView={currentView}
           onNavigate={setCurrentView}
-          appVersion={appVersion}
-          updateStatus={updateStatus}
-          onDownloadUpdate={downloadUpdate}
-          onInstallUpdate={installUpdate}
-          onDismissUpdate={dismissUpdate}
         >
           <AnimatePresence mode="wait">
             {currentView === 'dashboard' && (
