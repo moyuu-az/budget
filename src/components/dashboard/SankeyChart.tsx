@@ -1,24 +1,21 @@
 import { useMemo, useRef, useEffect, useState, useCallback, memo } from 'react';
-import { sankey as d3Sankey, sankeyLinkHorizontal } from 'd3-sankey';
+import { sankey as d3Sankey, sankeyLinkHorizontal, sankeyCenter } from 'd3-sankey';
 import type { SankeyNode, SankeyLink } from 'd3-sankey';
 import { useTemplateStore } from '../../stores/useTemplateStore';
-import { useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
+import { useMonthlyStore } from '../../stores/useMonthlyStore';
 import { useCategoryStore } from '../../stores/useCategoryStore';
 import { toYearMonth } from '../../utils/forecast';
+import { buildCashFlowData, type CashFlowNode, type CashFlowLink } from '../../utils/cashflow';
 
-interface SankeyNodeExtra {
-  name: string;
-  color: string;
-  value: number;
-}
+type SNode = SankeyNode<CashFlowNode, CashFlowLink>;
+type SLink = SankeyLink<CashFlowNode, CashFlowLink>;
 
-interface SankeyLinkExtra {
-  sourceColor: string;
-  targetColor: string;
-}
+// Color constants for SVG text elements
+const SAVINGS_TEXT = '#34d399';
+const DEFICIT_TEXT = '#f87171';
+const MARGIN = { top: 32, right: 130, bottom: 16, left: 130 } as const;
 
-type SNode = SankeyNode<SankeyNodeExtra, SankeyLinkExtra>;
-type SLink = SankeyLink<SankeyNodeExtra, SankeyLinkExtra>;
+const pathGen = sankeyLinkHorizontal();
 
 interface TooltipState {
   visible: boolean;
@@ -40,9 +37,6 @@ function SankeyChart() {
     content: '',
   });
 
-  const SVG_HEIGHT = 300;
-  const MARGIN = { top: 16, right: 120, bottom: 16, left: 120 };
-
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -58,88 +52,47 @@ function SankeyChart() {
     return () => observer.disconnect();
   }, []);
 
-  const yearMonth = useMemo(() => toYearMonth(new Date()), []);
+  const yearMonth = toYearMonth(new Date());
 
-  const sankeyData = useMemo(() => {
-    const enabled = templates.filter((t) => t.enabled);
-    if (enabled.length === 0) return null;
+  const cashFlowData = useMemo(
+    () => buildCashFlowData(templates, monthlyAmountsMap, categories, yearMonth),
+    [templates, monthlyAmountsMap, categories, yearMonth],
+  );
 
-    const categoryMap = new Map(categories.map((c) => [c.id, c]));
-
-    // Group templates by category and type
-    const incomeByCategory = new Map<number | 'uncategorized', { name: string; color: string; total: number }>();
-    const expenseByCategory = new Map<number | 'uncategorized', { name: string; color: string; total: number }>();
-
-    for (const template of enabled) {
-      const amount = resolveAmount(template.id, yearMonth, monthlyAmountsMap, templates);
-      if (amount <= 0) continue;
-
-      const catKey = template.categoryId ?? 'uncategorized';
-      const cat = template.categoryId != null ? categoryMap.get(template.categoryId) : null;
-      const catName = cat?.name ?? 'その他';
-      const catColor = cat?.color ?? '#6b7280';
-
-      const targetMap = template.type === 'income' ? incomeByCategory : expenseByCategory;
-
-      if (targetMap.has(catKey)) {
-        targetMap.get(catKey)!.total += amount;
-      } else {
-        targetMap.set(catKey, { name: catName, color: catColor, total: amount });
-      }
-    }
-
-    if (incomeByCategory.size === 0 || expenseByCategory.size === 0) return null;
-
-    // Build nodes: income categories first, then expense categories
-    const incomeEntries = Array.from(incomeByCategory.values());
-    const expenseEntries = Array.from(expenseByCategory.values());
-    const nodes: SankeyNodeExtra[] = [
-      ...incomeEntries.map((e) => ({ name: e.name, color: e.color, value: e.total })),
-      ...expenseEntries.map((e) => ({ name: e.name, color: e.color, value: e.total })),
-    ];
-
-    // Build links: distribute each income source proportionally across expenses
-    const totalExpense = expenseEntries.reduce((sum, e) => sum + e.total, 0);
-    const links: Array<{ source: number; target: number; value: number; sourceColor: string; targetColor: string }> = [];
-
-    for (let i = 0; i < incomeEntries.length; i++) {
-      for (let j = 0; j < expenseEntries.length; j++) {
-        const value = (incomeEntries[i].total * expenseEntries[j].total) / totalExpense;
-        if (value > 0) {
-          links.push({
-            source: i,
-            target: incomeEntries.length + j,
-            value,
-            sourceColor: incomeEntries[i].color,
-            targetColor: expenseEntries[j].color,
-          });
-        }
-      }
-    }
-
-    return { nodes, links };
-  }, [templates, monthlyAmountsMap, categories, yearMonth]);
+  // Dynamic height: base + per-node padding (right column is usually tallest)
+  const svgHeight = useMemo(() => {
+    if (!cashFlowData) return 300;
+    const rightNodes = cashFlowData.nodes.filter(
+      (n) => n.type === 'expense' || n.type === 'savings',
+    );
+    const leftNodes = cashFlowData.nodes.filter(
+      (n) => n.type === 'income' || n.type === 'deficit',
+    );
+    const maxNodes = Math.max(rightNodes.length, leftNodes.length, 1);
+    return Math.max(300, maxNodes * 44 + MARGIN.top + MARGIN.bottom + 32);
+  }, [cashFlowData]);
 
   const layout = useMemo(() => {
-    if (!sankeyData || width === 0) return null;
+    if (!cashFlowData || width === 0) return null;
 
     const innerWidth = width - MARGIN.left - MARGIN.right;
-    const innerHeight = SVG_HEIGHT - MARGIN.top - MARGIN.bottom;
+    const innerHeight = svgHeight - MARGIN.top - MARGIN.bottom;
 
     if (innerWidth < 100 || innerHeight < 50) return null;
 
-    const generator = d3Sankey<SankeyNodeExtra, SankeyLinkExtra>()
+    const generator = d3Sankey<CashFlowNode, CashFlowLink>()
       .nodeWidth(16)
-      .nodePadding(12)
+      .nodePadding(14)
+      .nodeAlign(sankeyCenter)
       .extent([[0, 0], [innerWidth, innerHeight]]);
 
     const graph = generator({
-      nodes: sankeyData.nodes.map((d) => ({ ...d })),
-      links: sankeyData.links.map((d) => ({ ...d })),
+      nodes: cashFlowData.nodes.map((d) => ({ ...d })),
+      links: cashFlowData.links.map((d) => ({ ...d })),
     });
 
     return graph;
-  }, [sankeyData, width]);
+  }, [cashFlowData, width, svgHeight]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent, content: string) => {
     const rect = containerRef.current?.getBoundingClientRect();
@@ -156,7 +109,7 @@ function SankeyChart() {
     setTooltip((prev) => ({ ...prev, visible: false }));
   }, []);
 
-  if (!sankeyData) {
+  if (!cashFlowData) {
     return (
       <div className="glass rounded-2xl p-6 flex items-center justify-center" style={{ minHeight: 200 }}>
         <p className="text-slate-500 text-sm">今月のデータがありません</p>
@@ -164,13 +117,15 @@ function SankeyChart() {
     );
   }
 
+  const { summary } = cashFlowData;
+  const svgWidth = Math.max(0, width - 48);
+
   return (
     <div ref={containerRef} className="glass rounded-2xl p-6 relative">
       <h2 className="text-lg font-semibold text-white mb-4">今月のキャッシュフロー</h2>
       {layout && width > 0 && (
-        <svg width={width - 48} height={SVG_HEIGHT}>
+        <svg width={svgWidth} height={svgHeight}>
           <g transform={`translate(${MARGIN.left},${MARGIN.top})`}>
-            {/* Gradient definitions for links */}
             <defs>
               {layout.links.map((link, i) => {
                 const sourceNode = link.source as SNode;
@@ -184,8 +139,8 @@ function SankeyChart() {
                     x2="100%"
                     y2="0%"
                   >
-                    <stop offset="0%" stopColor={sourceNode.color} stopOpacity={0.5} />
-                    <stop offset="100%" stopColor={targetNode.color} stopOpacity={0.5} />
+                    <stop offset="0%" stopColor={sourceNode.color} stopOpacity={0.45} />
+                    <stop offset="100%" stopColor={targetNode.color} stopOpacity={0.45} />
                   </linearGradient>
                 );
               })}
@@ -193,7 +148,6 @@ function SankeyChart() {
 
             {/* Links */}
             {layout.links.map((link, i) => {
-              const pathGen = sankeyLinkHorizontal();
               const d = pathGen(link as Parameters<typeof pathGen>[0]);
               if (!d) return null;
 
@@ -208,8 +162,8 @@ function SankeyChart() {
                   fill="none"
                   stroke={`url(#link-grad-${i})`}
                   strokeWidth={Math.max((link.width ?? 1), 1)}
-                  strokeOpacity={0.4}
-                  className="transition-opacity hover:!stroke-opacity-70"
+                  strokeOpacity={0.5}
+                  className="transition-opacity duration-150"
                   style={{ cursor: 'pointer' }}
                   onMouseMove={(e) => handleMouseMove(e, tooltipText)}
                   onMouseLeave={handleMouseLeave}
@@ -225,8 +179,13 @@ function SankeyChart() {
               const y1 = node.y1 ?? 0;
               const nodeHeight = y1 - y0;
               const nodeWidth = x1 - x0;
-              const isLeft = x0 < (width - MARGIN.left - MARGIN.right) / 2;
+
+              const isCenter = node.type === 'total';
+              const isLeft = !isCenter && (node.type === 'income' || node.type === 'deficit');
               const tooltipText = `${node.name}: ¥${Math.round(node.value ?? 0).toLocaleString()}`;
+
+              const fillOpacity = node.type === 'savings' || node.type === 'deficit' ? 0.75 : 0.85;
+              const rx = node.type === 'total' ? 4 : 3;
 
               return (
                 <g key={`node-${i}`}>
@@ -235,42 +194,113 @@ function SankeyChart() {
                     y={y0}
                     width={nodeWidth}
                     height={Math.max(nodeHeight, 1)}
-                    rx={3}
-                    ry={3}
+                    rx={rx}
+                    ry={rx}
                     fill={node.color}
-                    fillOpacity={0.85}
+                    fillOpacity={fillOpacity}
                     style={{ cursor: 'pointer' }}
                     onMouseMove={(e) => handleMouseMove(e, tooltipText)}
                     onMouseLeave={handleMouseLeave}
                   />
-                  {/* Node label */}
-                  <text
-                    x={isLeft ? x0 - 8 : x1 + 8}
-                    y={(y0 + y1) / 2}
-                    textAnchor={isLeft ? 'end' : 'start'}
-                    dominantBaseline="central"
-                    className="text-xs"
-                    fill="#94a3b8"
-                    style={{ fontSize: '11px' }}
-                  >
-                    {node.name}
-                  </text>
-                  <text
-                    x={isLeft ? x0 - 8 : x1 + 8}
-                    y={(y0 + y1) / 2 + 14}
-                    textAnchor={isLeft ? 'end' : 'start'}
-                    dominantBaseline="central"
-                    fill="#64748b"
-                    style={{ fontSize: '10px' }}
-                  >
-                    ¥{Math.round(node.value ?? 0).toLocaleString()}
-                  </text>
+                  {(node.type === 'savings' || node.type === 'deficit') && (
+                    <rect
+                      x={x0}
+                      y={y0}
+                      width={nodeWidth}
+                      height={Math.max(nodeHeight, 1)}
+                      rx={rx}
+                      ry={rx}
+                      fill="none"
+                      stroke={node.color}
+                      strokeWidth={1.5}
+                      strokeDasharray="4 2"
+                      strokeOpacity={0.6}
+                    />
+                  )}
+                  {isCenter ? (
+                    <>
+                      <text
+                        x={(x0 + x1) / 2}
+                        y={y0 - 18}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fill="#94a3b8"
+                        style={{ fontSize: '12px', fontWeight: 600 }}
+                      >
+                        {node.name}
+                      </text>
+                      <text
+                        x={(x0 + x1) / 2}
+                        y={y0 - 4}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fill="#cbd5e1"
+                        style={{ fontSize: '11px' }}
+                      >
+                        ¥{Math.round(node.value ?? 0).toLocaleString()}
+                      </text>
+                    </>
+                  ) : (
+                    <>
+                      <text
+                        x={isLeft ? x0 - 8 : x1 + 8}
+                        y={(y0 + y1) / 2 - 6}
+                        textAnchor={isLeft ? 'end' : 'start'}
+                        dominantBaseline="central"
+                        fill={node.type === 'savings' ? SAVINGS_TEXT : node.type === 'deficit' ? DEFICIT_TEXT : '#94a3b8'}
+                        style={{ fontSize: '11px', fontWeight: node.type === 'savings' || node.type === 'deficit' ? 600 : 400 }}
+                      >
+                        {node.name}
+                      </text>
+                      <text
+                        x={isLeft ? x0 - 8 : x1 + 8}
+                        y={(y0 + y1) / 2 + 8}
+                        textAnchor={isLeft ? 'end' : 'start'}
+                        dominantBaseline="central"
+                        fill="#64748b"
+                        style={{ fontSize: '10px' }}
+                      >
+                        ¥{Math.round(node.value ?? 0).toLocaleString()}
+                      </text>
+                    </>
+                  )}
                 </g>
               );
             })}
           </g>
         </svg>
       )}
+
+      {/* Summary footer */}
+      <div className="flex items-center justify-center gap-6 mt-3 pt-3 border-t border-white/5">
+        <div className="text-center">
+          <div className="text-[10px] text-slate-500 uppercase tracking-wider">収入</div>
+          <div className="text-sm font-medium text-emerald-400">
+            ¥{Math.round(summary.totalIncome).toLocaleString()}
+          </div>
+        </div>
+        <div className="text-slate-600">−</div>
+        <div className="text-center">
+          <div className="text-[10px] text-slate-500 uppercase tracking-wider">支出</div>
+          <div className="text-sm font-medium text-slate-300">
+            ¥{Math.round(summary.totalExpenses).toLocaleString()}
+          </div>
+        </div>
+        <div className="text-slate-600">=</div>
+        <div className="text-center">
+          <div className="text-[10px] text-slate-500 uppercase tracking-wider">
+            {summary.net >= 0 ? '貯蓄' : '不足'}
+          </div>
+          <div
+            className={`text-sm font-bold ${
+              summary.net >= 0 ? 'text-emerald-400' : 'text-red-400'
+            }`}
+          >
+            {summary.net >= 0 ? '+' : '-'}¥{Math.abs(Math.round(summary.net)).toLocaleString()}
+          </div>
+        </div>
+      </div>
+
       {/* Tooltip */}
       {tooltip.visible && (
         <div
