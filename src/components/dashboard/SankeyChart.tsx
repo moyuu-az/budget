@@ -36,6 +36,9 @@ function SankeyChart() {
     y: 0,
     content: '',
   });
+  const [selectedYearMonth, setSelectedYearMonth] = useState(() => toYearMonth(new Date()));
+  const fetchMonthlyAmounts = useMonthlyStore((s) => s.fetchMonthlyAmounts);
+  const fetchedMonthsRef = useRef(new Set<string>());
 
   useEffect(() => {
     const el = containerRef.current;
@@ -52,11 +55,34 @@ function SankeyChart() {
     return () => observer.disconnect();
   }, []);
 
-  const yearMonth = toYearMonth(new Date());
+  const currentYearMonth = useMemo(() => toYearMonth(new Date()), []);
+
+  const goPrevMonth = useCallback(() => {
+    setSelectedYearMonth((prev) => {
+      const [y, m] = prev.split('-').map(Number);
+      const d = new Date(y, m - 2, 1);
+      return toYearMonth(d);
+    });
+  }, []);
+
+  const goNextMonth = useCallback(() => {
+    setSelectedYearMonth((prev) => {
+      const [y, m] = prev.split('-').map(Number);
+      const d = new Date(y, m, 1);
+      return toYearMonth(d);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!fetchedMonthsRef.current.has(selectedYearMonth)) {
+      fetchedMonthsRef.current.add(selectedYearMonth);
+      fetchMonthlyAmounts(selectedYearMonth);
+    }
+  }, [selectedYearMonth, fetchMonthlyAmounts]);
 
   const cashFlowData = useMemo(
-    () => buildCashFlowData(templates, monthlyAmountsMap, categories, yearMonth),
-    [templates, monthlyAmountsMap, categories, yearMonth],
+    () => buildCashFlowData(templates, monthlyAmountsMap, categories, selectedYearMonth),
+    [templates, monthlyAmountsMap, categories, selectedYearMonth],
   );
 
   // Dynamic height: base + per-node padding (right column is usually tallest)
@@ -109,10 +135,46 @@ function SankeyChart() {
     setTooltip((prev) => ({ ...prev, visible: false }));
   }, []);
 
+  const titleText = useMemo(() => {
+    if (selectedYearMonth === currentYearMonth) return '今月のキャッシュフロー';
+    const [y, m] = selectedYearMonth.split('-').map(Number);
+    return `${y}年${m}月のキャッシュフロー`;
+  }, [selectedYearMonth, currentYearMonth]);
+
+  const isLatestMonth = selectedYearMonth >= currentYearMonth;
+
+  const navHeader = (
+    <div className="flex items-center gap-2 mb-4">
+      <button
+        aria-label="前の月"
+        onClick={goPrevMonth}
+        className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all"
+      >
+        <svg aria-hidden="true" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+        </svg>
+      </button>
+      <h2 className="text-lg font-semibold text-white">{titleText}</h2>
+      <button
+        aria-label="次の月"
+        onClick={goNextMonth}
+        disabled={isLatestMonth}
+        className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+      >
+        <svg aria-hidden="true" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
+    </div>
+  );
+
   if (!cashFlowData) {
     return (
-      <div className="glass rounded-2xl p-6 flex items-center justify-center" style={{ minHeight: 200 }}>
-        <p className="text-slate-500 text-sm">今月のデータがありません</p>
+      <div ref={containerRef} className="glass rounded-2xl p-6">
+        {navHeader}
+        <div className="flex items-center justify-center" style={{ minHeight: 150 }}>
+          <p className="text-slate-500 text-sm">データがありません</p>
+        </div>
       </div>
     );
   }
@@ -122,7 +184,7 @@ function SankeyChart() {
 
   return (
     <div ref={containerRef} className="glass rounded-2xl p-6 relative">
-      <h2 className="text-lg font-semibold text-white mb-4">今月のキャッシュフロー</h2>
+      {navHeader}
       {layout && width > 0 && (
         <svg width={svgWidth} height={svgHeight}>
           <g transform={`translate(${MARGIN.left},${MARGIN.top})`}>
