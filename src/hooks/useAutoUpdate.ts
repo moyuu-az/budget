@@ -6,6 +6,8 @@ export function useAutoUpdate() {
   const [appVersion, setAppVersion] = useState('');
 
   useEffect(() => {
+    if (!window.electronAPI) return;
+
     window.electronAPI.getAppVersion().then(setAppVersion).catch(() => {});
 
     const cleanup = window.electronAPI.onUpdateStatus((status: UpdateStatus) => {
@@ -16,15 +18,15 @@ export function useAutoUpdate() {
   }, []);
 
   const checkForUpdates = useCallback(() => {
-    window.electronAPI.checkForUpdates().catch(() => {});
+    window.electronAPI?.checkForUpdates().catch(() => {});
   }, []);
 
   const downloadUpdate = useCallback(() => {
-    window.electronAPI.downloadUpdate().catch(() => {});
+    window.electronAPI?.downloadUpdate().catch(() => {});
   }, []);
 
   const installUpdate = useCallback(() => {
-    window.electronAPI.installUpdate().catch(() => {});
+    window.electronAPI?.installUpdate().catch(() => {});
   }, []);
 
   const dismissUpdate = useCallback(() => {

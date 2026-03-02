@@ -41,7 +41,7 @@ function MonthNavigator({ yearMonth, onChange }: MonthNavigatorProps) {
         </svg>
       </button>
       <span className="text-white font-semibold text-lg min-w-[180px] text-center">
-        {MONTH_NAMES[month]} {year}
+        {year}年{MONTH_NAMES[month]}
       </span>
       <button
         onClick={goNext}

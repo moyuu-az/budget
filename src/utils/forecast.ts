@@ -1,4 +1,5 @@
 import type { EntryTemplate, MonthlyAmountsMap, ForecastPoint, ForecastEventDetail } from '../types';
+import { resolveAmount } from '../stores/useMonthlyStore';
 
 function getLastDayOfMonth(year: number, month: number): number {
   return new Date(year, month + 1, 0).getDate();
@@ -29,31 +30,35 @@ export function generateForecast(
   let balance = currentBalance;
 
   for (let i = 0; i <= days; i++) {
+    const isToday = i === 0;
     const date = new Date(today);
     date.setDate(today.getDate() + i);
     const dayOfMonth = date.getDate();
     const lastDay = getLastDayOfMonth(date.getFullYear(), date.getMonth());
     const yearMonth = toYearMonth(date);
 
-    const monthAmounts = monthlyAmountsMap.get(yearMonth);
     const dayEvents: string[] = [];
     const dayEventDetails: ForecastEventDetail[] = [];
 
     for (const template of enabledTemplates) {
       const effectiveDay = template.dayOfMonth > lastDay ? lastDay : template.dayOfMonth;
       if (dayOfMonth === effectiveDay) {
-        const amount = monthAmounts?.get(template.id) ?? 0;
+        const amount = resolveAmount(template.id, yearMonth, monthlyAmountsMap, templates);
         if (amount > 0) {
-          if (template.type === 'income') {
-            balance += amount;
-          } else {
-            balance -= amount;
+          // Only apply balance changes for future days, not today
+          if (!isToday) {
+            if (template.type === 'income') {
+              balance += amount;
+            } else {
+              balance -= amount;
+            }
           }
           dayEvents.push(template.name);
           dayEventDetails.push({
             name: template.name,
             amount,
             type: template.type,
+            categoryId: template.categoryId,
           });
         }
       }
@@ -64,16 +69,20 @@ export function generateForecast(
       balance,
       events: dayEvents,
       eventDetails: dayEventDetails,
+      isToday,
     });
   }
 
-  let minIdx = 0;
+  // Mark minimum balance point (exclude today at index 0)
+  let minIdx = -1;
+  let minBal = Infinity;
   for (let i = 1; i < points.length; i++) {
-    if (points[i].balance < points[minIdx].balance) {
+    if (points[i].balance < minBal) {
+      minBal = points[i].balance;
       minIdx = i;
     }
   }
-  if (points.length > 0) {
+  if (minIdx >= 0) {
     points[minIdx].isMinimum = true;
   }
 

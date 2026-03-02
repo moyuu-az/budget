@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 
-const PARTICLE_COUNT = 100;
-const CONNECTION_DISTANCE = 120;
+const PARTICLE_COUNT = 60;
+const CONNECTION_DISTANCE = 100;
 const COLORS = [
   new THREE.Color('#3b82f6'),
   new THREE.Color('#60a5fa'),
@@ -25,7 +25,7 @@ function ParticleBackground() {
 
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: false });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setClearColor(0x000000, 0);
     container.appendChild(renderer.domElement);
 
@@ -111,9 +111,12 @@ function ParticleBackground() {
 
     // Animation
     let animationId: number;
+    let frame = 0;
 
     const animate = () => {
       animationId = requestAnimationFrame(animate);
+      frame++;
+      if (frame % 2 !== 0) return; // skip odd frames = 30fps
 
       const posAttr = pointsGeometry.getAttribute('position') as THREE.BufferAttribute;
       const posArray = posAttr.array as Float32Array;

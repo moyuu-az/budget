@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { motion } from 'framer-motion';
 import {
   AreaChart,
@@ -7,10 +8,11 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  ReferenceDot
+  ReferenceDot,
+  ReferenceLine,
 } from 'recharts';
-import type { ForecastPoint } from '../types';
-import { formatYAxisTick } from '../utils/forecast';
+import type { ForecastPoint } from '../../types';
+import { formatYAxisTick } from '../../utils/forecast';
 
 interface ForecastChartProps {
   data: ForecastPoint[];
@@ -33,7 +35,9 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
         border: '1px solid rgba(100, 116, 170, 0.2)',
       }}
     >
-      <p className="text-slate-400 text-xs mb-1">{label}</p>
+      <p className="text-slate-400 text-xs mb-1">
+        {point.isToday ? `${label} - 今日（反映済み）` : label}
+      </p>
       <p className="text-white font-bold text-lg">¥{point.balance.toLocaleString()}</p>
       {point.eventDetails.length > 0 && (
         <div className="mt-2 border-t border-white/10 pt-2 space-y-1">
@@ -52,6 +56,8 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
 }
 
 function ForecastChart({ data, minimumPoint }: ForecastChartProps) {
+  const todayPoint = data.find((p) => p.isToday) ?? null;
+
   const formatXAxis = (dateStr: string) => {
     const date = new Date(dateStr);
     return `${date.getMonth() + 1}/${date.getDate()}`;
@@ -135,6 +141,28 @@ function ForecastChart({ data, minimumPoint }: ForecastChartProps) {
               filter: 'url(#glow)',
             }}
           />
+          {/* Today's vertical dashed line */}
+          {todayPoint && (
+            <ReferenceLine
+              x={todayPoint.date}
+              stroke="#3b82f6"
+              strokeDasharray="4 4"
+              strokeOpacity={0.5}
+            />
+          )}
+          {/* Today's special marker - larger dot */}
+          {todayPoint && (
+            <ReferenceDot
+              x={todayPoint.date}
+              y={todayPoint.balance}
+              r={8}
+              fill="#3b82f6"
+              stroke="white"
+              strokeWidth={2}
+              filter="url(#glow)"
+            />
+          )}
+          {/* Minimum balance marker */}
           {minimumPoint && (
             <ReferenceDot
               x={minimumPoint.date}
@@ -148,24 +176,37 @@ function ForecastChart({ data, minimumPoint }: ForecastChartProps) {
           )}
         </AreaChart>
       </ResponsiveContainer>
-      {minimumPoint && (
-        <motion.div
-          className="mt-3 flex items-center gap-2"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.5 }}
-        >
-          <span
-            className="w-3 h-3 rounded-full chart-glow"
-            style={{ backgroundColor: dotColor }}
-          />
-          <span className="text-sm text-slate-400">
-            最低残高: ¥{minimumPoint.balance.toLocaleString()} ({new Date(minimumPoint.date).toLocaleDateString('ja-JP')})
-          </span>
-        </motion.div>
-      )}
+      <div className="mt-3 flex items-center gap-4 flex-wrap">
+        {todayPoint && (
+          <motion.div
+            className="flex items-center gap-2"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.5 }}
+          >
+            <span className="w-3 h-3 rounded-full" style={{ backgroundColor: '#3b82f6' }} />
+            <span className="text-sm text-slate-400">今日</span>
+          </motion.div>
+        )}
+        {minimumPoint && (
+          <motion.div
+            className="flex items-center gap-2"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.6 }}
+          >
+            <span
+              className="w-3 h-3 rounded-full chart-glow"
+              style={{ backgroundColor: dotColor }}
+            />
+            <span className="text-sm text-slate-400">
+              最低残高: ¥{minimumPoint.balance.toLocaleString()} ({new Date(minimumPoint.date).toLocaleDateString('ja-JP')})
+            </span>
+          </motion.div>
+        )}
+      </div>
     </motion.div>
   );
 }
 
-export default ForecastChart;
+export default memo(ForecastChart);

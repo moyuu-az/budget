@@ -6,3 +6,4 @@ dist/
 .claude/
 .playwright-mcp/
 dev-app-update.yml
+docs/
