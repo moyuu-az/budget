@@ -9,7 +9,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import type { BalanceSnapshot } from '../../types';
-import { formatYAxisTick } from '../../utils/forecast';
+import { formatYAxisTick, formatXAxis } from '../../utils/forecast';
 
 interface HistoryChartProps {
   snapshots: BalanceSnapshot[];
@@ -45,11 +45,6 @@ function CustomTooltip({
 
 function HistoryChart({ snapshots }: HistoryChartProps) {
   const sorted = [...snapshots].sort((a, b) => a.date.localeCompare(b.date));
-
-  const formatXAxis = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return `${date.getMonth() + 1}/${date.getDate()}`;
-  };
 
   return (
     <motion.div

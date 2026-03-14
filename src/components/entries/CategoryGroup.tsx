@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
@@ -21,6 +21,11 @@ function CategoryGroup({ category, templates, yearMonth }: Props) {
   const subtotal = templates
     .filter((t) => t.enabled)
     .reduce((sum, t) => sum + resolveAmount(t.id, yearMonth, monthlyAmountsMap, allTemplates), 0);
+
+  const sortedTemplates = useMemo(
+    () => [...templates].sort((a, b) => a.dayOfMonth - b.dayOfMonth || a.sortOrder - b.sortOrder),
+    [templates]
+  );
 
   if (templates.length === 0) return null;
 
@@ -77,9 +82,7 @@ function CategoryGroup({ category, templates, yearMonth }: Props) {
             className="overflow-hidden"
           >
             <div className="ml-2 border-l border-slate-700/50 pl-1">
-              {templates
-                .sort((a, b) => a.dayOfMonth - b.dayOfMonth || a.sortOrder - b.sortOrder)
-                .map((t) => (
+              {sortedTemplates.map((t) => (
                   <EntryRow key={t.id} template={t} yearMonth={yearMonth} />
                 ))}
             </div>

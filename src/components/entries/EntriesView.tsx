@@ -17,9 +17,7 @@ function EntriesView() {
   const [copying, setCopying] = useState(false);
 
   const templates = useTemplateStore((s) => s.templates);
-  const fetchTemplates = useTemplateStore((s) => s.fetchTemplates);
   const categories = useCategoryStore((s) => s.categories);
-  const fetchCategories = useCategoryStore((s) => s.fetchCategories);
   const monthlyAmountsMap = useMonthlyStore((s) => s.monthlyAmountsMap);
   const fetchMonthlyAmounts = useMonthlyStore((s) => s.fetchMonthlyAmounts);
   const fetchMonthlyActuals = useMonthlyStore((s) => s.fetchMonthlyActuals);
@@ -27,12 +25,8 @@ function EntriesView() {
   const deleteMonthlyAmount = useMonthlyStore((s) => s.deleteMonthlyAmount);
   const addToast = useToastStore((s) => s.addToast);
 
-  // Fetch data on mount and when month changes
-  useEffect(() => {
-    fetchTemplates();
-    fetchCategories();
-  }, [fetchTemplates, fetchCategories]);
-
+  // Fetch month-specific data when month changes
+  // Base data (templates, categories) is fetched by App.tsx on mount
   useEffect(() => {
     fetchMonthlyAmounts(currentYearMonth);
     fetchMonthlyActuals(currentYearMonth);
@@ -118,9 +112,7 @@ function EntriesView() {
       transition={{ duration: 0.4 }}
     >
       {/* Header with month navigator */}
-      <div className="flex items-center justify-between">
-        <MonthNavigator yearMonth={currentYearMonth} onChange={setCurrentYearMonth} />
-      </div>
+      <MonthNavigator yearMonth={currentYearMonth} onChange={setCurrentYearMonth} />
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-4">

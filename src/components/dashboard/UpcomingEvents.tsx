@@ -124,11 +124,12 @@ function UpcomingEvents({ events }: UpcomingEventsProps) {
     <div className="glass rounded-2xl p-6">
       <h2 className="text-lg font-semibold text-white mb-4">今後の予定</h2>
       <ul className="space-y-1">
-        {flatEvents.map((event, index) => {
-          const date = new Date(event.date);
-          const label = `${date.getMonth() + 1}/${date.getDate()}`;
+        {(() => {
           const today = new Date();
           today.setHours(0, 0, 0, 0);
+          return flatEvents.map((event, index) => {
+          const date = new Date(event.date);
+          const label = `${date.getMonth() + 1}/${date.getDate()}`;
           const daysFromNow = Math.round(
             (date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
           );
@@ -184,7 +185,8 @@ function UpcomingEvents({ events }: UpcomingEventsProps) {
               </div>
             </motion.li>
           );
-        })}
+        });
+        })()}
       </ul>
     </div>
   );

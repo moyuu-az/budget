@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import type { Category, CategoryInput } from '../../types';
 import { useCategoryStore } from '../../stores/useCategoryStore';
@@ -13,9 +13,9 @@ interface EditState {
 }
 
 function CategoryManager() {
-  const { categories, fetchCategories, addCategory, updateCategory, deleteCategory } =
+  const { categories, addCategory, updateCategory, deleteCategory } =
     useCategoryStore();
-  const { templates, fetchTemplates } = useTemplateStore();
+  const { templates } = useTemplateStore();
   const { addToast } = useToastStore();
 
   const [editing, setEditing] = useState<EditState | null>(null);
@@ -25,11 +25,6 @@ function CategoryManager() {
   const [newName, setNewName] = useState('');
   const [newColor, setNewColor] = useState('#8b5cf6');
   const [newType, setNewType] = useState<'income' | 'expense'>('expense');
-
-  useEffect(() => {
-    fetchCategories();
-    fetchTemplates();
-  }, [fetchCategories, fetchTemplates]);
 
   const incomeCategories = categories
     .filter((c) => c.type === 'income')

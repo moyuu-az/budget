@@ -241,8 +241,7 @@ export function updateCategory(id: number, input: { name?: string; type?: string
 }
 
 export function deleteCategory(id: number): void {
-  // Set related templates' category_id to null before deleting
-  db.prepare('UPDATE entry_templates SET category_id = NULL WHERE category_id = ?').run(id);
+  // FK ON DELETE SET NULL handles nullifying category_id in entry_templates
   db.prepare('DELETE FROM categories WHERE id = ?').run(id);
 }
 

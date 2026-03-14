@@ -3,7 +3,6 @@ import { motion } from 'framer-motion';
 import { useBalanceStore } from '../../stores/useBalanceStore';
 import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useMonthlyStore } from '../../stores/useMonthlyStore';
-import { useCategoryStore } from '../../stores/useCategoryStore';
 import { generateForecast, toYearMonth } from '../../utils/forecast';
 import ForecastChart from './ForecastChart';
 import MinBalanceCard from './MinBalanceCard';
@@ -12,26 +11,19 @@ import UpcomingEvents from './UpcomingEvents';
 
 function DashboardView() {
   const balance = useBalanceStore((s) => s.balance);
-  const fetchBalance = useBalanceStore((s) => s.fetchBalance);
   const templates = useTemplateStore((s) => s.templates);
-  const fetchTemplates = useTemplateStore((s) => s.fetchTemplates);
   const monthlyAmountsMap = useMonthlyStore((s) => s.monthlyAmountsMap);
   const fetchMonthlyAmountsRange = useMonthlyStore((s) => s.fetchMonthlyAmountsRange);
-  const fetchCategories = useCategoryStore((s) => s.fetchCategories);
 
-  // Fetch data on mount
+  // Fetch monthly amounts for forecast range (current + next 2 months)
+  // Base data (balance, templates, categories) is fetched by App.tsx on mount
   useEffect(() => {
-    fetchBalance();
-    fetchTemplates();
-    fetchCategories();
-
-    // Fetch monthly amounts for forecast range (current + next 2 months)
     const now = new Date();
     const startMonth = toYearMonth(now);
     const endDate = new Date(now.getFullYear(), now.getMonth() + 3, 0);
     const endMonth = toYearMonth(endDate);
     fetchMonthlyAmountsRange(startMonth, endMonth);
-  }, [fetchBalance, fetchTemplates, fetchCategories, fetchMonthlyAmountsRange]);
+  }, [fetchMonthlyAmountsRange]);
 
   // Compute forecast data
   const forecast = useMemo(
