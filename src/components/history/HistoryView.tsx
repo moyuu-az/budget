@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useSnapshotStore } from '../../stores/useSnapshotStore';
 import SnapshotForm from './SnapshotForm';
@@ -6,11 +5,7 @@ import HistoryChart from './HistoryChart';
 import SnapshotList from './SnapshotList';
 
 function HistoryView() {
-  const { snapshots, fetchSnapshots } = useSnapshotStore();
-
-  useEffect(() => {
-    fetchSnapshots();
-  }, [fetchSnapshots]);
+  const { snapshots } = useSnapshotStore();
 
   return (
     <motion.div

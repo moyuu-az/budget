@@ -46,7 +46,6 @@ function ParticleBackground() {
     // Particle positions and velocities
     const positions = new Float32Array(PARTICLE_COUNT * 3);
     const colors = new Float32Array(PARTICLE_COUNT * 3);
-    const opacities = new Float32Array(PARTICLE_COUNT);
     const velocities: THREE.Vector3[] = [];
 
     for (let i = 0; i < PARTICLE_COUNT; i++) {
@@ -59,8 +58,6 @@ function ParticleBackground() {
       colors[i3] = color.r;
       colors[i3 + 1] = color.g;
       colors[i3 + 2] = color.b;
-
-      opacities[i] = 0.3 + Math.random() * 0.3;
 
       velocities.push(
         new THREE.Vector3(

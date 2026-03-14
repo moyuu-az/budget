@@ -12,7 +12,7 @@ import {
   ReferenceLine,
 } from 'recharts';
 import type { ForecastPoint } from '../../types';
-import { formatYAxisTick } from '../../utils/forecast';
+import { formatYAxisTick, formatXAxis } from '../../utils/forecast';
 
 interface ForecastChartProps {
   data: ForecastPoint[];
@@ -57,11 +57,6 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
 
 function ForecastChart({ data, minimumPoint }: ForecastChartProps) {
   const todayPoint = data.find((p) => p.isToday) ?? null;
-
-  const formatXAxis = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return `${date.getMonth() + 1}/${date.getDate()}`;
-  };
 
   const minBalance = Math.min(...data.map((d) => d.balance));
   const maxBalance = Math.max(...data.map((d) => d.balance));

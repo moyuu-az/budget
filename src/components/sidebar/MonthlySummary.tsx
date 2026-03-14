@@ -2,19 +2,13 @@ import { useMemo } from 'react';
 import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
 import { formatWithCommas } from '../../utils/currency';
-
-function getCurrentYearMonth(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  return `${year}-${month}`;
-}
+import { toYearMonth } from '../../utils/forecast';
 
 function MonthlySummary() {
   const { templates } = useTemplateStore();
   const { monthlyAmountsMap } = useMonthlyStore();
 
-  const yearMonth = getCurrentYearMonth();
+  const yearMonth = useMemo(() => toYearMonth(new Date()), []);
 
   const { totalIncome, totalExpense, net } = useMemo(() => {
     const enabledTemplates = templates.filter((t) => t.enabled);

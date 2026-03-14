@@ -100,3 +100,8 @@ export function formatCurrency(amount: number): string {
 export function formatYAxisTick(value: number): string {
   return `${(value / 10000).toFixed(0)}万`;
 }
+
+export function formatXAxis(dateStr: string): string {
+  const date = new Date(dateStr);
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
