@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type {
+  ActualWithCategory,
   EntryTemplate,
   MonthlyAmountsMap,
   MonthlyActualsMap,
@@ -8,8 +9,10 @@ import type {
 interface MonthlyState {
   monthlyAmountsMap: MonthlyAmountsMap;
   monthlyActualsMap: MonthlyActualsMap;
+  actualsWithCategory: ActualWithCategory[];
   loading: boolean;
   error: string | null;
+  fetchActualsRange: (startMonth: string, endMonth: string) => Promise<void>;
   fetchMonthlyAmounts: (yearMonth: string) => Promise<void>;
   fetchMonthlyAmountsRange: (startMonth: string, endMonth: string) => Promise<void>;
   setMonthlyAmount: (templateId: number, yearMonth: string, amount: number) => Promise<void>;
@@ -23,8 +26,31 @@ interface MonthlyState {
 export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   monthlyAmountsMap: new Map(),
   monthlyActualsMap: new Map(),
+  actualsWithCategory: [],
   loading: false,
   error: null,
+
+  fetchActualsRange: async (startMonth: string, endMonth: string) => {
+    set({ loading: true, error: null });
+    try {
+      const actuals = await window.electronAPI.getMonthlyActualsRange(startMonth, endMonth);
+      const newMap = new Map(get().monthlyActualsMap);
+      for (const [key] of newMap) {
+        if (key >= startMonth && key <= endMonth) {
+          newMap.delete(key);
+        }
+      }
+      for (const a of actuals) {
+        if (!newMap.has(a.yearMonth)) {
+          newMap.set(a.yearMonth, new Map<number, number>());
+        }
+        newMap.get(a.yearMonth)!.set(a.templateId, a.actualAmount);
+      }
+      set({ actualsWithCategory: actuals, monthlyActualsMap: newMap, loading: false });
+    } catch (e) {
+      set({ error: (e as Error).message, loading: false });
+    }
+  },
 
   fetchMonthlyAmounts: async (yearMonth: string) => {
     set({ loading: true, error: null });
