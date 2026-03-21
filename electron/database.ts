@@ -392,6 +392,43 @@ export function deleteMonthlyActual(templateId: number, yearMonth: string): void
   db.prepare('DELETE FROM monthly_actuals WHERE template_id = ? AND year_month = ?').run(templateId, yearMonth);
 }
 
+export function getMonthlyActualsRange(startMonth: string, endMonth: string): Array<{
+  template_id: number;
+  year_month: string;
+  actual_amount: number;
+  template_name: string;
+  template_type: string;
+  category_id: number | null;
+  category_name: string | null;
+  category_color: string | null;
+}> {
+  return db.prepare(`
+    SELECT
+      ma.template_id,
+      ma.year_month,
+      ma.actual_amount,
+      et.name AS template_name,
+      et.type AS template_type,
+      et.category_id,
+      c.name AS category_name,
+      c.color AS category_color
+    FROM monthly_actuals ma
+    JOIN entry_templates et ON et.id = ma.template_id
+    LEFT JOIN categories c ON c.id = et.category_id
+    WHERE ma.year_month >= ? AND ma.year_month <= ?
+    ORDER BY ma.year_month ASC
+  `).all(startMonth, endMonth) as Array<{
+    template_id: number;
+    year_month: string;
+    actual_amount: number;
+    template_name: string;
+    template_type: string;
+    category_id: number | null;
+    category_name: string | null;
+    category_color: string | null;
+  }>;
+}
+
 // --- Snapshots ---
 
 export function getSnapshots(): Array<{
@@ -427,4 +464,20 @@ export function addSnapshot(date: string, balance: number): {
 
 export function deleteSnapshot(id: number): void {
   db.prepare('DELETE FROM balance_snapshots WHERE id = ?').run(id);
+}
+
+export function getSnapshotsRange(startDate: string, endDate: string): Array<{
+  id: number;
+  date: string;
+  balance: number;
+  created_at: string;
+}> {
+  return db.prepare(
+    'SELECT * FROM balance_snapshots WHERE date >= ? AND date <= ? ORDER BY date ASC'
+  ).all(startDate, endDate) as Array<{
+    id: number;
+    date: string;
+    balance: number;
+    created_at: string;
+  }>;
 }

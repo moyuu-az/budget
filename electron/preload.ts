@@ -39,6 +39,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteMonthlyActual: (templateId: number, yearMonth: string) =>
     ipcRenderer.invoke('delete-monthly-actual', templateId, yearMonth),
 
+  // Analytics
+  getMonthlyActualsRange: (startMonth: string, endMonth: string) =>
+    ipcRenderer.invoke('get-monthly-actuals-range', startMonth, endMonth),
+  getSnapshotsRange: (startDate: string, endDate: string) =>
+    ipcRenderer.invoke('get-snapshots-range', startDate, endDate),
+
   // Snapshots
   getSnapshots: () => ipcRenderer.invoke('get-snapshots'),
   addSnapshot: (date: string, balance: number) => ipcRenderer.invoke('add-snapshot', date, balance),
