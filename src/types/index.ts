@@ -94,7 +94,7 @@ export interface UpdateStatus {
 }
 
 // --- View ---
-export type ViewType = 'dashboard' | 'entries' | 'history' | 'settings';
+export type ViewType = 'dashboard' | 'entries' | 'history' | 'settings' | 'analytics';
 
 // --- ElectronAPI ---
 export interface ElectronAPI {
@@ -122,6 +122,9 @@ export interface ElectronAPI {
   setMonthlyActual(templateId: number, yearMonth: string, actualAmount: number): Promise<void>;
   deleteMonthlyActual(templateId: number, yearMonth: string): Promise<void>;
 
+  getMonthlyActualsRange(startMonth: string, endMonth: string): Promise<ActualWithCategory[]>;
+  getSnapshotsRange(startDate: string, endDate: string): Promise<BalanceSnapshot[]>;
+
   getSnapshots(): Promise<BalanceSnapshot[]>;
   addSnapshot(date: string, balance: number): Promise<BalanceSnapshot>;
   deleteSnapshot(id: number): Promise<void>;
@@ -131,6 +134,59 @@ export interface ElectronAPI {
   downloadUpdate(): Promise<void>;
   installUpdate(): Promise<void>;
   onUpdateStatus(callback: (status: UpdateStatus) => void): () => void;
+}
+
+// --- Analytics ---
+export type ForecastPeriod = '60d' | '3m' | '6m' | '1y';
+
+export interface MonthSummary {
+  yearMonth: string;
+  endBalance: number;
+  totalIncome: number;
+  totalExpense: number;
+  minBalance: number;
+}
+
+export interface CategoryTrendPoint {
+  yearMonth: string;
+  categories: CategoryTrendItem[];
+}
+
+export interface CategoryTrendItem {
+  categoryId: number | null;
+  name: string;
+  color: string;
+  amount: number;
+}
+
+export interface CompositionItem {
+  categoryId: number | null;
+  name: string;
+  color: string;
+  amount: number;
+  percentage: number;
+}
+
+export interface ComparisonRow {
+  categoryId: number | null;
+  name: string;
+  color: string;
+  currentAmount: number;
+  prevMonthDiff: number | null;
+  prevMonthPercent: number | null;
+  prevYearDiff: number | null;
+  prevYearPercent: number | null;
+}
+
+export interface ActualWithCategory {
+  templateId: number;
+  yearMonth: string;
+  actualAmount: number;
+  templateName: string;
+  templateType: 'income' | 'expense';
+  categoryId: number | null;
+  categoryName: string | null;
+  categoryColor: string | null;
 }
 
 declare global {
