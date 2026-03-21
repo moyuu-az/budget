@@ -9,6 +9,7 @@ import Layout from './components/Layout';
 import DashboardView from './components/dashboard/DashboardView';
 import EntriesView from './components/entries/EntriesView';
 import HistoryView from './components/history/HistoryView';
+import AnalyticsView from './components/analytics/AnalyticsView';
 import SettingsView from './components/settings/SettingsView';
 import ParticleBackground from './components/ParticleBackground';
 import Toast from './components/shared/Toast';
@@ -41,7 +42,7 @@ function App() {
         <AnimatePresence mode="wait">
           {currentView === 'dashboard' && (
             <motion.div key="dashboard" {...pageTransition}>
-              <DashboardView />
+              <DashboardView onNavigate={setCurrentView} />
             </motion.div>
           )}
           {currentView === 'entries' && (
@@ -52,6 +53,11 @@ function App() {
           {currentView === 'history' && (
             <motion.div key="history" {...pageTransition}>
               <HistoryView />
+            </motion.div>
+          )}
+          {currentView === 'analytics' && (
+            <motion.div key="analytics" {...pageTransition}>
+              <AnalyticsView />
             </motion.div>
           )}
           {currentView === 'settings' && (
