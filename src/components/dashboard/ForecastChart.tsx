@@ -11,12 +11,15 @@ import {
   ReferenceDot,
   ReferenceLine,
 } from 'recharts';
-import type { ForecastPoint } from '../../types';
+import type { ForecastPoint, ForecastPeriod } from '../../types';
 import { formatYAxisTick, formatXAxis } from '../../utils/forecast';
 
 interface ForecastChartProps {
   data: ForecastPoint[];
   minimumPoint: ForecastPoint | null;
+  period: ForecastPeriod;
+  onPeriodChange: (period: ForecastPeriod) => void;
+  onOpenAnalytics?: () => void;
 }
 
 function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: ForecastPoint }> }) {
@@ -55,7 +58,23 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
   );
 }
 
-function ForecastChart({ data, minimumPoint }: ForecastChartProps) {
+const periodLabels: { value: ForecastPeriod; label: string }[] = [
+  { value: '60d', label: '60日' },
+  { value: '3m', label: '3ヶ月' },
+  { value: '6m', label: '6ヶ月' },
+  { value: '1y', label: '1年' },
+];
+
+function getXAxisInterval(period: ForecastPeriod): number {
+  switch (period) {
+    case '60d': return 6;
+    case '3m': return 13;
+    case '6m': return 29;
+    case '1y': return 59;
+  }
+}
+
+function ForecastChart({ data, minimumPoint, period, onPeriodChange, onOpenAnalytics }: ForecastChartProps) {
   const todayPoint = data.find((p) => p.isToday) ?? null;
 
   const minBalance = Math.min(...data.map((d) => d.balance));
@@ -77,7 +96,34 @@ function ForecastChart({ data, minimumPoint }: ForecastChartProps) {
       transition={{ duration: 0.5, delay: 0.2 }}
       className="glass rounded-2xl p-6"
     >
-      <h2 className="text-lg font-semibold text-white mb-4">60日間予測</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold text-white">残高予測</h2>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 bg-slate-800/50 rounded-lg p-1">
+            {periodLabels.map((p) => (
+              <button
+                key={p.value}
+                onClick={() => onPeriodChange(p.value)}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                  period === p.value
+                    ? 'bg-blue-500/20 text-blue-400'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          {onOpenAnalytics && (
+            <button
+              onClick={onOpenAnalytics}
+              className="text-xs text-blue-400 hover:text-blue-300 transition-colors ml-2"
+            >
+              詳細分析 →
+            </button>
+          )}
+        </div>
+      </div>
       <ResponsiveContainer width="100%" height={300}>
         <AreaChart data={data} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
           <defs>
@@ -108,7 +154,7 @@ function ForecastChart({ data, minimumPoint }: ForecastChartProps) {
             tickFormatter={formatXAxis}
             stroke="#4a5580"
             tick={{ fontSize: 11, fill: '#64748b' }}
-            interval={6}
+            interval={getXAxisInterval(period)}
             axisLine={{ stroke: 'rgba(100, 116, 170, 0.12)' }}
             tickLine={false}
           />

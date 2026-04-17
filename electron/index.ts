@@ -24,7 +24,9 @@ import {
   deleteMonthlyActual,
   getSnapshots,
   addSnapshot,
-  deleteSnapshot
+  deleteSnapshot,
+  getMonthlyActualsRange,
+  getSnapshotsRange
 } from './database';
 
 function createWindow(): BrowserWindow {
@@ -230,6 +232,24 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('delete-snapshot', (_event, id: number) => {
     deleteSnapshot(id);
+  });
+
+  // Analytics
+  ipcMain.handle('get-monthly-actuals-range', (_event, startMonth: string, endMonth: string) => {
+    return getMonthlyActualsRange(startMonth, endMonth).map((row) => ({
+      templateId: row.template_id,
+      yearMonth: row.year_month,
+      actualAmount: row.actual_amount,
+      templateName: row.template_name,
+      templateType: row.template_type as 'income' | 'expense',
+      categoryId: row.category_id,
+      categoryName: row.category_name,
+      categoryColor: row.category_color,
+    }));
+  });
+
+  ipcMain.handle('get-snapshots-range', (_event, startDate: string, endDate: string) => {
+    return getSnapshotsRange(startDate, endDate).map(mapSnapshot);
   });
 }
 
