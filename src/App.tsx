@@ -12,7 +12,7 @@ import HistoryView from './components/history/HistoryView';
 import AnalyticsView from './components/analytics/AnalyticsView';
 import SettingsView from './components/settings/SettingsView';
 import ParticleBackground from './components/ParticleBackground';
-import Toast from './components/shared/Toast';
+import { Toast } from './components/ui/Toast';
 
 const pageTransition = {
   initial: { opacity: 0, y: 20 },
