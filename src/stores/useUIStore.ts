@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Theme } from '../types/ui';
+import type { Theme, AnalyticsPeriod } from '../types/ui';
 import { shiftYearMonth } from '../types/ui';
 import { toYearMonth } from '../utils/forecast';
 
@@ -8,12 +8,14 @@ interface UIState {
   theme: Theme;
   selectedYearMonth: string;
   sidebarCollapsed: boolean;
+  analyticsPeriod: AnalyticsPeriod;
   setTheme: (t: Theme) => void;
   toggleTheme: () => void;
   setSelectedYearMonth: (ym: string) => void;
   shiftMonth: (delta: number) => void;
   toggleSidebar: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
+  setAnalyticsPeriod: (period: AnalyticsPeriod) => void;
 }
 
 const systemTheme = (): Theme => {
@@ -27,6 +29,7 @@ export const useUIStore = create<UIState>()(
       theme: systemTheme(),
       selectedYearMonth: toYearMonth(new Date()),
       sidebarCollapsed: false,
+      analyticsPeriod: '6m',
       setTheme: (theme) => set({ theme }),
       toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
       setSelectedYearMonth: (selectedYearMonth) => set({ selectedYearMonth }),
@@ -34,12 +37,14 @@ export const useUIStore = create<UIState>()(
         set((s) => ({ selectedYearMonth: shiftYearMonth(s.selectedYearMonth, delta) })),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
+      setAnalyticsPeriod: (analyticsPeriod) => set({ analyticsPeriod }),
     }),
     {
       name: 'balance-forecast-ui',
       partialize: (state) => ({
         theme: state.theme,
         sidebarCollapsed: state.sidebarCollapsed,
+        analyticsPeriod: state.analyticsPeriod,
       }),
     },
   ),

@@ -6,6 +6,7 @@ import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useMonthlyStore } from '../../stores/useMonthlyStore';
 import { generateForecast, toYearMonth, periodToDays, periodToMonths } from '../../utils/forecast';
 import ForecastChart from './ForecastChart';
+import KpiHero from './KpiHero';
 import MinBalanceCard from './MinBalanceCard';
 import SankeyChart from './SankeyChart';
 import UpcomingEvents from './UpcomingEvents';
@@ -57,6 +58,9 @@ function DashboardView({ onNavigate }: DashboardViewProps) {
       animate={{ opacity: 1 }}
       transition={{ duration: 0.4 }}
     >
+      {/* KPI hero - first row */}
+      <KpiHero />
+
       {/* Forecast Chart - full width */}
       <ForecastChart
         data={forecast}

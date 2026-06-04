@@ -5,6 +5,8 @@ import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useCategoryStore } from '../../stores/useCategoryStore';
 import { useMonthlyStore } from '../../stores/useMonthlyStore';
 import { useSnapshotStore } from '../../stores/useSnapshotStore';
+import { useUIStore } from '../../stores/useUIStore';
+import type { AnalyticsPeriod } from '../../types/ui';
 import { generateForecast, toYearMonth } from '../../utils/forecast';
 import {
   buildCategoryTrend,
@@ -18,14 +20,15 @@ import CategoryTrendChart from './CategoryTrendChart';
 import CompositionChart from './CompositionChart';
 import ComparisonTable from './ComparisonTable';
 
-const periodOptions = [
+const periodOptions: Array<{ value: AnalyticsPeriod; label: string }> = [
   { value: '3m', label: '3ヶ月' },
   { value: '6m', label: '6ヶ月' },
   { value: '1y', label: '1年' },
 ];
 
 function AnalyticsView() {
-  const [period, setPeriod] = useState('6m');
+  const period = useUIStore((s) => s.analyticsPeriod);
+  const setAnalyticsPeriod = useUIStore((s) => s.setAnalyticsPeriod);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
   const balance = useBalanceStore((s) => s.balance);
@@ -136,7 +139,7 @@ function AnalyticsView() {
         <PeriodSelector
           options={periodOptions}
           selected={period}
-          onChange={(v) => { setPeriod(v); setSelectedMonth(null); }}
+          onChange={(v) => { setAnalyticsPeriod(v); setSelectedMonth(null); }}
         />
       </div>
 

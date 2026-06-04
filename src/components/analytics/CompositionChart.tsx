@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import type { CompositionItem } from '../../types';
 import { formatCurrency } from '../../utils/forecast';
+import { EmptyState } from '../ui/EmptyState';
 
 interface CompositionChartProps {
   data: CompositionItem[];
@@ -57,9 +58,7 @@ function CompositionChart({ data, yearMonth }: CompositionChartProps) {
         <h2 className="text-lg font-semibold text-white mb-4">
           支出構成 - {formatMonth(yearMonth)}
         </h2>
-        <div className="flex items-center justify-center h-48 text-slate-400">
-          データがありません
-        </div>
+        <EmptyState title="データがありません" />
       </motion.div>
     );
   }

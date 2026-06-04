@@ -13,6 +13,7 @@ import {
 } from 'recharts';
 import type { ForecastPoint, ForecastPeriod } from '../../types';
 import { formatYAxisTick, formatXAxis } from '../../utils/forecast';
+import { Tabs, type TabItem } from '../ui/Tabs';
 
 interface ForecastChartProps {
   data: ForecastPoint[];
@@ -58,7 +59,7 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
   );
 }
 
-const periodLabels: { value: ForecastPeriod; label: string }[] = [
+const periodTabs: TabItem<ForecastPeriod>[] = [
   { value: '60d', label: '60日' },
   { value: '3m', label: '3ヶ月' },
   { value: '6m', label: '6ヶ月' },
@@ -99,21 +100,13 @@ function ForecastChart({ data, minimumPoint, period, onPeriodChange, onOpenAnaly
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-white">残高予測</h2>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 bg-slate-800/50 rounded-lg p-1">
-            {periodLabels.map((p) => (
-              <button
-                key={p.value}
-                onClick={() => onPeriodChange(p.value)}
-                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                  period === p.value
-                    ? 'bg-blue-500/20 text-blue-400'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
+          <Tabs
+            items={periodTabs}
+            value={period}
+            onChange={onPeriodChange}
+            ariaLabel="予測期間"
+            size="sm"
+          />
           {onOpenAnalytics && (
             <button
               onClick={onOpenAnalytics}

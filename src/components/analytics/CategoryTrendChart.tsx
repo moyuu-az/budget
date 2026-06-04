@@ -1,4 +1,4 @@
-import { memo, useMemo, useCallback } from 'react';
+import { memo, useMemo, useCallback, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   BarChart,
@@ -12,6 +12,7 @@ import {
 } from 'recharts';
 import type { CategoryTrendPoint } from '../../types';
 import { formatYAxisTick, formatCurrency } from '../../utils/forecast';
+import { EmptyState } from '../ui/EmptyState';
 
 interface CategoryTrendChartProps {
   data: CategoryTrendPoint[];
@@ -114,6 +115,22 @@ function CategoryTrendChart({ data, todayYearMonth, type, onMonthClick }: Catego
     return defs;
   }, [data]);
 
+  const [hiddenKeys, setHiddenKeys] = useState<ReadonlySet<string>>(() => new Set());
+
+  const toggleKey = useCallback((key: string) => {
+    setHiddenKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const visibleBarDefs = useMemo(
+    () => barDefs.filter((def) => !hiddenKeys.has(def.key)),
+    [barDefs, hiddenKeys],
+  );
+
   const handleClick = useCallback(
     (_data: unknown, index: number) => {
       if (onMonthClick && chartData[index]) {
@@ -132,9 +149,7 @@ function CategoryTrendChart({ data, todayYearMonth, type, onMonthClick }: Catego
         transition={{ duration: 0.4, delay: 0.1 }}
       >
         <h2 className="text-lg font-semibold text-white mb-4">{title}</h2>
-        <div className="flex items-center justify-center h-48 text-slate-400">
-          データがありません
-        </div>
+        <EmptyState title="データがありません" />
       </motion.div>
     );
   }
@@ -176,7 +191,7 @@ function CategoryTrendChart({ data, todayYearMonth, type, onMonthClick }: Catego
             stroke="#f59e0b"
             strokeDasharray="4 4"
           />
-          {barDefs.map((def) => (
+          {visibleBarDefs.map((def) => (
             <Bar
               key={def.key}
               dataKey={def.key}
@@ -188,6 +203,33 @@ function CategoryTrendChart({ data, todayYearMonth, type, onMonthClick }: Catego
           ))}
         </BarChart>
       </ResponsiveContainer>
+      <ul className="flex flex-wrap gap-x-3 gap-y-1.5 mt-4" aria-label={`${title}の凡例`}>
+        {barDefs.map((def) => {
+          const hidden = hiddenKeys.has(def.key);
+          return (
+            <li key={def.key}>
+              <button
+                type="button"
+                aria-pressed={!hidden}
+                onClick={() => toggleKey(def.key)}
+                className={`flex items-center gap-1.5 text-xs transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] rounded-[var(--radius-sm)] px-1 py-0.5 ${
+                  hidden ? 'opacity-40' : 'opacity-100'
+                }`}
+              >
+                <span
+                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                  style={{ backgroundColor: def.color }}
+                />
+                <span
+                  className={`text-slate-300 ${hidden ? 'line-through' : ''}`}
+                >
+                  {def.name}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </motion.div>
   );
 }

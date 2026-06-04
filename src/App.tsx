@@ -12,8 +12,10 @@ import HistoryView from './components/history/HistoryView';
 import AnalyticsView from './components/analytics/AnalyticsView';
 import SettingsView from './components/settings/SettingsView';
 import ParticleBackground from './components/ParticleBackground';
+import ShortcutHelpDialog from './components/layout/ShortcutHelpDialog';
 import { Toast } from './components/ui/Toast';
 import { useThemeEffect } from './hooks/useTheme';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 
 const pageTransition = {
   initial: { opacity: 0, y: 20 },
@@ -25,6 +27,7 @@ const pageTransition = {
 function App() {
   useThemeEffect();
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
+  const [helpOpen, setHelpOpen] = useState(false);
   const fetchBalance = useBalanceStore((s) => s.fetchBalance);
   const fetchCategories = useCategoryStore((s) => s.fetchCategories);
   const fetchTemplates = useTemplateStore((s) => s.fetchTemplates);
@@ -36,6 +39,11 @@ function App() {
     fetchTemplates();
     fetchSnapshots();
   }, [fetchBalance, fetchCategories, fetchTemplates, fetchSnapshots]);
+
+  useKeyboardShortcuts({
+    onNavigate: setCurrentView,
+    onShowHelp: () => setHelpOpen(true),
+  });
 
   return (
     <>
@@ -69,6 +77,7 @@ function App() {
           )}
         </AnimatePresence>
       </Layout>
+      <ShortcutHelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
       <Toast />
     </>
   );

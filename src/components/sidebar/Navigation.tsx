@@ -3,6 +3,7 @@ import { ViewType } from '../../types';
 interface Props {
   currentView: ViewType;
   onNavigate: (view: ViewType) => void;
+  collapsed?: boolean;
 }
 
 const navItems: { id: ViewType; label: string; icon: React.ReactNode }[] = [
@@ -54,7 +55,7 @@ const navItems: { id: ViewType; label: string; icon: React.ReactNode }[] = [
   },
 ];
 
-function Navigation({ currentView, onNavigate }: Props) {
+function Navigation({ currentView, onNavigate, collapsed = false }: Props) {
   return (
     <ul className="space-y-1">
       {navItems.map((item) => {
@@ -63,14 +64,20 @@ function Navigation({ currentView, onNavigate }: Props) {
           <li key={item.id}>
             <button
               onClick={() => onNavigate(item.id)}
-              className={`w-full text-left px-3 py-2.5 flex items-center gap-3 rounded-lg transition-all duration-200 ${
+              title={collapsed ? item.label : undefined}
+              aria-label={item.label}
+              className={`w-full px-3 py-2.5 flex items-center rounded-lg transition-all duration-200 border-l-2 ${
+                collapsed ? 'justify-center gap-0' : 'text-left gap-3'
+              } ${
                 isActive
-                  ? 'bg-white/10 text-white border-l-2 border-blue-400'
-                  : 'text-slate-400 hover:bg-white/5 hover:text-slate-200 border-l-2 border-transparent'
+                  ? 'bg-[var(--color-accent-primary)]/15 text-[var(--color-content-primary)] border-[var(--color-accent-primary)]'
+                  : 'text-[var(--color-content-muted)] hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-content-secondary)] border-transparent'
               }`}
             >
-              <span className={isActive ? 'text-blue-400' : ''}>{item.icon}</span>
-              <span className="text-sm font-medium">{item.label}</span>
+              <span className={isActive ? 'text-[var(--color-accent-primary)]' : ''}>
+                {item.icon}
+              </span>
+              {!collapsed && <span className="text-sm font-medium">{item.label}</span>}
             </button>
           </li>
         );

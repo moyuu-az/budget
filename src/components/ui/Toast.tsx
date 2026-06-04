@@ -1,9 +1,11 @@
-import type { ReactElement } from 'react';
+import { useEffect, useRef, type ReactElement } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useToastStore } from '../../stores/useToastStore';
 import { cn } from '../../lib/cn';
 
 type ToastType = 'success' | 'error' | 'info';
+
+const DISMISS_MS = 3000;
 
 const toneClasses: Record<ToastType, string> = {
   success: 'border-[var(--color-semantic-success)]/40 bg-[var(--color-surface-overlay)]',
@@ -17,6 +19,75 @@ const iconFor = (type: ToastType): string => {
   return 'i';
 };
 
+interface ToastItemProps {
+  id: string;
+  message: string;
+  type: ToastType;
+  onRemove: (id: string) => void;
+}
+
+function ToastItem({ id, message, type, onRemove }: ToastItemProps): ReactElement {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clear = (): void => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const arm = (): void => {
+    clear();
+    timerRef.current = setTimeout(() => onRemove(id), DISMISS_MS);
+  };
+
+  useEffect(() => {
+    arm();
+    return clear;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  return (
+    <motion.div
+      onMouseEnter={clear}
+      onMouseLeave={arm}
+      initial={{ opacity: 0, x: 80 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 80 }}
+      transition={{ duration: 0.2, ease: [0.2, 0, 0, 1] }}
+      className={cn(
+        'flex items-start gap-3 rounded-[var(--radius-lg)] border px-4 py-3',
+        'backdrop-blur-xl shadow-[var(--shadow-md)]',
+        toneClasses[type],
+      )}
+    >
+      <span
+        className={cn(
+          'inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold',
+          type === 'success' &&
+            'bg-[var(--color-semantic-success)]/20 text-[var(--color-semantic-success)]',
+          type === 'error' &&
+            'bg-[var(--color-semantic-danger)]/20 text-[var(--color-semantic-danger)]',
+          type === 'info' &&
+            'bg-[var(--color-accent-primary)]/20 text-[var(--color-accent-primary)]',
+        )}
+        aria-hidden="true"
+      >
+        {iconFor(type)}
+      </span>
+      <p className="flex-1 text-sm text-[var(--color-content-primary)]">{message}</p>
+      <button
+        type="button"
+        onClick={() => onRemove(id)}
+        aria-label="通知を閉じる"
+        className="text-[var(--color-content-muted)] hover:text-[var(--color-content-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] rounded"
+      >
+        ×
+      </button>
+    </motion.div>
+  );
+}
+
 export function Toast(): ReactElement {
   const toasts = useToastStore((s) => s.toasts);
   const remove = useToastStore((s) => s.removeToast);
@@ -29,42 +100,13 @@ export function Toast(): ReactElement {
     >
       <AnimatePresence initial={false}>
         {toasts.slice(0, 3).map((t) => (
-          <motion.div
+          <ToastItem
             key={t.id}
-            initial={{ opacity: 0, x: 80 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 80 }}
-            transition={{ duration: 0.2, ease: [0.2, 0, 0, 1] }}
-            className={cn(
-              'flex items-start gap-3 rounded-[var(--radius-lg)] border px-4 py-3',
-              'backdrop-blur-xl shadow-[var(--shadow-md)]',
-              toneClasses[t.type],
-            )}
-          >
-            <span
-              className={cn(
-                'inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold',
-                t.type === 'success' &&
-                  'bg-[var(--color-semantic-success)]/20 text-[var(--color-semantic-success)]',
-                t.type === 'error' &&
-                  'bg-[var(--color-semantic-danger)]/20 text-[var(--color-semantic-danger)]',
-                t.type === 'info' &&
-                  'bg-[var(--color-accent-primary)]/20 text-[var(--color-accent-primary)]',
-              )}
-              aria-hidden="true"
-            >
-              {iconFor(t.type)}
-            </span>
-            <p className="flex-1 text-sm text-[var(--color-content-primary)]">{t.message}</p>
-            <button
-              type="button"
-              onClick={() => remove(t.id)}
-              aria-label="通知を閉じる"
-              className="text-[var(--color-content-muted)] hover:text-[var(--color-content-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] rounded"
-            >
-              ×
-            </button>
-          </motion.div>
+            id={t.id}
+            message={t.message}
+            type={t.type}
+            onRemove={remove}
+          />
         ))}
       </AnimatePresence>
     </div>

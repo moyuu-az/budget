@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { useUIStore } from '../stores/useUIStore';
 
-const PARTICLE_COUNT = 60;
 const CONNECTION_DISTANCE = 100;
 const COLORS = [
   new THREE.Color('#3b82f6'),
@@ -14,10 +14,16 @@ const COLORS = [
 
 function ParticleBackground() {
   const containerRef = useRef<HTMLDivElement>(null);
+  const theme = useUIStore((s) => s.theme);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+
+    const isLight = theme === 'light';
+    const PARTICLE_COUNT = isLight ? 30 : 60;
+    const pointsOpacity = isLight ? 0.25 : 0.5;
+    const linesOpacity = isLight ? 0.12 : 0.25;
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 1000);
@@ -78,7 +84,7 @@ function ParticleBackground() {
       map: spriteTexture,
       vertexColors: true,
       transparent: true,
-      opacity: 0.5,
+      opacity: pointsOpacity,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       sizeAttenuation: true,
@@ -98,7 +104,7 @@ function ParticleBackground() {
     const lineMaterial = new THREE.LineBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.25,
+      opacity: linesOpacity,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
@@ -211,7 +217,7 @@ function ParticleBackground() {
         container.removeChild(renderer.domElement);
       }
     };
-  }, []);
+  }, [theme]);
 
   return (
     <div
