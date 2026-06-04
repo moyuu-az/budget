@@ -2,13 +2,14 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import type { UpdateStatus } from '../shared/types';
+import { CHANNELS } from './ipc/channels';
 
 export function initAutoUpdater(mainWindow: BrowserWindow): void {
   // Skip auto-update in development mode
   if (!app.isPackaged) {
-    ipcMain.handle('check-for-updates', async () => {});
-    ipcMain.handle('download-update', async () => {});
-    ipcMain.handle('install-update', () => {});
+    ipcMain.handle(CHANNELS.checkForUpdates, async () => {});
+    ipcMain.handle(CHANNELS.downloadUpdate, async () => {});
+    ipcMain.handle(CHANNELS.installUpdate, () => {});
     return;
   }
 
@@ -48,7 +49,7 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
     sendStatus('error', { message: err.message });
   });
 
-  ipcMain.handle('check-for-updates', async () => {
+  ipcMain.handle(CHANNELS.checkForUpdates, async () => {
     try {
       await autoUpdater.checkForUpdates();
     } catch (err) {
@@ -56,7 +57,7 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
     }
   });
 
-  ipcMain.handle('download-update', async () => {
+  ipcMain.handle(CHANNELS.downloadUpdate, async () => {
     try {
       await autoUpdater.downloadUpdate();
     } catch (err) {
@@ -64,7 +65,7 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
     }
   });
 
-  ipcMain.handle('install-update', () => {
+  ipcMain.handle(CHANNELS.installUpdate, () => {
     autoUpdater.quitAndInstall();
   });
 

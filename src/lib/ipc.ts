@@ -30,7 +30,15 @@ export function normalizeError(error: unknown): NormalizedError {
     return { code: error.code, message: error.message, details: error.details };
   }
 
-  const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  const messageProp = (error as { message?: unknown }).message;
+  const raw =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : typeof messageProp === 'string'
+          ? messageProp
+          : '';
   const decoded = decodeEnvelope(raw);
   if (decoded) {
     return { code: decoded.code, message: decoded.message, details: decoded.details };
