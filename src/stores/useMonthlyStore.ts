@@ -5,13 +5,14 @@ import type {
   MonthlyAmountsMap,
   MonthlyActualsMap,
 } from '../types';
+import { getIpc } from '../lib/ipc';
+import { reportError } from '../app/reportError';
 
 interface MonthlyState {
   monthlyAmountsMap: MonthlyAmountsMap;
   monthlyActualsMap: MonthlyActualsMap;
   actualsWithCategory: ActualWithCategory[];
   loading: boolean;
-  error: string | null;
   fetchActualsRange: (startMonth: string, endMonth: string) => Promise<void>;
   fetchMonthlyAmounts: (yearMonth: string) => Promise<void>;
   fetchMonthlyAmountsRange: (startMonth: string, endMonth: string) => Promise<void>;
@@ -28,12 +29,11 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   monthlyActualsMap: new Map(),
   actualsWithCategory: [],
   loading: false,
-  error: null,
 
   fetchActualsRange: async (startMonth: string, endMonth: string) => {
-    set({ loading: true, error: null });
+    set({ loading: true });
     try {
-      const actuals = await window.electronAPI.getMonthlyActualsRange(startMonth, endMonth);
+      const actuals = await getIpc().getMonthlyActualsRange(startMonth, endMonth);
       const newMap = new Map(get().monthlyActualsMap);
       for (const [key] of newMap) {
         if (key >= startMonth && key <= endMonth) {
@@ -48,14 +48,15 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
       }
       set({ actualsWithCategory: actuals, monthlyActualsMap: newMap, loading: false });
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      set({ loading: false });
+      reportError(e);
     }
   },
 
   fetchMonthlyAmounts: async (yearMonth: string) => {
-    set({ loading: true, error: null });
+    set({ loading: true });
     try {
-      const amounts = await window.electronAPI.getMonthlyAmounts(yearMonth);
+      const amounts = await getIpc().getMonthlyAmounts(yearMonth);
       const newMap = new Map(get().monthlyAmountsMap);
       const monthMap = new Map<number, number>();
       for (const a of amounts) {
@@ -64,14 +65,15 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
       newMap.set(yearMonth, monthMap);
       set({ monthlyAmountsMap: newMap, loading: false });
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      set({ loading: false });
+      reportError(e);
     }
   },
 
   fetchMonthlyAmountsRange: async (startMonth: string, endMonth: string) => {
-    set({ loading: true, error: null });
+    set({ loading: true });
     try {
-      const amounts = await window.electronAPI.getMonthlyAmountsRange(startMonth, endMonth);
+      const amounts = await getIpc().getMonthlyAmountsRange(startMonth, endMonth);
       const newMap = new Map(get().monthlyAmountsMap);
 
       // Clear existing entries in the range
@@ -91,7 +93,8 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
 
       set({ monthlyAmountsMap: newMap, loading: false });
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      set({ loading: false });
+      reportError(e);
     }
   },
 
@@ -108,9 +111,10 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     set({ monthlyAmountsMap: newMap });
 
     try {
-      await window.electronAPI.setMonthlyAmount(templateId, yearMonth, amount);
+      await getIpc().setMonthlyAmount(templateId, yearMonth, amount);
     } catch (e) {
-      set({ monthlyAmountsMap: prevMap, error: (e as Error).message });
+      set({ monthlyAmountsMap: prevMap });
+      reportError(e);
     }
   },
 
@@ -127,18 +131,19 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     }
 
     try {
-      await window.electronAPI.deleteMonthlyAmount(templateId, yearMonth);
+      await getIpc().deleteMonthlyAmount(templateId, yearMonth);
     } catch (e) {
-      set({ monthlyAmountsMap: prevMap, error: (e as Error).message });
+      set({ monthlyAmountsMap: prevMap });
+      reportError(e);
     }
   },
 
   copyMonthlyAmounts: async (fromMonth: string, toMonth: string) => {
-    set({ loading: true, error: null });
+    set({ loading: true });
     try {
-      await window.electronAPI.copyMonthlyAmounts(fromMonth, toMonth);
+      await getIpc().copyMonthlyAmounts(fromMonth, toMonth);
       // Re-fetch the target month to get the copied data
-      const amounts = await window.electronAPI.getMonthlyAmounts(toMonth);
+      const amounts = await getIpc().getMonthlyAmounts(toMonth);
       const newMap = new Map(get().monthlyAmountsMap);
       const monthMap = new Map<number, number>();
       for (const a of amounts) {
@@ -147,14 +152,15 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
       newMap.set(toMonth, monthMap);
       set({ monthlyAmountsMap: newMap, loading: false });
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      set({ loading: false });
+      reportError(e);
     }
   },
 
   fetchMonthlyActuals: async (yearMonth: string) => {
-    set({ loading: true, error: null });
+    set({ loading: true });
     try {
-      const actuals = await window.electronAPI.getMonthlyActuals(yearMonth);
+      const actuals = await getIpc().getMonthlyActuals(yearMonth);
       const newMap = new Map(get().monthlyActualsMap);
       const monthMap = new Map<number, number>();
       for (const a of actuals) {
@@ -163,7 +169,8 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
       newMap.set(yearMonth, monthMap);
       set({ monthlyActualsMap: newMap, loading: false });
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      set({ loading: false });
+      reportError(e);
     }
   },
 
@@ -180,9 +187,10 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     set({ monthlyActualsMap: newMap });
 
     try {
-      await window.electronAPI.setMonthlyActual(templateId, yearMonth, amount);
+      await getIpc().setMonthlyActual(templateId, yearMonth, amount);
     } catch (e) {
-      set({ monthlyActualsMap: prevMap, error: (e as Error).message });
+      set({ monthlyActualsMap: prevMap });
+      reportError(e);
     }
   },
 
@@ -199,9 +207,10 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     }
 
     try {
-      await window.electronAPI.deleteMonthlyActual(templateId, yearMonth);
+      await getIpc().deleteMonthlyActual(templateId, yearMonth);
     } catch (e) {
-      set({ monthlyActualsMap: prevMap, error: (e as Error).message });
+      set({ monthlyActualsMap: prevMap });
+      reportError(e);
     }
   },
 }));

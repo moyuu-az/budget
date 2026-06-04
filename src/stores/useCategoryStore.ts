@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import type { Category, CategoryInput } from '../types';
+import { getIpc } from '../lib/ipc';
+import { reportError } from '../app/reportError';
 
 interface CategoryState {
   categories: Category[];
   loading: boolean;
-  error: string | null;
   fetchCategories: () => Promise<void>;
   addCategory: (input: CategoryInput) => Promise<void>;
   updateCategory: (id: number, input: Partial<CategoryInput>) => Promise<void>;
@@ -14,24 +15,24 @@ interface CategoryState {
 export const useCategoryStore = create<CategoryState>((set, get) => ({
   categories: [],
   loading: false,
-  error: null,
 
   fetchCategories: async () => {
-    set({ loading: true, error: null });
+    set({ loading: true });
     try {
-      const categories = await window.electronAPI.getCategories();
+      const categories = await getIpc().getCategories();
       set({ categories, loading: false });
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      set({ loading: false });
+      reportError(e);
     }
   },
 
   addCategory: async (input: CategoryInput) => {
     try {
-      const category = await window.electronAPI.addCategory(input);
+      const category = await getIpc().addCategory(input);
       set({ categories: [...get().categories, category] });
     } catch (e) {
-      set({ error: (e as Error).message });
+      reportError(e);
     }
   },
 
@@ -39,14 +40,13 @@ export const useCategoryStore = create<CategoryState>((set, get) => ({
     const prev = get().categories;
     // optimistic update
     set({
-      categories: prev.map((c) =>
-        c.id === id ? { ...c, ...input } : c
-      ),
+      categories: prev.map((c) => (c.id === id ? { ...c, ...input } : c)),
     });
     try {
-      await window.electronAPI.updateCategory(id, input);
+      await getIpc().updateCategory(id, input);
     } catch (e) {
-      set({ categories: prev, error: (e as Error).message });
+      set({ categories: prev });
+      reportError(e);
     }
   },
 
@@ -55,9 +55,10 @@ export const useCategoryStore = create<CategoryState>((set, get) => ({
     // optimistic removal
     set({ categories: prev.filter((c) => c.id !== id) });
     try {
-      await window.electronAPI.deleteCategory(id);
+      await getIpc().deleteCategory(id);
     } catch (e) {
-      set({ categories: prev, error: (e as Error).message });
+      set({ categories: prev });
+      reportError(e);
     }
   },
 }));

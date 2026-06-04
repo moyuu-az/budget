@@ -1,9 +1,10 @@
 import { create } from 'zustand';
+import { getIpc } from '../lib/ipc';
+import { reportError } from '../app/reportError';
 
 interface BalanceState {
   balance: number;
   loading: boolean;
-  error: string | null;
   fetchBalance: () => Promise<void>;
   setBalance: (balance: number) => Promise<void>;
 }
@@ -11,15 +12,15 @@ interface BalanceState {
 export const useBalanceStore = create<BalanceState>((set, get) => ({
   balance: 0,
   loading: false,
-  error: null,
 
   fetchBalance: async () => {
-    set({ loading: true, error: null });
+    set({ loading: true });
     try {
-      const balance = await window.electronAPI.getBalance();
+      const balance = await getIpc().getBalance();
       set({ balance, loading: false });
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      set({ loading: false });
+      reportError(e);
     }
   },
 
@@ -27,9 +28,10 @@ export const useBalanceStore = create<BalanceState>((set, get) => ({
     const prev = get().balance;
     set({ balance }); // optimistic
     try {
-      await window.electronAPI.setBalance(balance);
+      await getIpc().setBalance(balance);
     } catch (e) {
-      set({ balance: prev, error: (e as Error).message });
+      set({ balance: prev });
+      reportError(e);
     }
   },
 }));
