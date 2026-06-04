@@ -26,3 +26,24 @@ export function isErrorEnvelope(value: unknown): value is ErrorEnvelope {
     typeof (value as { message?: unknown }).message === 'string'
   );
 }
+
+// Electron IPC strips thrown Error subclass identity, and whether it preserves a thrown
+// plain object's own properties is version-dependent. The ONE thing it always preserves is
+// Error.message — so we encode the envelope as tagged JSON inside the message. The renderer
+// decodes it back, recovering the precise error code regardless of Electron's serialization.
+export const ENVELOPE_TAG = '@@APP_ERROR@@';
+
+export function encodeEnvelope(envelope: ErrorEnvelope): string {
+  return ENVELOPE_TAG + JSON.stringify(envelope);
+}
+
+export function decodeEnvelope(message: string): ErrorEnvelope | null {
+  const index = message.indexOf(ENVELOPE_TAG);
+  if (index < 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(message.slice(index + ENVELOPE_TAG.length));
+    return isErrorEnvelope(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}

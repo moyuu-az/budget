@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
+import type { UpdateStatus } from '../shared/types';
 
 export function initAutoUpdater(mainWindow: BrowserWindow): void {
   // Skip auto-update in development mode
@@ -17,8 +18,9 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
 
-  function sendStatus(status: string, data?: Record<string, unknown>) {
-    mainWindow.webContents.send('update-status', { status, ...data });
+  function sendStatus(status: UpdateStatus['status'], data?: Omit<UpdateStatus, 'status'>): void {
+    const payload: UpdateStatus = { status, ...data };
+    mainWindow.webContents.send('update-status', payload);
   }
 
   autoUpdater.on('checking-for-update', () => {
