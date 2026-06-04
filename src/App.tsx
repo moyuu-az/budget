@@ -13,6 +13,7 @@ import AnalyticsView from './components/analytics/AnalyticsView';
 import SettingsView from './components/settings/SettingsView';
 import ParticleBackground from './components/ParticleBackground';
 import { Toast } from './components/ui/Toast';
+import { useThemeEffect } from './hooks/useTheme';
 
 const pageTransition = {
   initial: { opacity: 0, y: 20 },
@@ -22,6 +23,7 @@ const pageTransition = {
 };
 
 function App() {
+  useThemeEffect();
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const fetchBalance = useBalanceStore((s) => s.fetchBalance);
   const fetchCategories = useCategoryStore((s) => s.fetchCategories);
