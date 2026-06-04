@@ -13,6 +13,7 @@ import {
 } from 'recharts';
 import type { BalanceSnapshot, ForecastPoint } from '../../types';
 import { formatYAxisTick, formatCurrency } from '../../utils/forecast';
+import { EmptyState } from '../ui/EmptyState';
 
 interface TimelineChartProps {
   snapshots: BalanceSnapshot[];
@@ -124,9 +125,10 @@ function TimelineChart({ snapshots, forecast }: TimelineChartProps) {
         transition={{ duration: 0.4 }}
       >
         <h2 className="text-lg font-semibold text-white mb-4">残高タイムライン</h2>
-        <div className="flex items-center justify-center h-48 text-slate-400">
-          データがありません。履歴からスナップショットを追加してください。
-        </div>
+        <EmptyState
+          title="データがありません"
+          description="履歴からスナップショットを追加してください。"
+        />
       </motion.div>
     );
   }
@@ -175,9 +177,9 @@ function TimelineChart({ snapshots, forecast }: TimelineChartProps) {
           />
           <Tooltip
             contentStyle={tooltipStyle}
-            labelFormatter={formatTooltipDate}
-            formatter={(value: number, name: string) => [
-              formatCurrency(value),
+            labelFormatter={(label) => formatTooltipDate(String(label))}
+            formatter={(value, name) => [
+              formatCurrency(Number(value)),
               name === 'pastBalance' ? '実績' : '予測',
             ]}
           />

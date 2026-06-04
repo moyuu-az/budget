@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import type { BalanceSnapshot } from '../types';
+import { getIpc } from '../lib/ipc';
+import { reportError } from '../app/reportError';
 
 interface SnapshotState {
   snapshots: BalanceSnapshot[];
   loading: boolean;
-  error: string | null;
   fetchSnapshots: () => Promise<void>;
   addSnapshot: (date: string, balance: number) => Promise<void>;
   deleteSnapshot: (id: number) => Promise<void>;
@@ -13,24 +14,24 @@ interface SnapshotState {
 export const useSnapshotStore = create<SnapshotState>((set, get) => ({
   snapshots: [],
   loading: false,
-  error: null,
 
   fetchSnapshots: async () => {
-    set({ loading: true, error: null });
+    set({ loading: true });
     try {
-      const snapshots = await window.electronAPI.getSnapshots();
+      const snapshots = await getIpc().getSnapshots();
       set({ snapshots, loading: false });
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      set({ loading: false });
+      reportError(e);
     }
   },
 
   addSnapshot: async (date: string, balance: number) => {
     try {
-      const snapshot = await window.electronAPI.addSnapshot(date, balance);
+      const snapshot = await getIpc().addSnapshot(date, balance);
       set({ snapshots: [...get().snapshots, snapshot] });
     } catch (e) {
-      set({ error: (e as Error).message });
+      reportError(e);
     }
   },
 
@@ -39,9 +40,10 @@ export const useSnapshotStore = create<SnapshotState>((set, get) => ({
     // optimistic removal
     set({ snapshots: prev.filter((s) => s.id !== id) });
     try {
-      await window.electronAPI.deleteSnapshot(id);
+      await getIpc().deleteSnapshot(id);
     } catch (e) {
-      set({ snapshots: prev, error: (e as Error).message });
+      set({ snapshots: prev });
+      reportError(e);
     }
   },
 }));

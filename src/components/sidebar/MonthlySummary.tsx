@@ -33,26 +33,26 @@ function MonthlySummary() {
 
   return (
     <div>
-      <p className="text-xs text-slate-500 mb-2">今月のサマリー</p>
+      <p className="text-xs text-[var(--color-content-muted)] mb-2">今月のサマリー</p>
       <div className="space-y-1.5">
         <div className="flex justify-between items-center">
-          <span className="text-xs text-slate-400">収入</span>
-          <span className="text-sm text-green-400 font-medium">
+          <span className="text-xs text-[var(--color-content-muted)]">収入</span>
+          <span className="text-sm text-[var(--color-semantic-success)] font-medium">
             +¥{formatWithCommas(totalIncome)}
           </span>
         </div>
         <div className="flex justify-between items-center">
-          <span className="text-xs text-slate-400">支出</span>
-          <span className="text-sm text-red-400 font-medium">
+          <span className="text-xs text-[var(--color-content-muted)]">支出</span>
+          <span className="text-sm text-[var(--color-semantic-danger)] font-medium">
             -¥{formatWithCommas(totalExpense)}
           </span>
         </div>
-        <div className="border-t border-slate-700/50 pt-1.5">
+        <div className="border-t border-[var(--color-border-subtle)] pt-1.5">
           <div className="flex justify-between items-center">
-            <span className="text-xs text-slate-400">差引</span>
+            <span className="text-xs text-[var(--color-content-muted)]">差引</span>
             <span
               className={`text-sm font-bold ${
-                net >= 0 ? 'text-green-400' : 'text-red-400'
+                net >= 0 ? 'text-[var(--color-semantic-success)]' : 'text-[var(--color-semantic-danger)]'
               }`}
             >
               {net >= 0 ? '+' : ''}¥{formatWithCommas(Math.abs(net))}

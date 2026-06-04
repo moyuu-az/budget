@@ -57,11 +57,11 @@ function BalanceInput() {
 
   return (
     <div>
-      <label className="block text-xs text-slate-400 mb-1.5">
+      <label className="block text-xs text-[var(--color-content-muted)] mb-1.5">
         現在の残高
       </label>
       <div className="flex items-center gap-1">
-        <span className="text-xl text-slate-400 font-light">¥</span>
+        <span className="text-xl text-[var(--color-content-muted)] font-light">¥</span>
         <input
           ref={inputRef}
           type="text"
@@ -71,7 +71,7 @@ function BalanceInput() {
           onFocus={handleFocus}
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
-          className="w-full text-2xl font-bold text-white bg-slate-800/50 border border-slate-600 rounded-lg px-3 py-2 outline-none focus:border-blue-400/60 focus:ring-1 focus:ring-blue-400/30 transition-colors"
+          className="w-full text-2xl font-bold text-[var(--color-content-primary)] bg-[var(--color-surface-raised)] border border-[var(--color-border-strong)] rounded-lg px-3 py-2 outline-none focus:border-[var(--color-border-focus)] focus:ring-1 focus:ring-[var(--color-border-focus)]/30 transition-colors"
         />
       </div>
     </div>

@@ -1,66 +1,15 @@
-// --- Category ---
-export interface Category {
-  id: number;
-  name: string;
-  type: 'income' | 'expense';
-  color: string | null;
-  sortOrder: number;
-}
+// Re-export the shared cross-process contract (single source of truth in shared/).
+// Renderer-only types that never cross IPC stay declared below.
+export * from '../../shared/types';
+import type { ElectronAPI } from '../../shared/types';
 
-export interface CategoryInput {
-  name: string;
-  type: 'income' | 'expense';
-  color?: string;
-  sortOrder?: number;
-}
-
-// --- EntryTemplate ---
-export interface EntryTemplate {
-  id: number;
-  name: string;
-  dayOfMonth: number;
-  type: 'income' | 'expense';
-  enabled: boolean;
-  sortOrder: number;
-  categoryId: number | null;
-  defaultAmount: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface EntryTemplateInput {
-  name: string;
-  dayOfMonth: number;
-  type: 'income' | 'expense';
-  categoryId?: number | null;
-  defaultAmount?: number;
-}
-
-// --- MonthlyAmount ---
-export interface MonthlyAmount {
-  id: number;
-  templateId: number;
-  yearMonth: string;
-  amount: number;
-  createdAt: string;
-}
-
-// --- MonthlyActual ---
-export interface MonthlyActual {
-  id: number;
-  templateId: number;
-  yearMonth: string;
-  actualAmount: number;
-  createdAt: string;
-}
-
-// --- Maps ---
+// --- Maps (renderer-built, never cross IPC) ---
 // yearMonth -> templateId -> amount
 export type MonthlyAmountsMap = Map<string, Map<number, number>>;
 // yearMonth -> templateId -> actualAmount
 export type MonthlyActualsMap = Map<string, Map<number, number>>;
 
-// --- Forecast ---
+// --- Forecast (renderer-computed) ---
 export interface ForecastEventDetail {
   name: string;
   amount: number;
@@ -77,66 +26,10 @@ export interface ForecastPoint {
   isToday?: boolean;
 }
 
-// --- BalanceSnapshot ---
-export interface BalanceSnapshot {
-  id: number;
-  date: string;
-  balance: number;
-  createdAt: string;
-}
-
-// --- UpdateStatus ---
-export interface UpdateStatus {
-  status: 'checking' | 'available' | 'up-to-date' | 'downloading' | 'downloaded' | 'error';
-  version?: string;
-  percent?: number;
-  message?: string;
-}
-
 // --- View ---
 export type ViewType = 'dashboard' | 'entries' | 'history' | 'settings' | 'analytics';
 
-// --- ElectronAPI ---
-export interface ElectronAPI {
-  getBalance(): Promise<number>;
-  setBalance(balance: number): Promise<void>;
-
-  getCategories(): Promise<Category[]>;
-  addCategory(category: CategoryInput): Promise<Category>;
-  updateCategory(id: number, category: Partial<CategoryInput>): Promise<void>;
-  deleteCategory(id: number): Promise<void>;
-
-  getTemplates(): Promise<EntryTemplate[]>;
-  addTemplate(template: EntryTemplateInput): Promise<EntryTemplate>;
-  updateTemplate(id: number, template: Partial<EntryTemplateInput>): Promise<void>;
-  toggleTemplate(id: number, enabled: boolean): Promise<void>;
-  deleteTemplate(id: number): Promise<void>;
-
-  getMonthlyAmounts(yearMonth: string): Promise<MonthlyAmount[]>;
-  getMonthlyAmountsRange(startMonth: string, endMonth: string): Promise<MonthlyAmount[]>;
-  setMonthlyAmount(templateId: number, yearMonth: string, amount: number): Promise<void>;
-  deleteMonthlyAmount(templateId: number, yearMonth: string): Promise<void>;
-  copyMonthlyAmounts(fromMonth: string, toMonth: string): Promise<void>;
-
-  getMonthlyActuals(yearMonth: string): Promise<MonthlyActual[]>;
-  setMonthlyActual(templateId: number, yearMonth: string, actualAmount: number): Promise<void>;
-  deleteMonthlyActual(templateId: number, yearMonth: string): Promise<void>;
-
-  getMonthlyActualsRange(startMonth: string, endMonth: string): Promise<ActualWithCategory[]>;
-  getSnapshotsRange(startDate: string, endDate: string): Promise<BalanceSnapshot[]>;
-
-  getSnapshots(): Promise<BalanceSnapshot[]>;
-  addSnapshot(date: string, balance: number): Promise<BalanceSnapshot>;
-  deleteSnapshot(id: number): Promise<void>;
-
-  getAppVersion(): Promise<string>;
-  checkForUpdates(): Promise<void>;
-  downloadUpdate(): Promise<void>;
-  installUpdate(): Promise<void>;
-  onUpdateStatus(callback: (status: UpdateStatus) => void): () => void;
-}
-
-// --- Analytics ---
+// --- Analytics (renderer-computed, never cross IPC) ---
 export type ForecastPeriod = '60d' | '3m' | '6m' | '1y';
 
 export interface MonthSummary {
@@ -176,17 +69,6 @@ export interface ComparisonRow {
   prevMonthPercent: number | null;
   prevYearDiff: number | null;
   prevYearPercent: number | null;
-}
-
-export interface ActualWithCategory {
-  templateId: number;
-  yearMonth: string;
-  actualAmount: number;
-  templateName: string;
-  templateType: 'income' | 'expense';
-  categoryId: number | null;
-  categoryName: string | null;
-  categoryColor: string | null;
 }
 
 declare global {

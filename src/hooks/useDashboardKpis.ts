@@ -1,0 +1,98 @@
+import { useMemo } from 'react';
+import { useBalanceStore } from '../stores/useBalanceStore';
+import { useTemplateStore } from '../stores/useTemplateStore';
+import { useMonthlyStore } from '../stores/useMonthlyStore';
+import { generateForecast, toYearMonth } from '../utils/forecast';
+import type { ForecastPoint } from '../types';
+
+export interface NextLargeExpense {
+  name: string;
+  amount: number;
+  date: string;
+  daysUntil: number;
+}
+
+export interface DashboardKpis {
+  /** Net income - expense for the current calendar month (forecast events). */
+  thisMonthNet: number;
+  /** Lowest projected balance within the next 90 days (excludes today). */
+  minBalance90d: number;
+  /** Date string (YYYY-MM-DD) of the 90-day minimum, or null when unavailable. */
+  minBalance90dDate: string | null;
+  /** Largest single expense event occurring within the next 60 days, or null. */
+  nextLargeExpense: NextLargeExpense | null;
+  /** Average projected balance change per day over the 90-day window. */
+  forecastSlopePerDay: number;
+}
+
+const KPI_HORIZON_DAYS = 90;
+const LARGE_EXPENSE_HORIZON_DAYS = 60;
+
+function daysBetween(fromMidnight: Date, dateStr: string): number {
+  const target = new Date(dateStr);
+  target.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - fromMidnight.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function computeKpis(points: ForecastPoint[]): DashboardKpis {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const currentMonth = toYearMonth(today);
+
+  let thisMonthNet = 0;
+  let minBalance90d = Infinity;
+  let minBalance90dDate: string | null = null;
+  let nextLargeExpense: NextLargeExpense | null = null;
+
+  for (const point of points) {
+    if (point.date.startsWith(currentMonth)) {
+      for (const detail of point.eventDetails) {
+        thisMonthNet += detail.type === 'income' ? detail.amount : -detail.amount;
+      }
+    }
+
+    if (!point.isToday && point.balance < minBalance90d) {
+      minBalance90d = point.balance;
+      minBalance90dDate = point.date;
+    }
+
+    if (point.isToday) continue;
+    const daysUntil = daysBetween(today, point.date);
+    if (daysUntil > LARGE_EXPENSE_HORIZON_DAYS) continue;
+    for (const detail of point.eventDetails) {
+      if (detail.type !== 'expense') continue;
+      if (!nextLargeExpense || detail.amount > nextLargeExpense.amount) {
+        nextLargeExpense = {
+          name: detail.name,
+          amount: detail.amount,
+          date: point.date,
+          daysUntil,
+        };
+      }
+    }
+  }
+
+  const startBalance = points[0]?.balance ?? 0;
+  const endBalance = points[points.length - 1]?.balance ?? startBalance;
+  const span = Math.max(points.length - 1, 1);
+  const forecastSlopePerDay = (endBalance - startBalance) / span;
+
+  return {
+    thisMonthNet,
+    minBalance90d: minBalance90d === Infinity ? startBalance : minBalance90d,
+    minBalance90dDate,
+    nextLargeExpense,
+    forecastSlopePerDay,
+  };
+}
+
+export function useDashboardKpis(): DashboardKpis {
+  const balance = useBalanceStore((s) => s.balance);
+  const templates = useTemplateStore((s) => s.templates);
+  const monthlyAmountsMap = useMonthlyStore((s) => s.monthlyAmountsMap);
+
+  return useMemo(() => {
+    const points = generateForecast(balance, templates, monthlyAmountsMap, KPI_HORIZON_DAYS);
+    return computeKpis(points);
+  }, [balance, templates, monthlyAmountsMap]);
+}

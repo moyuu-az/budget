@@ -1,16 +1,33 @@
-import { memo } from 'react';
+import { memo, useMemo, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import type { ComparisonRow } from '../../types';
 import { formatCurrency } from '../../utils/forecast';
+import { EmptyState } from '../ui/EmptyState';
 
 interface ComparisonTableProps {
   data: ComparisonRow[];
   yearMonth: string;
 }
 
+type SortKey = 'name' | 'current' | 'prevMonth' | 'prevYear';
+type SortDirection = 'asc' | 'desc';
+
 function formatMonth(ym: string): string {
   const [y, m] = ym.split('-');
   return `${y}年${parseInt(m)}月`;
+}
+
+function sortValue(row: ComparisonRow, key: SortKey): string | number | null {
+  switch (key) {
+    case 'name':
+      return row.name;
+    case 'current':
+      return row.currentAmount;
+    case 'prevMonth':
+      return row.prevMonthDiff;
+    case 'prevYear':
+      return row.prevYearDiff;
+  }
 }
 
 function DiffCell({ diff, percent }: { diff: number | null; percent: number | null }) {
@@ -45,6 +62,44 @@ function DiffCell({ diff, percent }: { diff: number | null; percent: number | nu
 }
 
 function ComparisonTable({ data, yearMonth }: ComparisonTableProps) {
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<SortDirection>('asc');
+
+  const toggleSort = useCallback((key: SortKey) => {
+    setSortKey((prevKey) => {
+      if (prevKey === key) {
+        setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+        return key;
+      }
+      setSortDir(key === 'name' ? 'asc' : 'desc');
+      return key;
+    });
+  }, []);
+
+  const sortedData = useMemo(() => {
+    if (!sortKey) return data;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...data].sort((a, b) => {
+      const av = sortValue(a, sortKey);
+      const bv = sortValue(b, sortKey);
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === 'string' && typeof bv === 'string') {
+        return av.localeCompare(bv, 'ja') * dir;
+      }
+      return (Number(av) - Number(bv)) * dir;
+    });
+  }, [data, sortKey, sortDir]);
+
+  const ariaSortFor = useCallback(
+    (key: SortKey): 'ascending' | 'descending' | 'none' => {
+      if (sortKey !== key) return 'none';
+      return sortDir === 'asc' ? 'ascending' : 'descending';
+    },
+    [sortKey, sortDir],
+  );
+
   if (data.length === 0) {
     return (
       <motion.div
@@ -56,12 +111,13 @@ function ComparisonTable({ data, yearMonth }: ComparisonTableProps) {
         <h2 className="text-lg font-semibold text-white mb-4">
           月次比較 - {formatMonth(yearMonth)}
         </h2>
-        <div className="flex items-center justify-center h-48 text-slate-400">
-          データがありません
-        </div>
+        <EmptyState title="データがありません" />
       </motion.div>
     );
   }
+
+  const sortIndicator = (key: SortKey): string =>
+    sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 
   return (
     <motion.div
@@ -77,14 +133,58 @@ function ComparisonTable({ data, yearMonth }: ComparisonTableProps) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-700/50">
-              <th className="text-left px-3 py-2 text-slate-400 font-medium">カテゴリ</th>
-              <th className="text-right px-3 py-2 text-slate-400 font-medium">当月</th>
-              <th className="text-right px-3 py-2 text-slate-400 font-medium">前月比</th>
-              <th className="text-right px-3 py-2 text-slate-400 font-medium">前年比</th>
+              <th
+                aria-sort={ariaSortFor('name')}
+                className="text-left px-3 py-2 text-slate-400 font-medium"
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleSort('name')}
+                  className="font-medium hover:text-slate-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] rounded-[var(--radius-sm)]"
+                >
+                  カテゴリ{sortIndicator('name')}
+                </button>
+              </th>
+              <th
+                aria-sort={ariaSortFor('current')}
+                className="text-right px-3 py-2 text-slate-400 font-medium"
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleSort('current')}
+                  className="font-medium hover:text-slate-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] rounded-[var(--radius-sm)]"
+                >
+                  当月{sortIndicator('current')}
+                </button>
+              </th>
+              <th
+                aria-sort={ariaSortFor('prevMonth')}
+                className="text-right px-3 py-2 text-slate-400 font-medium"
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleSort('prevMonth')}
+                  className="font-medium hover:text-slate-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] rounded-[var(--radius-sm)]"
+                >
+                  前月比{sortIndicator('prevMonth')}
+                </button>
+              </th>
+              <th
+                aria-sort={ariaSortFor('prevYear')}
+                className="text-right px-3 py-2 text-slate-400 font-medium"
+              >
+                <button
+                  type="button"
+                  onClick={() => toggleSort('prevYear')}
+                  className="font-medium hover:text-slate-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] rounded-[var(--radius-sm)]"
+                >
+                  前年比{sortIndicator('prevYear')}
+                </button>
+              </th>
             </tr>
           </thead>
           <tbody>
-            {data.map((row) => (
+            {sortedData.map((row) => (
               <tr key={row.name} className="border-b border-slate-800/30 hover:bg-slate-800/20">
                 <td className="px-3 py-2">
                   <div className="flex items-center gap-2">

@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import type { EntryTemplate, EntryTemplateInput } from '../types';
+import { getIpc } from '../lib/ipc';
+import { reportError } from '../app/reportError';
 
 interface TemplateState {
   templates: EntryTemplate[];
   loading: boolean;
-  error: string | null;
   fetchTemplates: () => Promise<void>;
   addTemplate: (input: EntryTemplateInput) => Promise<void>;
   updateTemplate: (id: number, input: Partial<EntryTemplateInput>) => Promise<void>;
@@ -15,24 +16,24 @@ interface TemplateState {
 export const useTemplateStore = create<TemplateState>((set, get) => ({
   templates: [],
   loading: false,
-  error: null,
 
   fetchTemplates: async () => {
-    set({ loading: true, error: null });
+    set({ loading: true });
     try {
-      const templates = await window.electronAPI.getTemplates();
+      const templates = await getIpc().getTemplates();
       set({ templates, loading: false });
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      set({ loading: false });
+      reportError(e);
     }
   },
 
   addTemplate: async (input: EntryTemplateInput) => {
     try {
-      const template = await window.electronAPI.addTemplate(input);
+      const template = await getIpc().addTemplate(input);
       set({ templates: [...get().templates, template] });
     } catch (e) {
-      set({ error: (e as Error).message });
+      reportError(e);
     }
   },
 
@@ -45,9 +46,10 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
       ),
     });
     try {
-      await window.electronAPI.updateTemplate(id, input);
+      await getIpc().updateTemplate(id, input);
     } catch (e) {
-      set({ templates: prev, error: (e as Error).message });
+      set({ templates: prev });
+      reportError(e);
     }
   },
 
@@ -56,9 +58,10 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
     // optimistic removal
     set({ templates: prev.filter((t) => t.id !== id) });
     try {
-      await window.electronAPI.deleteTemplate(id);
+      await getIpc().deleteTemplate(id);
     } catch (e) {
-      set({ templates: prev, error: (e as Error).message });
+      set({ templates: prev });
+      reportError(e);
     }
   },
 
@@ -71,9 +74,10 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
       ),
     });
     try {
-      await window.electronAPI.toggleTemplate(id, enabled);
+      await getIpc().toggleTemplate(id, enabled);
     } catch (e) {
-      set({ templates: prev, error: (e as Error).message });
+      set({ templates: prev });
+      reportError(e);
     }
   },
 }));

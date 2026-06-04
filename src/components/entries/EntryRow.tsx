@@ -28,6 +28,9 @@ function EntryRow({ template, yearMonth }: Props) {
 
   const plannedInputRef = useRef<HTMLInputElement>(null);
   const actualInputRef = useRef<HTMLInputElement>(null);
+  // Original value captured when edit starts, to detect changes on blur.
+  const plannedOriginalRef = useRef('');
+  const actualOriginalRef = useRef('');
 
   // Resolve current planned amount
   const resolvedPlanned = resolveAmount(template.id, yearMonth, monthlyAmountsMap, templates);
@@ -62,7 +65,9 @@ function EntryRow({ template, yearMonth }: Props) {
   }, [template.id, template.enabled, toggleTemplate, addToast]);
 
   const startEditPlanned = () => {
-    setPlannedStr(formatWithCommas(resolvedPlanned));
+    const initial = formatWithCommas(resolvedPlanned);
+    plannedOriginalRef.current = initial;
+    setPlannedStr(initial);
     setEditingPlanned(true);
   };
 
@@ -80,8 +85,18 @@ function EntryRow({ template, yearMonth }: Props) {
     setEditingPlanned(false);
   };
 
+  const blurPlanned = () => {
+    if (plannedStr !== plannedOriginalRef.current) {
+      void savePlanned();
+    } else {
+      setEditingPlanned(false);
+    }
+  };
+
   const startEditActual = () => {
-    setActualStr(actualAmount !== null ? formatWithCommas(actualAmount) : '');
+    const initial = actualAmount !== null ? formatWithCommas(actualAmount) : '';
+    actualOriginalRef.current = initial;
+    setActualStr(initial);
     setEditingActual(true);
   };
 
@@ -99,6 +114,14 @@ function EntryRow({ template, yearMonth }: Props) {
     setEditingActual(false);
   };
 
+  const blurActual = () => {
+    if (actualStr !== actualOriginalRef.current) {
+      void saveActual();
+    } else {
+      setEditingActual(false);
+    }
+  };
+
   const handlePlannedKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') savePlanned();
     if (e.key === 'Escape') cancelPlanned();
@@ -107,6 +130,16 @@ function EntryRow({ template, yearMonth }: Props) {
   const handleActualKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') saveActual();
     if (e.key === 'Escape') cancelActual();
+  };
+
+  const handleTriggerKeyDown = (
+    e: React.KeyboardEvent<HTMLButtonElement>,
+    start: () => void,
+  ) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      start();
+    }
   };
 
   return (
@@ -148,12 +181,16 @@ function EntryRow({ template, yearMonth }: Props) {
               value={plannedStr}
               onChange={(e) => setPlannedStr(handleCurrencyInput(e.target.value))}
               onKeyDown={handlePlannedKeyDown}
-              onBlur={savePlanned}
+              onBlur={blurPlanned}
+              aria-label="予定金額を編集"
               className="w-full rounded bg-slate-700/70 border border-blue-500/50 px-2 py-0.5 text-sm text-white text-right tabular-nums focus:outline-none"
             />
           ) : (
             <button
               onClick={startEditPlanned}
+              onKeyDown={(e) => handleTriggerKeyDown(e, startEditPlanned)}
+              role="button"
+              tabIndex={0}
               className="text-right w-full group"
               title={hasMonthlyOverride ? '月別設定' : 'デフォルト金額'}
             >
@@ -183,12 +220,16 @@ function EntryRow({ template, yearMonth }: Props) {
               value={actualStr}
               onChange={(e) => setActualStr(handleCurrencyInput(e.target.value))}
               onKeyDown={handleActualKeyDown}
-              onBlur={saveActual}
+              onBlur={blurActual}
+              aria-label="実績金額を編集"
               className="w-full rounded bg-slate-700/70 border border-emerald-500/50 px-2 py-0.5 text-sm text-white text-right tabular-nums focus:outline-none"
             />
           ) : (
             <button
               onClick={startEditActual}
+              onKeyDown={(e) => handleTriggerKeyDown(e, startEditActual)}
+              role="button"
+              tabIndex={0}
               className="text-right w-full group"
               title="実績金額"
             >

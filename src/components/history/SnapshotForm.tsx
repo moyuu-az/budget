@@ -10,7 +10,11 @@ const inputStyle = {
   border: '1px solid var(--border-subtle)',
 };
 
-function SnapshotForm() {
+interface Props {
+  onSuccess?: () => void;
+}
+
+function SnapshotForm({ onSuccess }: Props) {
   const { addSnapshot } = useSnapshotStore();
   const { balance: currentBalance, setBalance } = useBalanceStore();
   const { addToast } = useToastStore();
@@ -28,6 +32,7 @@ function SnapshotForm() {
     try {
       await addSnapshot(today, currentBalance);
       addToast('現在の残高を記録しました', 'success');
+      onSuccess?.();
     } catch {
       addToast('記録に失敗しました', 'error');
     }
@@ -45,6 +50,7 @@ function SnapshotForm() {
       await addSnapshot(date, parsed);
       setBalanceInput('');
       addToast('残高を更新しました', 'success');
+      onSuccess?.();
     } catch {
       addToast('更新に失敗しました', 'error');
     }
