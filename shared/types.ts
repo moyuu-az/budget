@@ -1,0 +1,128 @@
+// Single source of truth for the cross-process (main <-> renderer) data contract.
+// Import/type-only: no electron, node, or react runtime imports, so this module is
+// safe to pull into BOTH the main and renderer bundles.
+
+// --- Category ---
+export interface Category {
+  id: number;
+  name: string;
+  type: 'income' | 'expense';
+  color: string | null;
+  sortOrder: number;
+}
+
+export interface CategoryInput {
+  name: string;
+  type: 'income' | 'expense';
+  color?: string;
+  sortOrder?: number;
+}
+
+// --- EntryTemplate ---
+export interface EntryTemplate {
+  id: number;
+  name: string;
+  dayOfMonth: number;
+  type: 'income' | 'expense';
+  enabled: boolean;
+  sortOrder: number;
+  categoryId: number | null;
+  defaultAmount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EntryTemplateInput {
+  name: string;
+  dayOfMonth: number;
+  type: 'income' | 'expense';
+  categoryId?: number | null;
+  defaultAmount?: number;
+}
+
+// --- MonthlyAmount ---
+export interface MonthlyAmount {
+  id: number;
+  templateId: number;
+  yearMonth: string;
+  amount: number;
+  createdAt: string;
+}
+
+// --- MonthlyActual ---
+export interface MonthlyActual {
+  id: number;
+  templateId: number;
+  yearMonth: string;
+  actualAmount: number;
+  createdAt: string;
+}
+
+// --- ActualWithCategory (JOIN result, crosses IPC for analytics) ---
+export interface ActualWithCategory {
+  templateId: number;
+  yearMonth: string;
+  actualAmount: number;
+  templateName: string;
+  templateType: 'income' | 'expense';
+  categoryId: number | null;
+  categoryName: string | null;
+  categoryColor: string | null;
+}
+
+// --- BalanceSnapshot ---
+export interface BalanceSnapshot {
+  id: number;
+  date: string;
+  balance: number;
+  createdAt: string;
+}
+
+// --- UpdateStatus (pushed from main via onUpdateStatus) ---
+export interface UpdateStatus {
+  status: 'checking' | 'available' | 'up-to-date' | 'downloading' | 'downloaded' | 'error';
+  version?: string;
+  percent?: number;
+  message?: string;
+}
+
+// --- ElectronAPI: the SINGLE source of truth for the IPC surface ---
+// The main-side Handlers type and the renderer client are both derived from this.
+export interface ElectronAPI {
+  getBalance(): Promise<number>;
+  setBalance(balance: number): Promise<void>;
+
+  getCategories(): Promise<Category[]>;
+  addCategory(category: CategoryInput): Promise<Category>;
+  updateCategory(id: number, category: Partial<CategoryInput>): Promise<void>;
+  deleteCategory(id: number): Promise<void>;
+
+  getTemplates(): Promise<EntryTemplate[]>;
+  addTemplate(template: EntryTemplateInput): Promise<EntryTemplate>;
+  updateTemplate(id: number, template: Partial<EntryTemplateInput>): Promise<void>;
+  toggleTemplate(id: number, enabled: boolean): Promise<void>;
+  deleteTemplate(id: number): Promise<void>;
+
+  getMonthlyAmounts(yearMonth: string): Promise<MonthlyAmount[]>;
+  getMonthlyAmountsRange(startMonth: string, endMonth: string): Promise<MonthlyAmount[]>;
+  setMonthlyAmount(templateId: number, yearMonth: string, amount: number): Promise<void>;
+  deleteMonthlyAmount(templateId: number, yearMonth: string): Promise<void>;
+  copyMonthlyAmounts(fromMonth: string, toMonth: string): Promise<void>;
+
+  getMonthlyActuals(yearMonth: string): Promise<MonthlyActual[]>;
+  setMonthlyActual(templateId: number, yearMonth: string, actualAmount: number): Promise<void>;
+  deleteMonthlyActual(templateId: number, yearMonth: string): Promise<void>;
+
+  getMonthlyActualsRange(startMonth: string, endMonth: string): Promise<ActualWithCategory[]>;
+  getSnapshotsRange(startDate: string, endDate: string): Promise<BalanceSnapshot[]>;
+
+  getSnapshots(): Promise<BalanceSnapshot[]>;
+  addSnapshot(date: string, balance: number): Promise<BalanceSnapshot>;
+  deleteSnapshot(id: number): Promise<void>;
+
+  getAppVersion(): Promise<string>;
+  checkForUpdates(): Promise<void>;
+  downloadUpdate(): Promise<void>;
+  installUpdate(): Promise<void>;
+  onUpdateStatus(callback: (status: UpdateStatus) => void): () => void;
+}
