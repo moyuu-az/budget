@@ -175,9 +175,9 @@ function TimelineChart({ snapshots, forecast }: TimelineChartProps) {
           />
           <Tooltip
             contentStyle={tooltipStyle}
-            labelFormatter={formatTooltipDate}
-            formatter={(value: number, name: string) => [
-              formatCurrency(value),
+            labelFormatter={(label) => formatTooltipDate(String(label))}
+            formatter={(value, name) => [
+              formatCurrency(Number(value)),
               name === 'pastBalance' ? '実績' : '予測',
             ]}
           />

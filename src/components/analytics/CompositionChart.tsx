@@ -94,7 +94,7 @@ function CompositionChart({ data, yearMonth }: CompositionChartProps) {
               </Pie>
               <Tooltip
                 contentStyle={tooltipStyle}
-                formatter={(value: number, name: string) => [formatCurrency(value), name]}
+                formatter={(value, name) => [formatCurrency(Number(value)), name]}
               />
               <CenterLabel cx={110} cy={110} total={total} />
             </PieChart>

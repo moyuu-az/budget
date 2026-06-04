@@ -151,9 +151,9 @@ function CategoryTrendChart({ data, todayYearMonth, type, onMonthClick }: Catego
         <BarChart
           data={chartData}
           margin={{ top: 5, right: 20, bottom: 5, left: 10 }}
-          onClick={(_e, state) => {
+          onClick={(state) => {
             if (state?.activeLabel && onMonthClick) {
-              onMonthClick(state.activeLabel);
+              onMonthClick(String(state.activeLabel));
             }
           }}
         >

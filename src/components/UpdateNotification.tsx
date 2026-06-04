@@ -17,7 +17,7 @@ function UpdateNotification({
 }: UpdateNotificationProps) {
   const status = updateStatus?.status;
 
-  if (status === 'available') {
+  if (updateStatus && status === 'available') {
     return (
       <div className="px-4 py-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>
         <p className="text-xs text-blue-400 mb-2">
@@ -41,7 +41,7 @@ function UpdateNotification({
     );
   }
 
-  if (status === 'downloading') {
+  if (updateStatus && status === 'downloading') {
     return (
       <div className="px-4 py-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>
         <p className="text-xs text-slate-400 mb-1.5">ダウンロード中...</p>
