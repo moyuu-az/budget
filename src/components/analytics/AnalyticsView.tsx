@@ -35,7 +35,7 @@ function AnalyticsView() {
   const templates = useTemplateStore((s) => s.templates);
   const categories = useCategoryStore((s) => s.categories);
   const monthlyAmountsMap = useMonthlyStore((s) => s.monthlyAmountsMap);
-  const actualsWithCategory = useMonthlyStore((s) => s.actualsWithCategory);
+  const monthlyActualsMap = useMonthlyStore((s) => s.monthlyActualsMap);
   const fetchMonthlyAmountsRange = useMonthlyStore((s) => s.fetchMonthlyAmountsRange);
   const fetchActualsRange = useMonthlyStore((s) => s.fetchActualsRange);
   const snapshots = useSnapshotStore((s) => s.snapshots);
@@ -84,42 +84,22 @@ function AnalyticsView() {
 
   const activeMonth = selectedMonth ?? todayYearMonth;
 
-  // Build trend data with type filtering
-  const fullTrend = useMemo(
-    () => buildCategoryTrend(actualsWithCategory, templates, categories, monthlyAmountsMap, months, todayYearMonth),
-    [actualsWithCategory, templates, categories, monthlyAmountsMap, months, todayYearMonth],
+  // Trends resolve each month's amount as actual ?? planned, so past/current months stay
+  // populated from planned amounts when no actuals were recorded. Type is filtered inside
+  // the builder, so no post-filtering is needed here.
+  const expenseTrend = useMemo(
+    () => buildCategoryTrend(templates, categories, monthlyAmountsMap, monthlyActualsMap, months, 'expense'),
+    [templates, categories, monthlyAmountsMap, monthlyActualsMap, months],
   );
 
-  // Split trends by type
-  const expenseTrend = useMemo(() => {
-    return fullTrend.map((point) => ({
-      ...point,
-      categories: point.categories.filter((c) => {
-        const actual = actualsWithCategory.find(
-          (a) => a.yearMonth === point.yearMonth && a.categoryId === c.categoryId,
-        );
-        if (actual) return actual.templateType === 'expense';
-        return templates.some((t) => t.categoryId === c.categoryId && t.type === 'expense');
-      }),
-    }));
-  }, [fullTrend, actualsWithCategory, templates]);
-
-  const incomeTrend = useMemo(() => {
-    return fullTrend.map((point) => ({
-      ...point,
-      categories: point.categories.filter((c) => {
-        const actual = actualsWithCategory.find(
-          (a) => a.yearMonth === point.yearMonth && a.categoryId === c.categoryId,
-        );
-        if (actual) return actual.templateType === 'income';
-        return templates.some((t) => t.categoryId === c.categoryId && t.type === 'income');
-      }),
-    }));
-  }, [fullTrend, actualsWithCategory, templates]);
+  const incomeTrend = useMemo(
+    () => buildCategoryTrend(templates, categories, monthlyAmountsMap, monthlyActualsMap, months, 'income'),
+    [templates, categories, monthlyAmountsMap, monthlyActualsMap, months],
+  );
 
   const composition = useMemo(
-    () => buildCompositionData(actualsWithCategory, templates, categories, monthlyAmountsMap, activeMonth, todayYearMonth, 'expense'),
-    [actualsWithCategory, templates, categories, monthlyAmountsMap, activeMonth, todayYearMonth],
+    () => buildCompositionData(templates, categories, monthlyAmountsMap, monthlyActualsMap, activeMonth, 'expense'),
+    [templates, categories, monthlyAmountsMap, monthlyActualsMap, activeMonth],
   );
 
   const comparison = useMemo(

@@ -39,17 +39,6 @@ export interface MonthlyActualRow {
   created_at: string;
 }
 
-export interface ActualWithCategoryRow {
-  template_id: number;
-  year_month: string;
-  actual_amount: number;
-  template_name: string;
-  template_type: string;
-  category_id: number | null;
-  category_name: string | null;
-  category_color: string | null;
-}
-
 export interface SnapshotRow {
   id: number;
   date: string;

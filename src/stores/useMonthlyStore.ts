@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import type {
-  ActualWithCategory,
   EntryTemplate,
   MonthlyAmountsMap,
   MonthlyActualsMap,
@@ -11,7 +10,6 @@ import { reportError } from '../app/reportError';
 interface MonthlyState {
   monthlyAmountsMap: MonthlyAmountsMap;
   monthlyActualsMap: MonthlyActualsMap;
-  actualsWithCategory: ActualWithCategory[];
   loading: boolean;
   fetchActualsRange: (startMonth: string, endMonth: string) => Promise<void>;
   fetchMonthlyAmounts: (yearMonth: string) => Promise<void>;
@@ -27,7 +25,6 @@ interface MonthlyState {
 export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   monthlyAmountsMap: new Map(),
   monthlyActualsMap: new Map(),
-  actualsWithCategory: [],
   loading: false,
 
   fetchActualsRange: async (startMonth: string, endMonth: string) => {
@@ -46,7 +43,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
         }
         newMap.get(a.yearMonth)!.set(a.templateId, a.actualAmount);
       }
-      set({ actualsWithCategory: actuals, monthlyActualsMap: newMap, loading: false });
+      set({ monthlyActualsMap: newMap, loading: false });
     } catch (e) {
       set({ loading: false });
       reportError(e);

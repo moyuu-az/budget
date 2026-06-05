@@ -6,10 +6,10 @@ import {
   generateMonthRange,
 } from './analytics';
 import type {
-  ActualWithCategory,
   Category,
   EntryTemplate,
   MonthlyAmountsMap,
+  MonthlyActualsMap,
   CategoryTrendPoint,
 } from '../types';
 
@@ -40,48 +40,86 @@ function makeCategory(overrides: Partial<Category> = {}): Category {
   };
 }
 
-function makeActual(overrides: Partial<ActualWithCategory> = {}): ActualWithCategory {
-  return {
-    templateId: 1,
-    yearMonth: '2026-01',
-    actualAmount: 1000,
-    templateName: 'Template',
-    templateType: 'expense',
-    categoryId: 1,
-    categoryName: 'Food',
-    categoryColor: '#ff0000',
-    ...overrides,
-  };
+// Convenience builders for the nested yearMonth -> templateId -> amount maps.
+function amounts(...entries: Array<[string, Array<[number, number]>]>): MonthlyAmountsMap {
+  return new Map(entries.map(([ym, pairs]) => [ym, new Map(pairs)]));
 }
+const actuals = amounts as (...entries: Array<[string, Array<[number, number]>]>) => MonthlyActualsMap;
 
-const TODAY = '2026-06';
+const NO_MAP: MonthlyAmountsMap = new Map();
 
 describe('buildCategoryTrend', () => {
   it('returns one entry per requested month with empty categories on no data', () => {
-    const result = buildCategoryTrend([], [], [], new Map(), ['2026-01', '2026-02'], TODAY);
+    const result = buildCategoryTrend([], [], NO_MAP, new Map(), ['2026-01', '2026-02'], 'expense');
     expect(result).toHaveLength(2);
     expect(result[0]).toEqual({ yearMonth: '2026-01', categories: [] });
     expect(result[1].categories).toEqual([]);
   });
 
-  it('aggregates actuals by category for past months and sorts descending', () => {
-    const actuals = [
-      makeActual({ templateId: 1, categoryId: 1, categoryName: 'Food', actualAmount: 300 }),
-      makeActual({ templateId: 2, categoryId: 1, categoryName: 'Food', actualAmount: 200 }),
-      makeActual({ templateId: 3, categoryId: 2, categoryName: 'Rent', categoryColor: '#00ff00', actualAmount: 800 }),
-    ];
-    const result = buildCategoryTrend(actuals, [], [], new Map(), ['2026-01'], TODAY);
-    const cats = result[0].categories;
-    expect(cats).toHaveLength(2);
-    expect(cats[0]).toMatchObject({ categoryId: 2, name: 'Rent', amount: 800 });
-    expect(cats[1]).toMatchObject({ categoryId: 1, name: 'Food', amount: 500 });
+  it('falls back to the planned default amount when no actual is recorded (regression)', () => {
+    // The original bug: past/current months read ONLY actuals, so a month with no
+    // recorded actuals rendered blank. Planned amounts must fill the gap.
+    const tpl = makeTemplate({ id: 1, type: 'expense', categoryId: 1, defaultAmount: 5000 });
+    const cats = [makeCategory({ id: 1, name: 'Food', color: '#abcdef' })];
+    const result = buildCategoryTrend([tpl], cats, NO_MAP, new Map(), ['2026-01'], 'expense');
+    expect(result[0].categories[0]).toMatchObject({
+      categoryId: 1,
+      name: 'Food',
+      color: '#abcdef',
+      amount: 5000,
+    });
   });
 
-  it('falls back to その他 / default color for a null category in actuals', () => {
-    const actuals = [
-      makeActual({ categoryId: null, categoryName: null, categoryColor: null, actualAmount: 400 }),
+  it('prefers a recorded actual over the planned amount', () => {
+    const tpl = makeTemplate({ id: 1, type: 'expense', categoryId: 1, defaultAmount: 5000 });
+    const cats = [makeCategory({ id: 1 })];
+    const result = buildCategoryTrend(
+      [tpl], cats, NO_MAP, actuals(['2026-01', [[1, 1200]]]), ['2026-01'], 'expense',
+    );
+    expect(result[0].categories[0].amount).toBe(1200);
+  });
+
+  it('treats a recorded actual of 0 as overriding the plan (then drops the zero bar)', () => {
+    const tpl = makeTemplate({ id: 1, type: 'expense', categoryId: 1, defaultAmount: 5000 });
+    const result = buildCategoryTrend(
+      [tpl], [makeCategory({ id: 1 })], NO_MAP, actuals(['2026-01', [[1, 0]]]), ['2026-01'], 'expense',
+    );
+    expect(result[0].categories).toEqual([]);
+  });
+
+  it('applies a monthly planned override over the default', () => {
+    const tpl = makeTemplate({ id: 1, categoryId: 1, defaultAmount: 1000 });
+    const result = buildCategoryTrend(
+      [tpl], [makeCategory({ id: 1 })], amounts(['2026-12', [[1, 7777]]]), new Map(), ['2026-12'], 'expense',
+    );
+    expect(result[0].categories[0].amount).toBe(7777);
+  });
+
+  it('filters templates by type', () => {
+    const tpls = [
+      makeTemplate({ id: 1, type: 'expense', categoryId: 1, defaultAmount: 100 }),
+      makeTemplate({ id: 2, type: 'income', categoryId: 2, defaultAmount: 200 }),
     ];
-    const result = buildCategoryTrend(actuals, [], [], new Map(), ['2026-01'], TODAY);
+    const cats = [makeCategory({ id: 1, name: 'Food' }), makeCategory({ id: 2, name: 'Pay', type: 'income' })];
+    const expense = buildCategoryTrend(tpls, cats, NO_MAP, new Map(), ['2026-01'], 'expense');
+    const income = buildCategoryTrend(tpls, cats, NO_MAP, new Map(), ['2026-01'], 'income');
+    expect(expense[0].categories).toHaveLength(1);
+    expect(expense[0].categories[0]).toMatchObject({ name: 'Food', amount: 100 });
+    expect(income[0].categories[0]).toMatchObject({ name: 'Pay', amount: 200 });
+  });
+
+  it('ignores disabled templates and non-positive amounts', () => {
+    const tpls = [
+      makeTemplate({ id: 1, enabled: false, categoryId: 1, defaultAmount: 5000 }),
+      makeTemplate({ id: 2, enabled: true, categoryId: 2, defaultAmount: 0 }),
+    ];
+    const result = buildCategoryTrend(tpls, [], NO_MAP, new Map(), ['2026-01'], 'expense');
+    expect(result[0].categories).toEqual([]);
+  });
+
+  it('falls back to その他 / default color for a null category', () => {
+    const tpl = makeTemplate({ id: 1, categoryId: null, defaultAmount: 400 });
+    const result = buildCategoryTrend([tpl], [], NO_MAP, new Map(), ['2026-01'], 'expense');
     expect(result[0].categories[0]).toMatchObject({
       categoryId: null,
       name: 'その他',
@@ -90,70 +128,93 @@ describe('buildCategoryTrend', () => {
     });
   });
 
-  it('uses templates (forecast) for months after today', () => {
-    const tpl = makeTemplate({ id: 10, categoryId: 1, defaultAmount: 1234 });
-    const cats = [makeCategory({ id: 1, name: 'Food', color: '#abcdef' })];
-    const result = buildCategoryTrend([], [tpl], cats, new Map(), ['2026-12'], TODAY);
-    expect(result[0].categories[0]).toMatchObject({
-      categoryId: 1,
-      name: 'Food',
-      color: '#abcdef',
-      amount: 1234,
-    });
-  });
-
-  it('applies a monthly override for future months', () => {
-    const tpl = makeTemplate({ id: 11, categoryId: 1, defaultAmount: 1000 });
-    const cats = [makeCategory({ id: 1 })];
-    const map: MonthlyAmountsMap = new Map([['2026-12', new Map([[11, 7777]])]]);
-    const result = buildCategoryTrend([], [tpl], cats, map, ['2026-12'], TODAY);
-    expect(result[0].categories[0].amount).toBe(7777);
-  });
-
-  it('ignores disabled templates and non-positive amounts in future months', () => {
+  it('aggregates templates sharing a category and sorts descending', () => {
     const tpls = [
-      makeTemplate({ id: 12, enabled: false, categoryId: 1, defaultAmount: 5000 }),
-      makeTemplate({ id: 13, enabled: true, categoryId: 2, defaultAmount: 0 }),
+      makeTemplate({ id: 1, categoryId: 1, defaultAmount: 300 }),
+      makeTemplate({ id: 2, categoryId: 1, defaultAmount: 200 }),
+      makeTemplate({ id: 3, categoryId: 2, defaultAmount: 800 }),
     ];
-    const result = buildCategoryTrend([], tpls, [], new Map(), ['2026-12'], TODAY);
+    const cats = [
+      makeCategory({ id: 1, name: 'Food' }),
+      makeCategory({ id: 2, name: 'Rent', color: '#00ff00' }),
+    ];
+    const result = buildCategoryTrend(tpls, cats, NO_MAP, new Map(), ['2026-01'], 'expense');
+    const items = result[0].categories;
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ categoryId: 2, name: 'Rent', amount: 800 });
+    expect(items[1]).toMatchObject({ categoryId: 1, name: 'Food', amount: 500 });
+  });
+
+  it('applies an actual override to only the matching template within a shared category', () => {
+    const tpls = [
+      makeTemplate({ id: 1, categoryId: 1, defaultAmount: 300 }),
+      makeTemplate({ id: 2, categoryId: 1, defaultAmount: 200 }),
+    ];
+    const result = buildCategoryTrend(
+      tpls, [makeCategory({ id: 1 })], NO_MAP, actuals(['2026-01', [[1, 50]]]), ['2026-01'], 'expense',
+    );
+    // template 1 -> actual 50, template 2 -> planned 200 => 250 total
+    expect(result[0].categories[0].amount).toBe(250);
+  });
+
+  it('counts recorded actuals even when the template is disabled (toggling never erases history)', () => {
+    // A recorded actual is a fact: disabling the template later must not retroactively
+    // wipe it from historical analytics.
+    const tpl = makeTemplate({ id: 1, enabled: false, type: 'expense', categoryId: 1, defaultAmount: 5000 });
+    const result = buildCategoryTrend(
+      [tpl], [makeCategory({ id: 1 })], NO_MAP, actuals(['2026-01', [[1, 1800]]]), ['2026-01'], 'expense',
+    );
+    expect(result[0].categories[0]).toMatchObject({ categoryId: 1, amount: 1800 });
+  });
+
+  it('does not synthesize a planned fallback for a disabled template without an actual', () => {
+    const tpl = makeTemplate({ id: 1, enabled: false, type: 'expense', categoryId: 1, defaultAmount: 5000 });
+    const result = buildCategoryTrend([tpl], [makeCategory({ id: 1 })], NO_MAP, new Map(), ['2026-01'], 'expense');
+    expect(result[0].categories).toEqual([]);
+  });
+
+  it('ignores an actual whose template type does not match the requested type', () => {
+    const tpl = makeTemplate({ id: 1, type: 'income', categoryId: 1, defaultAmount: 0 });
+    const result = buildCategoryTrend(
+      [tpl], [makeCategory({ id: 1 })], NO_MAP, actuals(['2026-01', [[1, 999]]]), ['2026-01'], 'expense',
+    );
     expect(result[0].categories).toEqual([]);
   });
 });
 
 describe('buildCompositionData', () => {
   it('returns an empty array when the total is zero', () => {
-    expect(buildCompositionData([], [], [], new Map(), '2026-01', TODAY, 'expense')).toEqual([]);
+    expect(buildCompositionData([], [], NO_MAP, new Map(), '2026-01', 'expense')).toEqual([]);
   });
 
-  it('aggregates past-month actuals filtered by type and computes percentages', () => {
-    const actuals = [
-      makeActual({ templateId: 1, templateType: 'expense', categoryId: 1, categoryName: 'Food', actualAmount: 750 }),
-      makeActual({ templateId: 2, templateType: 'expense', categoryId: 2, categoryName: 'Rent', categoryColor: '#0f0', actualAmount: 250 }),
-      makeActual({ templateId: 3, templateType: 'income', categoryId: 3, categoryName: 'Pay', actualAmount: 9999 }),
+  it('aggregates by category, filters by type, and computes percentages', () => {
+    const tpls = [
+      makeTemplate({ id: 1, type: 'expense', categoryId: 1, defaultAmount: 750 }),
+      makeTemplate({ id: 2, type: 'expense', categoryId: 2, defaultAmount: 250 }),
+      makeTemplate({ id: 3, type: 'income', categoryId: 3, defaultAmount: 9999 }),
     ];
-    const result = buildCompositionData(actuals, [], [], new Map(), '2026-01', TODAY, 'expense');
+    const cats = [
+      makeCategory({ id: 1, name: 'Food' }),
+      makeCategory({ id: 2, name: 'Rent', color: '#0f0' }),
+    ];
+    const result = buildCompositionData(tpls, cats, NO_MAP, new Map(), '2026-01', 'expense');
     expect(result).toHaveLength(2);
     expect(result[0]).toMatchObject({ name: 'Food', amount: 750, percentage: 75 });
     expect(result[1]).toMatchObject({ name: 'Rent', amount: 250, percentage: 25 });
   });
 
-  it('groups null-category actuals under その他', () => {
-    const actuals = [
-      makeActual({ categoryId: null, categoryName: null, categoryColor: null, actualAmount: 1000 }),
-    ];
-    const result = buildCompositionData(actuals, [], [], new Map(), '2026-01', TODAY, 'expense');
-    expect(result[0]).toMatchObject({ categoryId: null, name: 'その他', percentage: 100 });
+  it('prefers recorded actuals when present', () => {
+    const tpl = makeTemplate({ id: 1, type: 'expense', categoryId: 1, defaultAmount: 1000 });
+    const result = buildCompositionData(
+      [tpl], [makeCategory({ id: 1 })], NO_MAP, actuals(['2026-01', [[1, 400]]]), '2026-01', 'expense',
+    );
+    expect(result[0]).toMatchObject({ amount: 400, percentage: 100 });
   });
 
-  it('uses enabled templates of the matching type for future months', () => {
-    const tpls = [
-      makeTemplate({ id: 1, type: 'income', categoryId: 1, defaultAmount: 5000 }),
-      makeTemplate({ id: 2, type: 'expense', categoryId: 2, defaultAmount: 999 }),
-    ];
-    const cats = [makeCategory({ id: 1, name: 'Salary', type: 'income', color: '#111' })];
-    const result = buildCompositionData([], tpls, cats, new Map(), '2026-12', TODAY, 'income');
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ name: 'Salary', amount: 5000, percentage: 100 });
+  it('groups null-category templates under その他', () => {
+    const tpl = makeTemplate({ id: 1, categoryId: null, defaultAmount: 1000 });
+    const result = buildCompositionData([tpl], [], NO_MAP, new Map(), '2026-01', 'expense');
+    expect(result[0]).toMatchObject({ categoryId: null, name: 'その他', percentage: 100 });
   });
 });
 

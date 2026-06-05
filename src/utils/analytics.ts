@@ -1,134 +1,131 @@
 import type {
-  ActualWithCategory,
   Category,
   EntryTemplate,
   MonthlyAmountsMap,
+  MonthlyActualsMap,
   CategoryTrendPoint,
+  CategoryTrendItem,
   CompositionItem,
   ComparisonRow,
 } from '../types';
 import { resolveAmount } from '../stores/useMonthlyStore';
 
+const OTHER_NAME = 'その他';
+const OTHER_COLOR = '#6b7280';
+
+type CategoryAccumulator = Map<number | null, { name: string; color: string; amount: number }>;
+
+// Add a single template's contribution to the running per-category totals.
+// Non-positive contributions are dropped (a 0 actual means "nothing spent").
+function addContribution(
+  totals: CategoryAccumulator,
+  template: EntryTemplate,
+  categoryMap: Map<number, Category>,
+  amount: number,
+): void {
+  if (amount <= 0) return;
+  const key = template.categoryId;
+  const existing = totals.get(key);
+  if (existing) {
+    existing.amount += amount;
+  } else {
+    const cat = key != null ? categoryMap.get(key) : undefined;
+    totals.set(key, {
+      name: cat?.name ?? OTHER_NAME,
+      color: cat?.color ?? OTHER_COLOR,
+      amount,
+    });
+  }
+}
+
+// Aggregate one month into per-category totals from two distinct sources:
+//   1. Recorded actuals — facts; counted regardless of the template's current `enabled`
+//      state so toggling a template never rewrites historical analytics.
+//   2. Planned fallback — for ACTIVE templates with no recorded actual that month, using
+//      the monthly override or the template default. This keeps past/current months
+//      populated even when actuals were never entered (the original blank-chart bug).
+// Keeping the two sources separate is what prevents disabling a template from erasing its
+// past actuals, or a default from being synthesized in place of a real recorded value.
+function aggregateMonthByCategory(
+  templates: EntryTemplate[],
+  templateById: Map<number, EntryTemplate>,
+  categoryMap: Map<number, Category>,
+  amountsMap: MonthlyAmountsMap,
+  actualsMap: MonthlyActualsMap,
+  yearMonth: string,
+  type: 'income' | 'expense',
+): CategoryAccumulator {
+  const totals: CategoryAccumulator = new Map();
+  const monthActuals = actualsMap.get(yearMonth);
+
+  if (monthActuals) {
+    for (const [templateId, actualAmount] of monthActuals) {
+      const template = templateById.get(templateId);
+      if (!template || template.type !== type) continue;
+      addContribution(totals, template, categoryMap, actualAmount);
+    }
+  }
+
+  for (const template of templates) {
+    if (!template.enabled || template.type !== type) continue;
+    if (monthActuals?.has(template.id)) continue;
+    const planned = resolveAmount(template.id, yearMonth, amountsMap, templates);
+    addContribution(totals, template, categoryMap, planned);
+  }
+
+  return totals;
+}
+
 export function buildCategoryTrend(
-  actuals: ActualWithCategory[],
   templates: EntryTemplate[],
   categories: Category[],
-  monthlyAmountsMap: MonthlyAmountsMap,
+  amountsMap: MonthlyAmountsMap,
+  actualsMap: MonthlyActualsMap,
   months: string[],
-  todayYearMonth: string,
+  type: 'income' | 'expense',
 ): CategoryTrendPoint[] {
   const categoryMap = new Map(categories.map((c) => [c.id, c]));
+  const templateById = new Map(templates.map((t) => [t.id, t]));
 
-  return months.map((ym) => {
-    const categoryTotals = new Map<number | null, { name: string; color: string; amount: number }>();
+  return months.map((yearMonth) => {
+    const totals = aggregateMonthByCategory(templates, templateById, categoryMap, amountsMap, actualsMap, yearMonth, type);
+    const items: CategoryTrendItem[] = Array.from(totals.entries())
+      .map(([categoryId, data]) => ({
+        categoryId,
+        name: data.name,
+        color: data.color,
+        amount: data.amount,
+      }))
+      .sort((a, b) => b.amount - a.amount);
 
-    if (ym <= todayYearMonth) {
-      const monthActuals = actuals.filter((a) => a.yearMonth === ym);
-      for (const a of monthActuals) {
-        const key = a.categoryId;
-        const existing = categoryTotals.get(key);
-        if (existing) {
-          existing.amount += a.actualAmount;
-        } else {
-          categoryTotals.set(key, {
-            name: a.categoryName ?? 'その他',
-            color: a.categoryColor ?? '#6b7280',
-            amount: a.actualAmount,
-          });
-        }
-      }
-    } else {
-      const enabled = templates.filter((t) => t.enabled);
-      for (const t of enabled) {
-        const amount = resolveAmount(t.id, ym, monthlyAmountsMap, templates);
-        if (amount <= 0) continue;
-        const key = t.categoryId;
-        const cat = key != null ? categoryMap.get(key) : null;
-        const existing = categoryTotals.get(key);
-        if (existing) {
-          existing.amount += amount;
-        } else {
-          categoryTotals.set(key, {
-            name: cat?.name ?? 'その他',
-            color: cat?.color ?? '#6b7280',
-            amount,
-          });
-        }
-      }
-    }
-
-    const items = Array.from(categoryTotals.entries()).map(([categoryId, data]) => ({
-      categoryId,
-      name: data.name,
-      color: data.color,
-      amount: data.amount,
-    }));
-    items.sort((a, b) => b.amount - a.amount);
-
-    return { yearMonth: ym, categories: items };
+    return { yearMonth, categories: items };
   });
 }
 
 export function buildCompositionData(
-  actuals: ActualWithCategory[],
   templates: EntryTemplate[],
   categories: Category[],
-  monthlyAmountsMap: MonthlyAmountsMap,
+  amountsMap: MonthlyAmountsMap,
+  actualsMap: MonthlyActualsMap,
   yearMonth: string,
-  todayYearMonth: string,
-  type: 'expense' | 'income' = 'expense',
+  type: 'income' | 'expense',
 ): CompositionItem[] {
   const categoryMap = new Map(categories.map((c) => [c.id, c]));
-  const totals = new Map<number | null, { name: string; color: string; amount: number }>();
-
-  if (yearMonth <= todayYearMonth) {
-    const monthActuals = actuals.filter((a) => a.yearMonth === yearMonth && a.templateType === type);
-    for (const a of monthActuals) {
-      const key = a.categoryId;
-      const existing = totals.get(key);
-      if (existing) {
-        existing.amount += a.actualAmount;
-      } else {
-        totals.set(key, {
-          name: a.categoryName ?? 'その他',
-          color: a.categoryColor ?? '#6b7280',
-          amount: a.actualAmount,
-        });
-      }
-    }
-  } else {
-    const enabled = templates.filter((t) => t.enabled && t.type === type);
-    for (const t of enabled) {
-      const amount = resolveAmount(t.id, yearMonth, monthlyAmountsMap, templates);
-      if (amount <= 0) continue;
-      const key = t.categoryId;
-      const cat = key != null ? categoryMap.get(key) : null;
-      const existing = totals.get(key);
-      if (existing) {
-        existing.amount += amount;
-      } else {
-        totals.set(key, {
-          name: cat?.name ?? 'その他',
-          color: cat?.color ?? '#6b7280',
-          amount,
-        });
-      }
-    }
-  }
+  const templateById = new Map(templates.map((t) => [t.id, t]));
+  const totals = aggregateMonthByCategory(templates, templateById, categoryMap, amountsMap, actualsMap, yearMonth, type);
 
   const totalAmount = Array.from(totals.values()).reduce((sum, v) => sum + v.amount, 0);
   if (totalAmount === 0) return [];
 
-  const items = Array.from(totals.entries()).map(([categoryId, data]) => ({
-    categoryId,
-    name: data.name,
-    color: data.color,
-    amount: data.amount,
-    percentage: Math.round((data.amount / totalAmount) * 1000) / 10,
-  }));
-  items.sort((a, b) => b.amount - a.amount);
-
-  return items;
+  return Array.from(totals.entries())
+    .map(([categoryId, data]) => ({
+      categoryId,
+      name: data.name,
+      color: data.color,
+      amount: data.amount,
+      percentage: Math.round((data.amount / totalAmount) * 1000) / 10,
+    }))
+    .sort((a, b) => b.amount - a.amount);
 }
 
 export function buildComparisonData(
