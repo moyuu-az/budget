@@ -1,11 +1,11 @@
 import type Database from 'better-sqlite3';
-import type { MonthlyActual, ActualWithCategory } from '../../shared/types';
-import type { MonthlyActualRow, ActualWithCategoryRow } from './row-types';
-import { rowToMonthlyActual, rowToActualWithCategory } from '../mappers';
+import type { MonthlyActual } from '../../shared/types';
+import type { MonthlyActualRow } from './row-types';
+import { rowToMonthlyActual } from '../mappers';
 
 export interface MonthlyActualRepository {
   getForMonth(yearMonth: string): MonthlyActual[];
-  getForRange(startMonth: string, endMonth: string): ActualWithCategory[];
+  getForRange(startMonth: string, endMonth: string): MonthlyActual[];
   set(templateId: number, yearMonth: string, amount: number): void;
   remove(templateId: number, yearMonth: string): void;
 }
@@ -19,29 +19,16 @@ export function createMonthlyActualRepository(db: Database.Database): MonthlyAct
       return rows.map(rowToMonthlyActual);
     },
 
-    // JOIN with template + category for analytics.
+    // Raw actuals across a month range. The renderer overlays these onto planned
+    // amounts (actual ?? planned) and derives category/type from templates, so no
+    // JOIN is needed here.
     getForRange(startMonth, endMonth) {
       const rows = db
         .prepare(
-          `
-          SELECT
-            ma.template_id,
-            ma.year_month,
-            ma.actual_amount,
-            et.name AS template_name,
-            et.type AS template_type,
-            et.category_id,
-            c.name AS category_name,
-            c.color AS category_color
-          FROM monthly_actuals ma
-          JOIN entry_templates et ON et.id = ma.template_id
-          LEFT JOIN categories c ON c.id = et.category_id
-          WHERE ma.year_month >= ? AND ma.year_month <= ?
-          ORDER BY ma.year_month ASC
-        `,
+          'SELECT * FROM monthly_actuals WHERE year_month >= ? AND year_month <= ? ORDER BY year_month ASC',
         )
-        .all(startMonth, endMonth) as ActualWithCategoryRow[];
-      return rows.map(rowToActualWithCategory);
+        .all(startMonth, endMonth) as MonthlyActualRow[];
+      return rows.map(rowToMonthlyActual);
     },
 
     // Upsert. Returns void: the renderer discards the row.

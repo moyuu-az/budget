@@ -6,7 +6,6 @@ import type {
   EntryTemplate,
   MonthlyAmount,
   MonthlyActual,
-  ActualWithCategory,
   BalanceSnapshot,
 } from '../shared/types';
 import type {
@@ -14,7 +13,6 @@ import type {
   TemplateRow,
   MonthlyAmountRow,
   MonthlyActualRow,
-  ActualWithCategoryRow,
   SnapshotRow,
 } from './repositories/row-types';
 
@@ -60,19 +58,6 @@ export function rowToMonthlyActual(row: MonthlyActualRow): MonthlyActual {
     yearMonth: row.year_month,
     actualAmount: row.actual_amount,
     createdAt: row.created_at,
-  };
-}
-
-export function rowToActualWithCategory(row: ActualWithCategoryRow): ActualWithCategory {
-  return {
-    templateId: row.template_id,
-    yearMonth: row.year_month,
-    actualAmount: row.actual_amount,
-    templateName: row.template_name,
-    templateType: row.template_type as 'income' | 'expense',
-    categoryId: row.category_id,
-    categoryName: row.category_name,
-    categoryColor: row.category_color,
   };
 }
 

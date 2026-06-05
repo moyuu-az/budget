@@ -58,18 +58,6 @@ export interface MonthlyActual {
   createdAt: string;
 }
 
-// --- ActualWithCategory (JOIN result, crosses IPC for analytics) ---
-export interface ActualWithCategory {
-  templateId: number;
-  yearMonth: string;
-  actualAmount: number;
-  templateName: string;
-  templateType: 'income' | 'expense';
-  categoryId: number | null;
-  categoryName: string | null;
-  categoryColor: string | null;
-}
-
 // --- BalanceSnapshot ---
 export interface BalanceSnapshot {
   id: number;
@@ -113,7 +101,9 @@ export interface ElectronAPI {
   setMonthlyActual(templateId: number, yearMonth: string, actualAmount: number): Promise<void>;
   deleteMonthlyActual(templateId: number, yearMonth: string): Promise<void>;
 
-  getMonthlyActualsRange(startMonth: string, endMonth: string): Promise<ActualWithCategory[]>;
+  // Raw actuals for a month range; the renderer overlays them onto planned amounts
+  // when building analytics trends (actual ?? planned).
+  getMonthlyActualsRange(startMonth: string, endMonth: string): Promise<MonthlyActual[]>;
   getSnapshotsRange(startDate: string, endDate: string): Promise<BalanceSnapshot[]>;
 
   getSnapshots(): Promise<BalanceSnapshot[]>;
