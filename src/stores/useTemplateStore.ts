@@ -6,6 +6,7 @@ import { reportError } from '../app/reportError';
 interface TemplateState {
   templates: EntryTemplate[];
   loading: boolean;
+  reset: () => void;
   fetchTemplates: () => Promise<void>;
   addTemplate: (input: EntryTemplateInput) => Promise<void>;
   updateTemplate: (id: number, input: Partial<EntryTemplateInput>) => Promise<void>;
@@ -16,6 +17,16 @@ interface TemplateState {
 export const useTemplateStore = create<TemplateState>((set, get) => ({
   templates: [],
   loading: false,
+
+  /**
+   * Clears everything this store holds.
+   *
+   * Called when the active ledger changes. Without it the previous ledger's
+   * numbers would stay on screen under the new ledger's name until each fetch
+   * came back -- brief, but a household budget showing someone else's figures
+   * even for a moment is not acceptable.
+   */
+  reset: () => set({ templates: [], loading: false }),
 
   fetchTemplates: async () => {
     set({ loading: true });

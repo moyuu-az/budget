@@ -6,6 +6,7 @@ import { reportError } from '../app/reportError';
 interface CategoryState {
   categories: Category[];
   loading: boolean;
+  reset: () => void;
   fetchCategories: () => Promise<void>;
   addCategory: (input: CategoryInput) => Promise<void>;
   updateCategory: (id: number, input: Partial<CategoryInput>) => Promise<void>;
@@ -15,6 +16,16 @@ interface CategoryState {
 export const useCategoryStore = create<CategoryState>((set, get) => ({
   categories: [],
   loading: false,
+
+  /**
+   * Clears everything this store holds.
+   *
+   * Called when the active ledger changes. Without it the previous ledger's
+   * numbers would stay on screen under the new ledger's name until each fetch
+   * came back -- brief, but a household budget showing someone else's figures
+   * even for a moment is not acceptable.
+   */
+  reset: () => set({ categories: [], loading: false }),
 
   fetchCategories: async () => {
     set({ loading: true });
