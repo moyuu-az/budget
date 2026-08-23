@@ -12,5 +12,12 @@
     "resolveJsonModule": true,
     "isolatedModules": true
   },
-  "include": ["electron/**/*.ts", "shared/**/*.ts", "electron.vite.config.ts"]
+  "include": [
+    "electron/**/*.ts",
+    "server/**/*.ts",
+    "scripts/**/*.ts",
+    "shared/**/*.ts",
+    "electron.vite.config.ts",
+    "vitest.config.ts"
+  ]
 }
