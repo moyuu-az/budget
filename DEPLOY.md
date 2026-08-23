@@ -129,15 +129,76 @@ gcloud run deploy "$SERVICE" \
 postgres://app_user:PASSWORD@/DB_NAME?host=/cloudsql/PROJECT:REGION:INSTANCE
 ```
 
-## 6. OAuth 同意画面 (ブラウザ操作。ここだけ CLI で完結しない)
+## 6. OAuth 同意画面とカスタムクライアント (ブラウザ操作。ここだけ CLI で完結しない)
 
-Console → APIs & Services → OAuth consent screen。
+**組織 (Organization) の外にあるプロジェクトでは、カスタム OAuth クライアントが必須。**
+IAP 既定の Google 管理クライアントは組織内の identity しか扱えないので、組織外の
+アカウント (配偶者の個人 Gmail など) を許可するにはこの手順が要る。
 
-- User type: **External**
-- アプリ名と連絡先を入力し、認証情報は自動生成でよい
+なお IAP の OAuth Admin API (`gcloud iap oauth-brands`) は組織配下でないと使えず、
+2026-03 に廃止済み。コンソール以外の道はない。
 
-IAP は既定で Google 管理の OAuth クライアントを使うため、クライアント ID を自分で
-作る必要はない。
+### 6-1. ブランディング
+
+Console → **APIs & Services → OAuth 同意画面 (ブランディング)**
+
+- 対象ユーザー: **External**
+- 必須はアプリ名 / ユーザーサポートメール / デベロッパー連絡先の 3 つだけ
+- **ホームページ URL・プライバシーポリシー URL・承認済みドメインは空欄でよい**
+  (リダイレクト先は Google 側の `iap.googleapis.com` で、自分のドメインを使わないため)
+
+### 6-2. 公開ステータスは「テスト中」のまま
+
+**本番公開しないこと。** 公開すると、実在するホームページ URL とプライバシーポリシー
+URL が必須になり、`*.run.app` は Google 所有ドメインなので Search Console で所有権を
+証明できない。ロゴを設定していると審査も必要になる。
+
+テスト中に残る唯一の制約は「リフレッシュトークンが 7 日で失効」だが、
+**これは要求スコープが name / email / profile を超える場合のみ**適用される。IAP が
+使うのは `openid` と `email` だけなので該当しない (実際にサインイン用リダイレクトの
+`scope=openid+email` で確認できる)。
+
+代わりに**テストユーザーへ利用者全員を追加する**。ここが空だと誰もサインインできない。
+
+### 6-3. OAuth クライアント
+
+Console → **APIs & Services → 認証情報 → クライアントを作成**
+
+- 種類: **ウェブ アプリケーション**
+- 作成後にクライアント ID をコピーし、**同じクライアントを開き直して**
+  「承認済みのリダイレクト URI」に以下を追加する
+
+```
+https://iap.googleapis.com/v1/oauth/clientIds/<CLIENT_ID>:handleRedirect
+```
+
+これを登録しないと、サインイン時に `redirect_uri_mismatch` で止まる。
+
+JSON をダウンロードし、**リポジトリ管理外の `.secrets/oauth-client.json`** に置く
+(`.secrets/` は `.gitignore` 済み)。
+
+### 6-4. IAP へ適用
+
+```sh
+python3 -c "
+import json
+d = json.load(open('.secrets/oauth-client.json'))['web']
+print('accessSettings:\n  oauthSettings:\n    clientId: %s\n    clientSecret: %s' % (d['client_id'], d['client_secret']))
+" > /tmp/iap-oauth.yaml
+
+gcloud iap settings set /tmp/iap-oauth.yaml \
+  --project="$PROJECT_ID" --resource-type=cloud-run \
+  --region="$REGION" --service="$SERVICE"
+
+rm /tmp/iap-oauth.yaml
+```
+
+適用できたかは、未認証で開いて 302 が返り、`accounts.google.com` へ飛ぶことで確認
+できる。502 のままならクライアントが適用されていない。
+
+```sh
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "$SERVICE_URL/"
+```
 
 ## 7. IAP 有効化
 
@@ -204,6 +265,16 @@ npm run db:import -- \
 
 `gcloud sql connect` から `SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'app_user';`
 が両方 `f` であることも確認する。
+
+## ローカルに置く認証情報
+
+| ファイル | 内容 | 管理 |
+|---|---|---|
+| `.secrets/oauth-client.json` | IAP 用カスタム OAuth クライアント | `.gitignore` 済み。再取得はコンソールから |
+| `.env` | ローカル開発用の接続情報 | `.gitignore` 済み |
+
+本番の DB 接続文字列と所有者パスワードは Secret Manager
+(`budget-database-url` / `budget-owner-password`) にあり、手元には置かない。
 
 ## 運用メモ
 
