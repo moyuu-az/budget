@@ -2,6 +2,7 @@ import { ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { ViewType } from '../types';
 import BalanceInput from './sidebar/BalanceInput';
+import LedgerSwitcher from './layout/LedgerSwitcher';
 import Navigation from './sidebar/Navigation';
 import MonthlySummary from './sidebar/MonthlySummary';
 import ThemeToggle from './layout/ThemeToggle';
@@ -53,9 +54,10 @@ function Layout({ currentView, onNavigate, children }: Props) {
           <ThemeToggle />
         </div>
 
-        {/* Balance Input — hidden when collapsed (input needs width) */}
+        {/* Ledger switcher + balance — hidden when collapsed (both need width) */}
         {!collapsed && (
-          <div className="px-4 py-3">
+          <div className="flex flex-col gap-3 px-4 py-3">
+            <LedgerSwitcher />
             <BalanceInput />
           </div>
         )}

@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { ViewType } from './types';
-import { useBalanceStore } from './stores/useBalanceStore';
-import { useCategoryStore } from './stores/useCategoryStore';
-import { useTemplateStore } from './stores/useTemplateStore';
-import { useSnapshotStore } from './stores/useSnapshotStore';
+import { loadLedgerData } from './app/ledger';
+import { reportError } from './app/reportError';
 import Layout from './components/Layout';
 import DashboardView from './components/dashboard/DashboardView';
 import EntriesView from './components/entries/EntriesView';
@@ -28,17 +26,13 @@ function App() {
   useThemeEffect();
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const [helpOpen, setHelpOpen] = useState(false);
-  const fetchBalance = useBalanceStore((s) => s.fetchBalance);
-  const fetchCategories = useCategoryStore((s) => s.fetchCategories);
-  const fetchTemplates = useTemplateStore((s) => s.fetchTemplates);
-  const fetchSnapshots = useSnapshotStore((s) => s.fetchSnapshots);
-
+  // The initial load of whichever ledger bootstrap selected. Subsequent
+  // switches go through switchLedger, which clears before it reloads -- so this
+  // deliberately does NOT depend on the active ledger. Two code paths racing to
+  // refetch the same data on a switch would be worse than one.
   useEffect(() => {
-    fetchBalance();
-    fetchCategories();
-    fetchTemplates();
-    fetchSnapshots();
-  }, [fetchBalance, fetchCategories, fetchTemplates, fetchSnapshots]);
+    loadLedgerData().catch(reportError);
+  }, []);
 
   useKeyboardShortcuts({
     onNavigate: setCurrentView,

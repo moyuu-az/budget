@@ -11,6 +11,7 @@ interface MonthlyState {
   monthlyAmountsMap: MonthlyAmountsMap;
   monthlyActualsMap: MonthlyActualsMap;
   loading: boolean;
+  reset: () => void;
   fetchActualsRange: (startMonth: string, endMonth: string) => Promise<void>;
   fetchMonthlyAmounts: (yearMonth: string) => Promise<void>;
   fetchMonthlyAmountsRange: (startMonth: string, endMonth: string) => Promise<void>;
@@ -26,6 +27,19 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   monthlyAmountsMap: new Map(),
   monthlyActualsMap: new Map(),
   loading: false,
+
+  /**
+   * Clears everything this store holds.
+   *
+   * Called when the active ledger changes. Without it the previous ledger's
+   * numbers would stay on screen under the new ledger's name until each fetch
+   * came back -- brief, but a household budget showing someone else's figures
+   * even for a moment is not acceptable.
+   */
+  // Fresh Maps, not a shared instance: the same object handed back on every
+  // reset would let a stale reference keep mutating live state.
+  reset: () =>
+    set({ monthlyAmountsMap: new Map(), monthlyActualsMap: new Map(), loading: false }),
 
   fetchActualsRange: async (startMonth: string, endMonth: string) => {
     set({ loading: true });
