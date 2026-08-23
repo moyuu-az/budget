@@ -1,9 +1,12 @@
 node_modules/
-out/
 dist/
+storybook-static/
 .env
+# Deployment credentials kept locally (OAuth client JSON etc.). Never committed.
+.secrets/
 *.db
+*.db-shm
+*.db-wal
 .claude/
 .playwright-mcp/
-dev-app-update.yml
 docs/

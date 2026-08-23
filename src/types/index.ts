@@ -1,9 +1,8 @@
-// Re-export the shared cross-process contract (single source of truth in shared/).
-// Renderer-only types that never cross IPC stay declared below.
+// Re-export the shared client/server contract (single source of truth in shared/).
+// Renderer-only types that never travel over the wire stay declared below.
 export * from '../../shared/types';
-import type { ElectronAPI } from '../../shared/types';
 
-// --- Maps (renderer-built, never cross IPC) ---
+// --- Maps (renderer-built, never sent to the server) ---
 // yearMonth -> templateId -> amount
 export type MonthlyAmountsMap = Map<string, Map<number, number>>;
 // yearMonth -> templateId -> actualAmount
@@ -69,10 +68,4 @@ export interface ComparisonRow {
   prevMonthPercent: number | null;
   prevYearDiff: number | null;
   prevYearPercent: number | null;
-}
-
-declare global {
-  interface Window {
-    electronAPI: ElectronAPI;
-  }
 }

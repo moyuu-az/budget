@@ -1,11 +1,12 @@
 import { create } from 'zustand';
 import type { EntryTemplate, EntryTemplateInput } from '../types';
-import { getIpc } from '../lib/ipc';
+import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
 
 interface TemplateState {
   templates: EntryTemplate[];
   loading: boolean;
+  reset: () => void;
   fetchTemplates: () => Promise<void>;
   addTemplate: (input: EntryTemplateInput) => Promise<void>;
   updateTemplate: (id: number, input: Partial<EntryTemplateInput>) => Promise<void>;
@@ -17,10 +18,20 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
   templates: [],
   loading: false,
 
+  /**
+   * Clears everything this store holds.
+   *
+   * Called when the active ledger changes. Without it the previous ledger's
+   * numbers would stay on screen under the new ledger's name until each fetch
+   * came back -- brief, but a household budget showing someone else's figures
+   * even for a moment is not acceptable.
+   */
+  reset: () => set({ templates: [], loading: false }),
+
   fetchTemplates: async () => {
     set({ loading: true });
     try {
-      const templates = await getIpc().getTemplates();
+      const templates = await getApi().getTemplates();
       set({ templates, loading: false });
     } catch (e) {
       set({ loading: false });
@@ -30,7 +41,7 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
 
   addTemplate: async (input: EntryTemplateInput) => {
     try {
-      const template = await getIpc().addTemplate(input);
+      const template = await getApi().addTemplate(input);
       set({ templates: [...get().templates, template] });
     } catch (e) {
       reportError(e);
@@ -46,7 +57,7 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
       ),
     });
     try {
-      await getIpc().updateTemplate(id, input);
+      await getApi().updateTemplate(id, input);
     } catch (e) {
       set({ templates: prev });
       reportError(e);
@@ -58,7 +69,7 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
     // optimistic removal
     set({ templates: prev.filter((t) => t.id !== id) });
     try {
-      await getIpc().deleteTemplate(id);
+      await getApi().deleteTemplate(id);
     } catch (e) {
       set({ templates: prev });
       reportError(e);
@@ -74,7 +85,7 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
       ),
     });
     try {
-      await getIpc().toggleTemplate(id, enabled);
+      await getApi().toggleTemplate(id, enabled);
     } catch (e) {
       set({ templates: prev });
       reportError(e);
