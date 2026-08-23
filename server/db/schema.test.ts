@@ -443,3 +443,21 @@ describe('isolation start-up guard', () => {
     );
   });
 });
+
+describe('isolation guard catches inherited privilege', () => {
+  it('refuses a role that merely INHERITS bypass rights', async () => {
+    // The realistic mistake is not creating a superuser for the app -- it is
+    // granting the app role membership of something convenient. Checking only
+    // the role's own attributes would wave this through.
+    await db.adminPool.query('CREATE ROLE privileged_parent BYPASSRLS');
+    await db.adminPool.query('GRANT privileged_parent TO app_user');
+    try {
+      await expect(assertIsolationEnforceable(db.pool)).rejects.toThrow(
+        /inherits BYPASSRLS from "privileged_parent"/,
+      );
+    } finally {
+      await db.adminPool.query('REVOKE privileged_parent FROM app_user');
+      await db.adminPool.query('DROP ROLE privileged_parent');
+    }
+  });
+});
