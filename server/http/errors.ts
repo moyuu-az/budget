@@ -95,15 +95,30 @@ const SQLSTATE: Record<string, ErrorCode> = {
 };
 
 /**
- * A row-level security policy refused the statement.
+ * insufficient_privilege. Two very different things arrive under this one code,
+ * and they need opposite answers.
  *
- * This is never a user mistake. Either a repository tried to write outside its
- * ledger, or the connecting role lost a privilege it needs. Both are defects
- * worth finding in the logs, so it is classified as PERSISTENCE (which the
- * client shows as a generic failure) rather than dressed up as a validation
- * problem the user could fix.
+ *  - A ROW-LEVEL SECURITY refusal: the statement tried to reach a row outside
+ *    the current ledger. The commonest way to provoke it is an upsert naming
+ *    another ledger's template -- `ON CONFLICT DO UPDATE` finds the conflicting
+ *    row, cannot see it under the USING policy, and raises
+ *    'new row violates row-level security policy'. That is the second isolation
+ *    layer working, and the honest answer to the caller is FORBIDDEN.
+ *
+ *  - A missing GRANT: the connecting role cannot touch the table at all. Nothing
+ *    the caller did caused it and nothing they can do will fix it, so it stays a
+ *    500.
+ *
+ * PostgreSQL only distinguishes them in the message text, so that is what is
+ * matched. Both are logged either way.
+ *
+ * (A cross-ledger id usually trips the composite foreign key first and surfaces
+ * as CONFLICT instead. Which of the two fires depends on whether a conflicting
+ * row already exists -- both are 4xx with a message that fits, so the difference
+ * does not reach the user as anything meaningful.)
  */
-const RLS_DENIED = '42501';
+const INSUFFICIENT_PRIVILEGE = '42501';
+const RLS_MESSAGE = /row-level security/i;
 
 export function mapUnknownToAppError(error: unknown): AppError {
   if (error instanceof AppError) return error;
@@ -123,8 +138,11 @@ export function mapUnknownToAppError(error: unknown): AppError {
         safeMessage: false,
       });
 
-    if (code === RLS_DENIED) {
-      return fromDriver('PERSISTENCE');
+    if (code === INSUFFICIENT_PRIVILEGE) {
+      return RLS_MESSAGE.test(message)
+        ? // Our own wording: the caller reached outside their ledger.
+          new ForbiddenError('この家計簿では操作できない対象です')
+        : fromDriver('PERSISTENCE');
     }
     const mapped = SQLSTATE[code];
     if (mapped) return fromDriver(mapped);
