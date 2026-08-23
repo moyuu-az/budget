@@ -35,7 +35,7 @@ export function createCategoryRepository(db: Database.Database): CategoryReposit
 
     update(id, input) {
       const sets: string[] = [];
-      const params: (string | number)[] = [];
+      const params: (string | number | null)[] = [];
 
       if (input.name !== undefined) {
         sets.push('name = ?');

@@ -14,7 +14,10 @@ export interface Category {
 export interface CategoryInput {
   name: string;
   type: 'income' | 'expense';
-  color?: string;
+  // Nullable, not merely optional: `undefined` in a patch means "leave alone",
+  // while `null` means "clear the colour". Collapsing the two would make
+  // removing a colour impossible to express.
+  color?: string | null;
   sortOrder?: number;
 }
 
