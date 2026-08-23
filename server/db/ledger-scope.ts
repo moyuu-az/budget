@@ -40,10 +40,30 @@ export async function withLedgerScope<T>(
     throw new Error(`withLedgerScope: invalid ledgerId ${String(ledgerId)}`);
   }
 
+  return withTransaction(pool, async (client) => {
+    await client.query('SELECT set_config($1, $2, true)', [LEDGER_GUC, String(ledgerId)]);
+    return fn(client);
+  });
+}
+
+/**
+ * Runs `fn` in a transaction with NO ledger scope.
+ *
+ * For work on users / ledgers / ledger_members, which are not ledger-scoped and
+ * so carry no row-level security policy. Provisioning a person -- creating the
+ * user, their private ledger and both memberships -- has to be atomic, or a
+ * failure halfway leaves an account that can sign in but has nothing to open.
+ *
+ * Never reach for this from a domain repository. Doing so would step around
+ * both isolation layers at once.
+ */
+export async function withTransaction<T>(
+  pool: Pool,
+  fn: (client: PoolClient) => Promise<T>,
+): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('SELECT set_config($1, $2, true)', [LEDGER_GUC, String(ledgerId)]);
     const result = await fn(client);
     await client.query('COMMIT');
     return result;
@@ -59,12 +79,10 @@ export async function withLedgerScope<T>(
 }
 
 /**
- * Runs `fn` on a pooled connection with NO ledger scope.
+ * Runs `fn` on a pooled connection with no ledger scope and no transaction.
  *
- * Only server/auth/ may use this, and only against users / ledgers /
- * ledger_members -- the tables that must be readable before a ledger has been
- * chosen. Reaching for it from a domain repository defeats both isolation
- * layers at once.
+ * For single reads of users / ledgers / ledger_members. Anything that writes
+ * more than one row should use withTransaction instead.
  */
 export async function withoutLedgerScope<T>(
   pool: Pool,

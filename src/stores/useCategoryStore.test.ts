@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useCategoryStore } from './useCategoryStore';
 import { useToastStore } from './useToastStore';
-import { setIpc } from '../lib/ipc';
-import { createMockElectronAPI } from '../test/mockElectronAPI';
-import type { Category, CategoryInput, ElectronAPI } from '../types';
+import { setApi } from '../lib/api';
+import { createMockApi } from '../test/mock-api';
+import type { Category, CategoryInput, AppApi } from '../types';
 
 const makeCategory = (overrides: Partial<Category> = {}): Category => ({
   id: 1,
@@ -14,17 +14,17 @@ const makeCategory = (overrides: Partial<Category> = {}): Category => ({
   ...overrides,
 });
 
-let ipc: ElectronAPI;
+let ipc: AppApi;
 
 beforeEach(() => {
-  ipc = createMockElectronAPI();
-  setIpc(ipc);
+  ipc = createMockApi();
+  setApi(ipc);
   useCategoryStore.setState({ categories: [], loading: false });
   useToastStore.setState({ toasts: [], queue: [] });
 });
 
 afterEach(() => {
-  setIpc(null);
+  setApi(null);
   vi.restoreAllMocks();
 });
 

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { getIpc } from '../lib/ipc';
+import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
 
 interface BalanceState {
@@ -16,7 +16,7 @@ export const useBalanceStore = create<BalanceState>((set, get) => ({
   fetchBalance: async () => {
     set({ loading: true });
     try {
-      const balance = await getIpc().getBalance();
+      const balance = await getApi().getBalance();
       set({ balance, loading: false });
     } catch (e) {
       set({ loading: false });
@@ -28,7 +28,7 @@ export const useBalanceStore = create<BalanceState>((set, get) => ({
     const prev = get().balance;
     set({ balance }); // optimistic
     try {
-      await getIpc().setBalance(balance);
+      await getApi().setBalance(balance);
     } catch (e) {
       set({ balance: prev });
       reportError(e);

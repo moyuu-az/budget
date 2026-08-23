@@ -1,9 +1,9 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
-import { setupMockElectronAPI } from './mockElectronAPI';
+import { setupMockApi } from './mock-api';
 
-setupMockElectronAPI();
+setupMockApi();
 
 afterEach(() => {
   cleanup();

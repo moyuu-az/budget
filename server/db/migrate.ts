@@ -11,6 +11,17 @@ import type { Pool } from './pool';
 // files are skipped and the edit would only ever reach a fresh database.
 // ---------------------------------------------------------------------------
 
+/**
+ * Advisory lock key, so two processes starting at once cannot apply the same
+ * migration twice. The number is arbitrary but must never change: it is the
+ * identity of the lock, and a different value would let an old and a new
+ * deployment run migrations concurrently.
+ *
+ * Cloud Run can start several instances of a new revision simultaneously, which
+ * makes this a real scenario rather than a theoretical one.
+ */
+const MIGRATION_LOCK_KEY = 4_027_316_501;
+
 const MIGRATIONS_TABLE = `
   CREATE TABLE IF NOT EXISTS schema_migrations (
     version    TEXT PRIMARY KEY,
@@ -42,6 +53,9 @@ export async function migrate(
   const skipped: string[] = [];
 
   try {
+    // Blocks until any other migrating process finishes; released with the
+    // session when the client is returned to the pool.
+    await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK_KEY]);
     await client.query(MIGRATIONS_TABLE);
 
     const files = fs
@@ -76,6 +90,9 @@ export async function migrate(
       }
     }
   } finally {
+    await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK_KEY]).catch(() => {
+      // Losing the connection releases the lock anyway.
+    });
     client.release();
   }
 

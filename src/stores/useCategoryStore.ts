@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Category, CategoryInput } from '../types';
-import { getIpc } from '../lib/ipc';
+import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
 
 interface CategoryState {
@@ -19,7 +19,7 @@ export const useCategoryStore = create<CategoryState>((set, get) => ({
   fetchCategories: async () => {
     set({ loading: true });
     try {
-      const categories = await getIpc().getCategories();
+      const categories = await getApi().getCategories();
       set({ categories, loading: false });
     } catch (e) {
       set({ loading: false });
@@ -29,7 +29,7 @@ export const useCategoryStore = create<CategoryState>((set, get) => ({
 
   addCategory: async (input: CategoryInput) => {
     try {
-      const category = await getIpc().addCategory(input);
+      const category = await getApi().addCategory(input);
       set({ categories: [...get().categories, category] });
     } catch (e) {
       reportError(e);
@@ -43,7 +43,7 @@ export const useCategoryStore = create<CategoryState>((set, get) => ({
       categories: prev.map((c) => (c.id === id ? { ...c, ...input } : c)),
     });
     try {
-      await getIpc().updateCategory(id, input);
+      await getApi().updateCategory(id, input);
     } catch (e) {
       set({ categories: prev });
       reportError(e);
@@ -55,7 +55,7 @@ export const useCategoryStore = create<CategoryState>((set, get) => ({
     // optimistic removal
     set({ categories: prev.filter((c) => c.id !== id) });
     try {
-      await getIpc().deleteCategory(id);
+      await getApi().deleteCategory(id);
     } catch (e) {
       set({ categories: prev });
       reportError(e);

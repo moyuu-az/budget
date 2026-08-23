@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { startTestDb, resetDb, createLedger, raw, type TestDb } from '../test/pg';
 import { withLedgerScope, withoutLedgerScope } from './ledger-scope';
+import { assertIsolationEnforceable } from './assert-isolation';
 
 // ---------------------------------------------------------------------------
 // What this file protects
@@ -425,5 +426,20 @@ describe('money and date representation', () => {
       ),
     );
     expect(code).toBe('23514'); // check_violation
+  });
+});
+
+describe('isolation start-up guard', () => {
+  it('accepts the least-privilege application role', async () => {
+    await expect(assertIsolationEnforceable(db.pool)).resolves.toBeUndefined();
+  });
+
+  it('refuses a superuser connection', async () => {
+    // The exact mistake that produced a real leak during development: the server
+    // pointed at the `postgres` user, where no policy applies and a request for
+    // an empty ledger returns whatever row the planner found first.
+    await expect(assertIsolationEnforceable(db.adminPool)).rejects.toThrow(
+      /bypasses row-level security/,
+    );
   });
 });

@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { getIpc, setIpc, normalizeError } from './ipc';
+import { describe, it, expect, afterEach } from 'vitest';
+import { getApi, setApi, configureApi, normalizeError } from './api';
 import { encodeEnvelope, type ErrorEnvelope } from '../../shared/errors';
-import { createMockElectronAPI } from '../test/mockElectronAPI';
-import type { ElectronAPI } from '../types';
+import { createMockApi } from '../test/mock-api';
+import type { AppApi } from '../types';
 
 describe('normalizeError', () => {
   it('recovers code/message from a real ErrorEnvelope object', () => {
@@ -36,15 +36,13 @@ describe('normalizeError', () => {
     expect(result.details).toEqual({ id: 42 });
   });
 
-  it('decodes an encoded envelope embedded in a remote-prefixed Error message', () => {
+  it('decodes an encoded envelope embedded in a longer message', () => {
     const envelope: ErrorEnvelope = {
       __appError: true,
       code: 'CONFLICT',
       message: 'データが競合しました',
     };
-    const error = new Error(
-      `Error invoking remote method 'add-category': ${encodeEnvelope(envelope)}`,
-    );
+    const error = new Error(`request failed: ${encodeEnvelope(envelope)}`);
 
     const result = normalizeError(error);
 
@@ -78,15 +76,13 @@ describe('normalizeError', () => {
     expect(result.message).toBe('something went sideways');
   });
 
-  it('falls back to UNKNOWN with the Electron remote-method prefix stripped for a plain Error', () => {
-    const error = new Error(
-      "Error invoking remote method 'set-balance': boom in main process",
-    );
+  it('falls back to UNKNOWN carrying the raw message for a plain Error', () => {
+    const error = new Error('boom on the server');
 
     const result = normalizeError(error);
 
     expect(result.code).toBe('UNKNOWN');
-    expect(result.message).toBe('boom in main process');
+    expect(result.message).toBe('boom on the server');
   });
 
   it('falls back to the JA default message when the raw message is empty', () => {
@@ -97,30 +93,36 @@ describe('normalizeError', () => {
   });
 });
 
-describe('getIpc / setIpc seam', () => {
+describe('getApi / setApi seam', () => {
   afterEach(() => {
-    setIpc(null);
+    setApi(null);
   });
 
-  it('returns window.electronAPI when no override is set', () => {
-    expect(getIpc()).toBe(window.electronAPI);
+  it('returns the configured client when no override is set', () => {
+    const configured: AppApi = createMockApi();
+    configureApi(configured);
+
+    expect(getApi()).toBe(configured);
   });
 
-  it('setIpc(fake) makes getIpc() return the fake', () => {
-    const fake: ElectronAPI = createMockElectronAPI();
+  it('setApi(fake) makes getApi() return the fake', () => {
+    const configured: AppApi = createMockApi();
+    configureApi(configured);
+    const fake: AppApi = createMockApi();
 
-    setIpc(fake);
+    setApi(fake);
 
-    expect(getIpc()).toBe(fake);
-    expect(getIpc()).not.toBe(window.electronAPI);
+    expect(getApi()).toBe(fake);
+    expect(getApi()).not.toBe(configured);
   });
 
-  it('setIpc(null) restores window.electronAPI', () => {
-    const fake: ElectronAPI = createMockElectronAPI();
-    setIpc(fake);
+  it('setApi(null) restores the configured client', () => {
+    const configured: AppApi = createMockApi();
+    configureApi(configured);
+    setApi(createMockApi());
 
-    setIpc(null);
+    setApi(null);
 
-    expect(getIpc()).toBe(window.electronAPI);
+    expect(getApi()).toBe(configured);
   });
 });

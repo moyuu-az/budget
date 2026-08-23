@@ -1,8 +1,9 @@
 import { vi } from 'vitest';
-import type { ElectronAPI } from '../types';
+import { configureApi } from '../lib/api';
+import type { AppApi } from '../types';
 
-// A fully-mocked ElectronAPI for tests. Override individual methods per test as needed.
-export const createMockElectronAPI = (): ElectronAPI => ({
+// A fully-mocked AppApi for tests. Override individual methods per test as needed.
+export const createMockApi = (): AppApi => ({
   getBalance: vi.fn().mockResolvedValue(0),
   setBalance: vi.fn().mockResolvedValue(undefined),
 
@@ -38,15 +39,16 @@ export const createMockElectronAPI = (): ElectronAPI => ({
   addSnapshot: vi.fn().mockResolvedValue({ id: 1, date: '2026-01-01', balance: 0, createdAt: '2026-01-01T00:00:00Z' }),
   deleteSnapshot: vi.fn().mockResolvedValue(undefined),
 
-  getAppVersion: vi.fn().mockResolvedValue('1.0.0-test'),
-  checkForUpdates: vi.fn().mockResolvedValue(undefined),
-  downloadUpdate: vi.fn().mockResolvedValue(undefined),
-  installUpdate: vi.fn().mockResolvedValue(undefined),
-  onUpdateStatus: vi.fn(() => () => undefined),
+  getSession: vi.fn().mockResolvedValue({
+    user: { id: 1, email: 'test@example.com', displayName: 'test' },
+    ledgers: [{ id: 1, slug: 'shared', name: '家計', kind: 'shared' }],
+  }),
 });
 
-export const setupMockElectronAPI = (): void => {
-  (globalThis as { window?: Window & { electronAPI?: ElectronAPI } }).window =
-    (globalThis as { window?: Window & { electronAPI?: ElectronAPI } }).window ?? ({} as Window);
-  (window as Window & { electronAPI: ElectronAPI }).electronAPI = createMockElectronAPI();
+// Installs a mock as the configured client, standing in for what bootstrap does
+// in the browser. Individual tests can still override it with setApi().
+export const setupMockApi = (): AppApi => {
+  const api = createMockApi();
+  configureApi(api);
+  return api;
 };

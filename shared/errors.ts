@@ -1,13 +1,18 @@
-// The single cross-process error wire format. Electron's structured-clone IPC
-// strips Error subclass identity, so the main process throws a PLAIN tagged object
-// (an ErrorEnvelope) which survives serialization intact. The renderer detects it
-// via isErrorEnvelope and maps the code to a user-facing message.
+// The single client <-> server error wire format. The server never sends a raw
+// Error: it sends a PLAIN tagged object (an ErrorEnvelope) so the client can
+// recover a typed code rather than string-matching a message. The client detects
+// it via isErrorEnvelope and maps the code to a user-facing message.
 
 export type ErrorCode =
   | 'VALIDATION'
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'PERSISTENCE'
+  // The caller is not signed in, or the sign-in could not be verified.
+  | 'UNAUTHORIZED'
+  // The caller is signed in but may not touch what they asked for -- in practice,
+  // naming a ledger they are not a member of.
+  | 'FORBIDDEN'
   | 'UNKNOWN';
 
 export interface ErrorEnvelope {
@@ -27,10 +32,10 @@ export function isErrorEnvelope(value: unknown): value is ErrorEnvelope {
   );
 }
 
-// Electron IPC strips thrown Error subclass identity, and whether it preserves a thrown
-// plain object's own properties is version-dependent. The ONE thing it always preserves is
-// Error.message — so we encode the envelope as tagged JSON inside the message. The renderer
-// decodes it back, recovering the precise error code regardless of Electron's serialization.
+// The envelope is also encoded as tagged JSON inside an Error's message. Over HTTP the
+// body carries the envelope directly, but a fetch client still has to throw *something*,
+// and a thrown Error is the one shape every caller already handles. Encoding the envelope
+// into the message means the code survives even where a custom property would not.
 export const ENVELOPE_TAG = '@@APP_ERROR@@';
 
 export function encodeEnvelope(envelope: ErrorEnvelope): string {
