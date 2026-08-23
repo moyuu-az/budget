@@ -26,34 +26,41 @@ import type { Pool } from './pool';
 // ---------------------------------------------------------------------------
 
 export async function assertIsolationEnforceable(pool: Pool): Promise<void> {
+  // Checks INHERITED privileges, not just the role's own attributes.
+  //
+  // `SELECT rolsuper FROM pg_roles WHERE rolname = current_user` would miss the
+  // realistic case: an ordinary-looking role that was granted membership of a
+  // privileged one. pg_has_role(..., 'USAGE') is true when the current user can
+  // actually exercise that role's privileges, which is the question that
+  // matters -- a role inheriting BYPASSRLS bypasses row-level security just as
+  // completely as one holding it directly.
   const { rows } = await pool.query<{
     role: string;
+    via: string | null;
     is_superuser: boolean;
     bypasses_rls: boolean;
   }>(
     `SELECT current_user AS role,
-            rolsuper     AS is_superuser,
-            rolbypassrls AS bypasses_rls
-       FROM pg_roles
-      WHERE rolname = current_user`,
+            r.rolname    AS via,
+            r.rolsuper   AS is_superuser,
+            r.rolbypassrls AS bypasses_rls
+       FROM pg_roles r
+      WHERE pg_has_role(current_user, r.oid, 'USAGE')
+        AND (r.rolsuper OR r.rolbypassrls)
+      LIMIT 1`,
   );
 
-  if (rows.length === 0) {
-    // current_user has no pg_roles row: possible with some managed-service
-    // proxies. Better to stop than to assume isolation holds.
-    throw new Error(
-      'Cannot determine the privileges of the connected database role; refusing to start',
-    );
-  }
+  // No row means no reachable role carries either attribute -- the safe case.
+  if (rows.length === 0) return;
 
-  const { role, is_superuser, bypasses_rls } = rows[0];
-  if (is_superuser || bypasses_rls) {
-    const reason = is_superuser ? 'is a SUPERUSER' : 'holds BYPASSRLS';
-    throw new Error(
-      `Database role "${role}" ${reason}, which bypasses row-level security. ` +
-        'Ledger isolation would not apply and one ledger\'s data could be served for another. ' +
-        'Connect as a least-privilege role instead (see DATABASE_APP_ROLE in .env.example), ' +
-        'and run migrations separately as the owner.',
-    );
-  }
+  const { role, via, is_superuser } = rows[0];
+  const attribute = is_superuser ? 'SUPERUSER' : 'BYPASSRLS';
+  const how = via === role ? `is ${attribute}` : `inherits ${attribute} from "${via ?? '?'}"`;
+
+  throw new Error(
+    `Database role "${role}" ${how}, which bypasses row-level security. ` +
+      "Ledger isolation would not apply and one ledger's data could be served for another. " +
+      'Connect as a least-privilege role instead (see DATABASE_APP_ROLE in .env.example), ' +
+      'and run migrations separately as the owner.',
+  );
 }
