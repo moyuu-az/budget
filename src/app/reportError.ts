@@ -1,5 +1,5 @@
 import { useToastStore } from '../stores/useToastStore';
-import { normalizeError, type NormalizedError } from '../lib/ipc';
+import { normalizeError, type NormalizedError } from '../lib/api';
 import type { ErrorCode } from '../../shared/errors';
 
 const GENERIC_MESSAGES: Record<ErrorCode, string> = {
@@ -7,6 +7,8 @@ const GENERIC_MESSAGES: Record<ErrorCode, string> = {
   NOT_FOUND: '対象が見つかりませんでした',
   CONFLICT: 'データが競合しました。再度お試しください',
   PERSISTENCE: 'データの保存に失敗しました',
+  UNAUTHORIZED: 'サインインが必要です。ページを再読み込みしてください',
+  FORBIDDEN: 'この家計簿を開く権限がありません',
   UNKNOWN: '予期しないエラーが発生しました',
 };
 

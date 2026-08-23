@@ -4,7 +4,7 @@ import type {
   MonthlyAmountsMap,
   MonthlyActualsMap,
 } from '../types';
-import { getIpc } from '../lib/ipc';
+import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
 
 interface MonthlyState {
@@ -30,7 +30,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   fetchActualsRange: async (startMonth: string, endMonth: string) => {
     set({ loading: true });
     try {
-      const actuals = await getIpc().getMonthlyActualsRange(startMonth, endMonth);
+      const actuals = await getApi().getMonthlyActualsRange(startMonth, endMonth);
       const newMap = new Map(get().monthlyActualsMap);
       for (const [key] of newMap) {
         if (key >= startMonth && key <= endMonth) {
@@ -53,7 +53,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   fetchMonthlyAmounts: async (yearMonth: string) => {
     set({ loading: true });
     try {
-      const amounts = await getIpc().getMonthlyAmounts(yearMonth);
+      const amounts = await getApi().getMonthlyAmounts(yearMonth);
       const newMap = new Map(get().monthlyAmountsMap);
       const monthMap = new Map<number, number>();
       for (const a of amounts) {
@@ -70,7 +70,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   fetchMonthlyAmountsRange: async (startMonth: string, endMonth: string) => {
     set({ loading: true });
     try {
-      const amounts = await getIpc().getMonthlyAmountsRange(startMonth, endMonth);
+      const amounts = await getApi().getMonthlyAmountsRange(startMonth, endMonth);
       const newMap = new Map(get().monthlyAmountsMap);
 
       // Clear existing entries in the range
@@ -108,7 +108,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     set({ monthlyAmountsMap: newMap });
 
     try {
-      await getIpc().setMonthlyAmount(templateId, yearMonth, amount);
+      await getApi().setMonthlyAmount(templateId, yearMonth, amount);
     } catch (e) {
       set({ monthlyAmountsMap: prevMap });
       reportError(e);
@@ -128,7 +128,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     }
 
     try {
-      await getIpc().deleteMonthlyAmount(templateId, yearMonth);
+      await getApi().deleteMonthlyAmount(templateId, yearMonth);
     } catch (e) {
       set({ monthlyAmountsMap: prevMap });
       reportError(e);
@@ -138,9 +138,9 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   copyMonthlyAmounts: async (fromMonth: string, toMonth: string) => {
     set({ loading: true });
     try {
-      await getIpc().copyMonthlyAmounts(fromMonth, toMonth);
+      await getApi().copyMonthlyAmounts(fromMonth, toMonth);
       // Re-fetch the target month to get the copied data
-      const amounts = await getIpc().getMonthlyAmounts(toMonth);
+      const amounts = await getApi().getMonthlyAmounts(toMonth);
       const newMap = new Map(get().monthlyAmountsMap);
       const monthMap = new Map<number, number>();
       for (const a of amounts) {
@@ -157,7 +157,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   fetchMonthlyActuals: async (yearMonth: string) => {
     set({ loading: true });
     try {
-      const actuals = await getIpc().getMonthlyActuals(yearMonth);
+      const actuals = await getApi().getMonthlyActuals(yearMonth);
       const newMap = new Map(get().monthlyActualsMap);
       const monthMap = new Map<number, number>();
       for (const a of actuals) {
@@ -184,7 +184,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     set({ monthlyActualsMap: newMap });
 
     try {
-      await getIpc().setMonthlyActual(templateId, yearMonth, amount);
+      await getApi().setMonthlyActual(templateId, yearMonth, amount);
     } catch (e) {
       set({ monthlyActualsMap: prevMap });
       reportError(e);
@@ -204,7 +204,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     }
 
     try {
-      await getIpc().deleteMonthlyActual(templateId, yearMonth);
+      await getApi().deleteMonthlyActual(templateId, yearMonth);
     } catch (e) {
       set({ monthlyActualsMap: prevMap });
       reportError(e);
