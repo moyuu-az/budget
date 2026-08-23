@@ -358,6 +358,52 @@ describe('responses', () => {
     expect(envelope.details).toBeDefined();
   });
 
+  it('answers FORBIDDEN when row-level security refuses a cross-ledger write', async () => {
+    // An upsert naming another ledger's template: ON CONFLICT DO UPDATE finds
+    // the conflicting row, cannot see it under the USING policy, and raises
+    // 42501. That is the isolation layer working, not the server malfunctioning,
+    // so it must not surface as a 500.
+    const bob = await sessionFor(BOB);
+    const bobLedger = personalLedgerOf(bob);
+    const template = (await (
+      await call('addTemplate', {
+        as: BOB, ledgerId: bobLedger, args: [{ name: 'bob', dayOfMonth: 1, type: 'expense' }],
+      })
+    ).json()) as { id: number };
+    await call('setMonthlyAmount', { as: BOB, ledgerId: bobLedger, args: [template.id, '2026-01', 111] });
+
+    const alice = await sessionFor(ALICE);
+    const response = await call('setMonthlyAmount', {
+      as: ALICE, ledgerId: personalLedgerOf(alice), args: [template.id, '2026-01', 999],
+    });
+
+    expect(response.status).toBe(403);
+    expect((await envelopeOf(response)).code).toBe('FORBIDDEN');
+
+    // Bob's figure is untouched.
+    const amounts = (await (
+      await call('getMonthlyAmounts', { as: BOB, ledgerId: bobLedger, args: ['2026-01'] })
+    ).json()) as { amount: number }[];
+    expect(amounts).toEqual([expect.objectContaining({ amount: 111 })]);
+  });
+
+  it('still treats a missing GRANT as a server fault, not a permission answer', async () => {
+    // The same SQLSTATE (42501) covers "the role cannot touch this table at
+    // all". Nothing the caller did caused that and nothing they can do fixes
+    // it, so it must stay a 500 rather than telling them they lack permission.
+    const alice = await sessionFor(ALICE);
+    const ledgerId = sharedLedgerOf(alice);
+
+    await db.adminPool.query('REVOKE SELECT ON categories FROM app_user');
+    try {
+      const response = await call('getCategories', { as: ALICE, ledgerId });
+      expect(response.status).toBe(500);
+      expect((await envelopeOf(response)).code).toBe('PERSISTENCE');
+    } finally {
+      await db.adminPool.query('GRANT SELECT ON categories TO app_user');
+    }
+  });
+
   it('withholds driver error text when internals are not exposed', async () => {
     const production = createApp({
       pool: db.pool,
