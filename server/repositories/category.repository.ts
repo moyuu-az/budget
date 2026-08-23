@@ -1,0 +1,68 @@
+import type { PoolClient } from '../db/pool';
+import type { Category, CategoryInput } from '../../shared/types';
+import type { CategoryRow } from './row-types';
+import { rowToCategory } from '../mappers';
+import { buildSetClause } from './sql';
+
+export interface CategoryRepository {
+  getAll(): Promise<Category[]>;
+  add(input: CategoryInput): Promise<Category>;
+  update(id: number, input: Partial<CategoryInput>): Promise<void>;
+  remove(id: number): Promise<void>;
+}
+
+/** Domain field -> column. The only place the correspondence is written down. */
+const COLUMNS: Partial<Record<keyof CategoryInput, string>> = {
+  name: 'name',
+  type: 'type',
+  color: 'color',
+  sortOrder: 'sort_order',
+};
+
+export function createCategoryRepository(
+  client: PoolClient,
+  ledgerId: number,
+): CategoryRepository {
+  return {
+    async getAll() {
+      const { rows } = await client.query<CategoryRow>(
+        'SELECT * FROM categories ORDER BY type ASC, sort_order ASC',
+      );
+      return rows.map(rowToCategory);
+    },
+
+    async add(input) {
+      // MAX(sort_order) is per ledger, and row-level security already confines
+      // the scan to this ledger -- so the next number continues this household's
+      // ordering rather than a global one.
+      const { rows: maxRows } = await client.query<{ max_order: number }>(
+        'SELECT COALESCE(MAX(sort_order), -1) AS max_order FROM categories WHERE type = $1',
+        [input.type],
+      );
+      const sortOrder = input.sortOrder ?? maxRows[0].max_order + 1;
+
+      const { rows } = await client.query<CategoryRow>(
+        `INSERT INTO categories (ledger_id, name, type, color, sort_order)
+           VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+        [ledgerId, input.name, input.type, input.color ?? null, sortOrder],
+      );
+      return rowToCategory(rows[0]);
+    },
+
+    async update(id, input) {
+      const { sets, params } = buildSetClause(input, COLUMNS);
+      if (sets.length === 0) return;
+
+      await client.query(
+        `UPDATE categories SET ${sets.join(', ')} WHERE id = $${params.length + 1}`,
+        [...params, id],
+      );
+    },
+
+    async remove(id) {
+      // The composite FK on entry_templates carries ON DELETE SET NULL
+      // (category_id), so templates survive and merely become uncategorised.
+      await client.query('DELETE FROM categories WHERE id = $1', [id]);
+    },
+  };
+}
