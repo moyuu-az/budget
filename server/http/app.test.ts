@@ -547,3 +547,42 @@ describe('bounded names', () => {
     expect(oversized.status).toBe(400);
   });
 });
+
+describe('asset values are whole yen', () => {
+  it('refuses a fraction of a yen', async () => {
+    // Every screen rounds for display, and figures rounded independently stop
+    // adding up: two holdings of 100.5 render as ¥101 + ¥101 beside a total of
+    // ¥201. Refusing the input is the only fix that does not require every
+    // reader to round the same way forever.
+    const alice = await sessionFor(ALICE);
+    const ledgerId = personalLedgerOf(alice);
+    const category = (await (
+      await call('addAssetCategory', { as: ALICE, ledgerId, args: [{ name: '現金' }] })
+    ).json()) as { id: number };
+
+    const response = await call('addAsset', {
+      as: ALICE,
+      ledgerId,
+      args: [{ categoryId: category.id, name: '財布', value: 100.5 }],
+    });
+
+    expect(response.status).toBe(400);
+    expect((await envelopeOf(response)).code).toBe('VALIDATION');
+  });
+
+  it('still accepts a negative whole amount', async () => {
+    const alice = await sessionFor(ALICE);
+    const ledgerId = personalLedgerOf(alice);
+    const category = (await (
+      await call('addAssetCategory', { as: ALICE, ledgerId, args: [{ name: '住宅ローン' }] })
+    ).json()) as { id: number };
+
+    const response = await call('addAsset', {
+      as: ALICE,
+      ledgerId,
+      args: [{ categoryId: category.id, name: '残債', value: -28_000_000 }],
+    });
+
+    expect(response.status).toBe(200);
+  });
+});

@@ -1,8 +1,6 @@
 import { useMemo } from 'react';
-import { useBalanceStore } from '../stores/useBalanceStore';
-import { useTemplateStore } from '../stores/useTemplateStore';
-import { useMonthlyStore } from '../stores/useMonthlyStore';
-import { generateForecast, toYearMonth } from '../utils/forecast';
+import { useForecast } from './useForecast';
+import { toYearMonth } from '../utils/forecast';
 import type { ForecastPoint } from '../types';
 
 export interface NextLargeExpense {
@@ -87,12 +85,8 @@ function computeKpis(points: ForecastPoint[]): DashboardKpis {
 }
 
 export function useDashboardKpis(): DashboardKpis {
-  const balance = useBalanceStore((s) => s.balance);
-  const templates = useTemplateStore((s) => s.templates);
-  const monthlyAmountsMap = useMonthlyStore((s) => s.monthlyAmountsMap);
-
-  return useMemo(() => {
-    const points = generateForecast(balance, templates, monthlyAmountsMap, KPI_HORIZON_DAYS);
-    return computeKpis(points);
-  }, [balance, templates, monthlyAmountsMap]);
+  // Same projection as the chart, just a fixed horizon -- see useForecast for
+  // why there is only one place that builds it.
+  const points = useForecast(KPI_HORIZON_DAYS);
+  return useMemo(() => computeKpis(points), [points]);
 }

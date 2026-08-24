@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { assetsOfCategory, totalAssetValue, useAssetStore } from './useAssetStore';
+import { assetsOfCategory, useAssetStore } from './useAssetStore';
+import { totalAssetValue } from '../utils/net-worth';
 import { useToastStore } from './useToastStore';
 import { setApi } from '../lib/api';
 import { createMockApi } from '../test/mock-api';
@@ -149,6 +150,24 @@ describe('updateAsset', () => {
     expect(useToastStore.getState().toasts.map((t) => t.type)).toEqual(['error']);
     // No point refreshing a list nothing changed.
     expect(api.getAssets).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the holdings without touching the categories', async () => {
+    // Refetching categories here would overwrite an optimistic rename that
+    // another save has in flight, and updateCategory has already returned -- so
+    // nothing would put it back until the next full load. A holding whose
+    // category is missing is reported as その他 instead (see utils/net-worth).
+    const renamed = [makeCategory({ id: 1, name: '新NISA' })];
+    useAssetStore.setState({ categories: renamed, assets: [makeAsset({ id: 1 })] });
+    api.updateAsset = vi.fn().mockResolvedValue(undefined);
+    api.getAssets = vi.fn().mockResolvedValue([makeAsset({ id: 1, name: '更新後' })]);
+    api.getAssetCategories = vi.fn();
+
+    await useAssetStore.getState().updateAsset(1, { name: '更新後' });
+
+    expect(api.getAssetCategories).not.toHaveBeenCalled();
+    expect(useAssetStore.getState().categories).toEqual(renamed);
+    expect(useAssetStore.getState().assets[0].name).toBe('更新後');
   });
 
   it('still reports success when only the refresh fails, and says nothing else', async () => {

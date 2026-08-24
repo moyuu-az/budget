@@ -1,12 +1,12 @@
 import { useMemo, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import type { ForecastPeriod, ViewType } from '../../types';
-import { useBalanceStore } from '../../stores/useBalanceStore';
-import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useMonthlyStore } from '../../stores/useMonthlyStore';
-import { generateForecast, toYearMonth, periodToDays, periodToMonths } from '../../utils/forecast';
+import { useForecast } from '../../hooks/useForecast';
+import { toYearMonth, periodToDays, periodToMonths } from '../../utils/forecast';
 import ForecastChart from './ForecastChart';
 import KpiHero from './KpiHero';
+import HoldingsCard from './HoldingsCard';
 import MinBalanceCard from './MinBalanceCard';
 import SankeyChart from './SankeyChart';
 import UpcomingEvents from './UpcomingEvents';
@@ -17,9 +17,6 @@ interface DashboardViewProps {
 
 function DashboardView({ onNavigate }: DashboardViewProps) {
   const [forecastPeriod, setForecastPeriod] = useState<ForecastPeriod>('60d');
-  const balance = useBalanceStore((s) => s.balance);
-  const templates = useTemplateStore((s) => s.templates);
-  const monthlyAmountsMap = useMonthlyStore((s) => s.monthlyAmountsMap);
   const fetchMonthlyAmountsRange = useMonthlyStore((s) => s.fetchMonthlyAmountsRange);
 
   // Fetch monthly amounts for forecast range (current + dynamic months)
@@ -32,11 +29,7 @@ function DashboardView({ onNavigate }: DashboardViewProps) {
     fetchMonthlyAmountsRange(startMonth, endMonth);
   }, [fetchMonthlyAmountsRange, forecastPeriod]);
 
-  // Compute forecast data
-  const forecast = useMemo(
-    () => generateForecast(balance, templates, monthlyAmountsMap, periodToDays(forecastPeriod)),
-    [balance, templates, monthlyAmountsMap, forecastPeriod]
-  );
+  const forecast = useForecast(periodToDays(forecastPeriod));
 
   const minimumPoint = useMemo(
     () => forecast.find((p) => p.isMinimum) ?? null,
@@ -60,6 +53,11 @@ function DashboardView({ onNavigate }: DashboardViewProps) {
     >
       {/* KPI hero - first row */}
       <KpiHero />
+
+      {/* What is held right now. Renders nothing when 資産 is unused, and its
+          cash/net-worth toggle reaches only this card -- everything below stays
+          cash, because that is what the forecast is about. */}
+      <HoldingsCard />
 
       {/* Forecast Chart - full width */}
       <ForecastChart
