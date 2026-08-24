@@ -8,6 +8,7 @@ import DashboardView from './components/dashboard/DashboardView';
 import EntriesView from './components/entries/EntriesView';
 import HistoryView from './components/history/HistoryView';
 import AnalyticsView from './components/analytics/AnalyticsView';
+import AssetsView from './components/assets/AssetsView';
 import SettingsView from './components/settings/SettingsView';
 import ParticleBackground from './components/ParticleBackground';
 import ShortcutHelpDialog from './components/layout/ShortcutHelpDialog';
@@ -62,6 +63,11 @@ function App() {
           {currentView === 'analytics' && (
             <motion.div key="analytics" {...pageTransition}>
               <AnalyticsView />
+            </motion.div>
+          )}
+          {currentView === 'assets' && (
+            <motion.div key="assets" {...pageTransition}>
+              <AssetsView />
             </motion.div>
           )}
           {currentView === 'settings' && (

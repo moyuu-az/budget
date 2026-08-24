@@ -13,6 +13,9 @@ const GO_TO_VIEW: Record<string, ViewType> = {
   h: 'history',
   a: 'analytics',
   s: 'settings',
+  // 'a' was already taken by 分析; 'w' for wealth keeps every view reachable
+  // without renaming a shortcut people have already learnt.
+  w: 'assets',
 };
 
 const CHORD_TIMEOUT_MS = 1200;

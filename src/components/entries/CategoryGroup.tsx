@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
 import EntryRow from './EntryRow';
+import { costTypeLabel, costTypeTone } from '../../utils/cost-type';
+import { Badge } from '../ui/Badge';
 import type { Category, EntryTemplate } from '../../types';
 
 interface Props {
@@ -63,6 +65,12 @@ function CategoryGroup({ category, templates, yearMonth }: Props) {
             {category?.name ?? '未分類'}
           </span>
           <span className="text-xs text-slate-500">({templates.length})</span>
+
+          {/* 固定費/変動費 of the group, so the split in the summary above can be
+              traced back to the rows that produced it. */}
+          {category?.type === 'expense' && (
+            <Badge tone={costTypeTone(category.costType)}>{costTypeLabel(category.costType)}</Badge>
+          )}
         </div>
 
         {/* Subtotal */}

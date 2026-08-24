@@ -1,6 +1,7 @@
 node_modules/
 dist/
 storybook-static/
+coverage/
 .env
 # Deployment credentials kept locally (OAuth client JSON etc.). Never committed.
 .secrets/
