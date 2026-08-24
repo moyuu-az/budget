@@ -3,16 +3,7 @@ import { motion } from 'framer-motion';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { useDashboardKpis } from '../../hooks/useDashboardKpis';
-
-function formatYen(amount: number): string {
-  const sign = amount < 0 ? '-' : '';
-  return `${sign}¥${Math.abs(Math.round(amount)).toLocaleString('ja-JP')}`;
-}
-
-function formatSignedYen(amount: number): string {
-  const sign = amount > 0 ? '+' : amount < 0 ? '-' : '';
-  return `${sign}¥${Math.abs(Math.round(amount)).toLocaleString('ja-JP')}`;
-}
+import { formatYen, formatSignedYen } from '../../utils/currency';
 
 interface KpiCardProps {
   label: string;

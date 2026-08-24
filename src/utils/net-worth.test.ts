@@ -79,14 +79,21 @@ describe('summarizeHoldings', () => {
 });
 
 describe('the parts always add up', () => {
-  it('rounds each holding once, so the chips sum to the asset total', () => {
-    // Values are NUMERIC(14,2). Rounding each displayed figure independently
-    // would show ¥101 + ¥101 against a total of ¥201 -- a one-yen contradiction
-    // on the very line whose job is to prove the parts add up.
+  it('does not round, so every screen showing the same data agrees', () => {
+    // An earlier version rounded per holding here so the chips would sum
+    // exactly. It made this card disagree with the 資産 screen, which rounds
+    // only for display. Rounding lives at the edge (utils/currency.ts) and
+    // whole-yen values are enforced at the input instead.
+    const result = summarizeHoldings(0, [category()], [asset({ value: 100 })]);
+    expect(result.assets).toBe(100);
+    expect(result.total).toBe(100);
+  });
+
+  it('keeps the chips summing to the asset total', () => {
     const result = summarizeHoldings(
       0,
       [category()],
-      [asset({ id: 1, value: 100.5 }), asset({ id: 2, value: 100.5 })],
+      [asset({ id: 1, value: 100 }), asset({ id: 2, value: 250 })],
     );
     const chips = result.byCategory.reduce((sum, line) => sum + line.value, 0);
     expect(chips + result.other).toBe(result.assets);
@@ -110,8 +117,8 @@ describe('the parts always add up', () => {
     expect(result.other).toBe(0);
   });
 
-  it('rounds the balance too, so 残高 ＋ 資産 ＝ 純資産 holds exactly', () => {
-    const result = summarizeHoldings(500_000.4, [category()], [asset({ value: 100.5 })]);
+  it('keeps 残高 ＋ 資産 ＝ 純資産 exact', () => {
+    const result = summarizeHoldings(500_000, [category()], [asset({ value: 100 })]);
     expect(result.cash + result.assets).toBe(result.total);
   });
 });

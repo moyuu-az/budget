@@ -16,15 +16,20 @@ interface StoryArgs {
 /**
  * Seeds the stores the card reads, since it takes no props of its own.
  *
- * Set during render rather than in an effect: an effect runs AFTER the first
- * paint, so switching stories would show the previous story's state for a frame.
- * The card is rendered below, so it mounts against state that is already correct.
+ * Done in a loader rather than in the component: a loader runs BEFORE the story
+ * renders, so the first paint is already correct. Setting the stores during
+ * render would notify the already-mounted card mid-render, which React reports
+ * as updating one component while rendering another; doing it in an effect
+ * would show the previous story's state for a frame.
  */
-function Harness({ balance, categories, assets, view }: StoryArgs) {
-  useBalanceStore.setState({ balance });
-  useAssetStore.setState({ categories, assets, loading: false });
-  useUIStore.setState({ holdingsView: view });
+const seed = async ({ args }: { args: StoryArgs }): Promise<Record<string, never>> => {
+  useBalanceStore.setState({ balance: args.balance });
+  useAssetStore.setState({ categories: args.categories, assets: args.assets, loading: false });
+  useUIStore.setState({ holdingsView: args.view });
+  return {};
+};
 
+function Harness(_: StoryArgs) {
   return <HoldingsCard />;
 }
 
@@ -46,6 +51,7 @@ const meta = {
   title: 'Dashboard/HoldingsCard',
   component: Harness,
   parameters: { layout: 'padded' },
+  loaders: [seed],
   args: {
     balance: 1_525_210,
     categories: [NISA, CASH],

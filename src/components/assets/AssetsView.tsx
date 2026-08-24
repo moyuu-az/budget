@@ -2,9 +2,11 @@ import { useMemo, useState, type ReactElement } from 'react';
 import { motion } from 'framer-motion';
 import type { Asset, AssetCategory, AssetCategoryInput, AssetInput } from '../../types';
 import type { AssetCategoryTemplate } from '../../../shared/asset-templates';
-import { useAssetStore, assetsOfCategory, totalAssetValue } from '../../stores/useAssetStore';
+import { useAssetStore, assetsOfCategory } from '../../stores/useAssetStore';
+import { totalAssetValue } from '../../utils/net-worth';
 import { useToastStore } from '../../stores/useToastStore';
 import { Card } from '../ui/Card';
+import { formatYen as yen } from '../../utils/currency';
 import { Button } from '../ui/Button';
 import { EmptyState } from '../ui/EmptyState';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
@@ -25,7 +27,6 @@ interface AssetDialogState {
   asset: Asset | null;
 }
 
-const yen = (value: number): string => `¥${value.toLocaleString('ja-JP')}`;
 
 /**
  * 資産.

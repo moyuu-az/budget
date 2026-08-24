@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import type { Asset, AssetCategory } from '../../types';
 import { formatFieldValue } from '../../../shared/asset-fields';
 import { Card } from '../ui/Card';
+import { formatYen as yen } from '../../utils/currency';
 import { Button } from '../ui/Button';
 import { IconButton } from '../ui/IconButton';
 
@@ -16,7 +17,6 @@ interface Props {
   onDeleteCategory: () => void;
 }
 
-const yen = (value: number): string => `¥${value.toLocaleString('ja-JP')}`;
 
 /**
  * One asset category and its holdings.

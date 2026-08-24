@@ -90,6 +90,33 @@ describe('when the ledger tracks assets', () => {
     expect(screen.getByText('¥250,000')).toBeInTheDocument();
   });
 
+  it('shows holdings whose category is not loaded as その他', async () => {
+    // Reachable in a shared ledger: the other member adds a category, this
+    // client refetches holdings only. Dropping them would make the chips
+    // quietly fail to add up to the 資産 figure above them.
+    const user = userEvent.setup();
+    useAssetStore.setState({
+      categories: [NISA],
+      assets: [holding(), holding({ id: 2, categoryId: 99, value: 40_000 })],
+    });
+    render(<HoldingsCard />);
+
+    await user.click(screen.getByRole('tab', { name: '純資産' }));
+
+    expect(screen.getByText('その他')).toBeInTheDocument();
+    expect(screen.getByText('¥40,000')).toBeInTheDocument();
+    expect(screen.getByText(/資産 ¥1,040,000/)).toBeInTheDocument();
+  });
+
+  it('does not invent an その他 row when every holding has its category', async () => {
+    const user = userEvent.setup();
+    render(<HoldingsCard />);
+
+    await user.click(screen.getByRole('tab', { name: '純資産' }));
+
+    expect(screen.queryByText('その他')).not.toBeInTheDocument();
+  });
+
   it('shows a loan tracked as a negative asset', async () => {
     const user = userEvent.setup();
     useAssetStore.setState({

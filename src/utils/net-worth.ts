@@ -1,5 +1,4 @@
 import type { Asset, AssetCategory } from '../types';
-import { totalAssetValue } from '../stores/useAssetStore';
 
 // ---------------------------------------------------------------------------
 // What the household holds right now.
@@ -19,6 +18,22 @@ import { totalAssetValue } from '../stores/useAssetStore';
 //   a flag would move the same judgement into a setting the user has to keep
 //   correct, and would hide the mistake again when they got it wrong.
 // ---------------------------------------------------------------------------
+
+/**
+ * Sum of every holding.
+ *
+ * Lives here rather than in the asset store so that `src/utils/` depends on
+ * nothing: importing it from the store pulled zustand, the API client and the
+ * toast store in behind it, and would have become a cycle the moment the store
+ * wanted anything from this module.
+ *
+ * Takes anything with a `value` so a projection can be summed through the same
+ * function -- two reduces over the same field is how two screens end up
+ * disagreeing after only one of them is fixed.
+ */
+export function totalAssetValue(assets: readonly { value: number }[]): number {
+  return assets.reduce((sum, asset) => sum + asset.value, 0);
+}
 
 export interface HoldingsCategoryLine {
   id: number;
@@ -58,21 +73,19 @@ export function summarizeHoldings(
   categories: readonly AssetCategory[],
   assets: readonly Asset[],
 ): Holdings {
-  // ROUNDED ONCE, HERE, AND NEVER AGAIN.
+  // NOTHING IS ROUNDED HERE.
   //
-  // Asset values are NUMERIC(14,2), so two holdings of 100.5 sum to 201. Round
-  // for display at each figure independently and the card shows ¥101 + ¥101
-  // against a total of ¥201 -- a one-yen contradiction on the very line whose
-  // job is to prove the parts add up. Rounding the parts first and deriving
-  // every total from the rounded parts makes the arithmetic on screen true by
-  // construction.
-  const rounded = assets.map((asset) => ({
-    categoryId: asset.categoryId,
-    value: Math.round(asset.value),
-  }));
-
+  // An earlier version rounded each holding so the chips would sum exactly to
+  // the asset total. It worked on this card and broke the 資産 screen, which
+  // rounds only for display: the same two holdings of 100.5 read ¥202 here and
+  // ¥201 there. Rounding in two places is the problem, not the cure.
+  //
+  // So rounding happens once, at the very edge, in utils/currency.ts -- and the
+  // reason it can be left that late is that a holding's value is now required to
+  // be a whole number of yen (server/http/input-schemas.ts). With integers in,
+  // every sum on every screen is exact and identical.
   const totals = new Map<number, number>();
-  for (const asset of rounded) {
+  for (const asset of assets) {
     totals.set(asset.categoryId, (totals.get(asset.categoryId) ?? 0) + asset.value);
   }
 
@@ -91,13 +104,13 @@ export function summarizeHoldings(
   // Summed from the holdings themselves, not from byCategory: one whose category
   // has vanished from the list still belongs in the total. `other` below is what
   // keeps that difference visible instead of silent.
-  const assetTotal = totalAssetValue(rounded);
+  const assetTotal = totalAssetValue(assets);
   const shown = byCategory.reduce((sum, line) => sum + line.value, 0);
 
   return {
-    cash: Math.round(cash),
+    cash,
     assets: assetTotal,
-    total: Math.round(cash) + assetTotal,
+    total: cash + assetTotal,
     byCategory,
     other: assetTotal - shown,
   };

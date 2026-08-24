@@ -150,9 +150,20 @@ export const assetCategoryPatchSchema = assetCategoryInputSchema.partial();
 export const assetInputSchema = z.object({
   categoryId: idSchema,
   name: nameSchema('資産名'),
-  // Not amountSchema: a holding may legitimately be negative (a loan balance
-  // tracked as an asset category), which is why value has no CHECK either.
-  value: finiteNumberSchema,
+  /**
+   * Whole yen, and it may be negative.
+   *
+   * Negative because a household that tracks a loan balance as an asset
+   * category has to enter it that way for the total to mean anything -- which
+   * is also why the column carries no CHECK.
+   *
+   * Integer because the alternative is a fraction of a yen that no screen can
+   * show. Every screen rounds for display, and figures rounded independently
+   * stop adding up: two holdings of 100.5 render as ¥101 + ¥101 beside a total
+   * of ¥201. Refusing the input is the only fix that does not require every
+   * reader to round the same way forever.
+   */
+  value: finiteNumberSchema.int('評価額は円単位（整数）で入力してください'),
   fields: assetFieldValuesSchema.optional(),
 });
 export const assetPatchSchema = assetInputSchema.partial();

@@ -137,16 +137,20 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     // put two contradictory messages on screen for a problem the user cannot
     // act on -- the same confusion this store's boolean return exists to end.
     //
-    // BOTH lists, not just the holdings. In a shared ledger the other member may
-    // have added a category since this client last looked; fetching holdings
-    // alone would bring in one belonging to a category this client does not
-    // have, and nothing on screen could explain it.
+    // HOLDINGS ONLY -- categories are deliberately left alone.
+    //
+    // Refetching both looks safer and is not: the category list would overwrite
+    // an optimistic rename that another save has in flight, and updateCategory
+    // has already returned, so nothing would put it back until the next full
+    // load. Trading a visible-and-explained gap for a silently reverted edit is
+    // the wrong way round.
+    //
+    // The gap it leaves -- a holding whose category this client has not fetched,
+    // because the other member of a shared ledger added it -- is handled where
+    // it is visible instead: summarizeHoldings reports it as その他 rather than
+    // letting the parts quietly fail to add up.
     try {
-      const [categories, assets] = await Promise.all([
-        getApi().getAssetCategories(),
-        getApi().getAssets(),
-      ]);
-      set({ categories, assets });
+      set({ assets: await getApi().getAssets() });
     } catch {
       // Intentionally ignored; see above.
     }
@@ -166,17 +170,6 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     }
   },
 }));
-
-/**
- * Sum of every holding. The 資産 view's headline figure, and the dashboard's.
- *
- * Takes anything with a `value` so the dashboard can sum its already-rounded
- * projection through the same function -- two reduces over the same field is
- * how the two screens end up disagreeing after only one of them is fixed.
- */
-export function totalAssetValue(assets: readonly { value: number }[]): number {
-  return assets.reduce((sum, asset) => sum + asset.value, 0);
-}
 
 /** Holdings of one category, in a stable order. */
 export function assetsOfCategory(assets: readonly Asset[], categoryId: number): Asset[] {

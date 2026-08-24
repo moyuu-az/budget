@@ -62,7 +62,13 @@ function AssetDialog({ open, category, asset, onSubmit, onClose }: Props): React
 
     // Number(''), which is 0, would silently save a blank box as zero.
     const parsedValue = value.trim() === '' ? Number.NaN : Number(value.trim());
-    if (!Number.isFinite(parsedValue)) nextErrors.value = '評価額は数値で入力してください';
+    if (!Number.isFinite(parsedValue)) {
+      nextErrors.value = '評価額は数値で入力してください';
+    } else if (!Number.isInteger(parsedValue)) {
+      // Whole yen only -- see assetInputSchema for why a fraction of a yen
+      // makes the figures on two screens disagree.
+      nextErrors.value = '評価額は円単位（整数）で入力してください';
+    }
 
     // The category's own rules, from the module the server also runs.
     const { values, errors: fieldErrors } = validateFieldValues(category.fields, draft);
@@ -117,7 +123,7 @@ function AssetDialog({ open, category, asset, onSubmit, onClose }: Props): React
           inputMode="numeric"
           placeholder="1000000"
           prefix="¥"
-          hint="含み損などで負の値にもできます"
+          hint="円単位。住宅ローン残高などは負の値で入力できます"
           error={errors.value}
           onChange={(e) => setValue(e.target.value)}
         />

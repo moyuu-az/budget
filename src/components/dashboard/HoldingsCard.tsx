@@ -6,23 +6,13 @@ import { useBalanceStore } from '../../stores/useBalanceStore';
 import { useAssetStore } from '../../stores/useAssetStore';
 import { useUIStore } from '../../stores/useUIStore';
 import { summarizeHoldings } from '../../utils/net-worth';
+import { formatYen } from '../../utils/currency';
 import type { HoldingsView } from '../../types/ui';
 
 const VIEWS: { value: HoldingsView; label: string }[] = [
   { value: 'cash', label: '現金' },
   { value: 'netWorth', label: '純資産' },
 ];
-
-/**
- * Formats only. It does NOT round -- summarizeHoldings already did, once, so
- * that every figure on this card is derived from the same rounded parts. Adding
- * a round here would let each number be rounded twice from a different starting
- * point, which is exactly the one-yen disagreement it was moved out to prevent.
- */
-function formatYen(amount: number): string {
-  const sign = amount < 0 ? '-' : '';
-  return `${sign}¥${Math.abs(amount).toLocaleString('ja-JP')}`;
-}
 
 /**
  * What the household holds right now, as either cash or net worth.
