@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { useBalanceStore } from '../../stores/useBalanceStore';
 import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useCategoryStore } from '../../stores/useCategoryStore';
 import { useMonthlyStore } from '../../stores/useMonthlyStore';
 import { useSnapshotStore } from '../../stores/useSnapshotStore';
 import { useUIStore } from '../../stores/useUIStore';
 import type { AnalyticsPeriod } from '../../types/ui';
-import { generateForecast, toYearMonth } from '../../utils/forecast';
+import { toYearMonth } from '../../utils/forecast';
+import { useForecast } from '../../hooks/useForecast';
 import {
   buildCategoryTrend,
   buildCompositionData,
@@ -31,7 +31,6 @@ function AnalyticsView() {
   const setAnalyticsPeriod = useUIStore((s) => s.setAnalyticsPeriod);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
-  const balance = useBalanceStore((s) => s.balance);
   const templates = useTemplateStore((s) => s.templates);
   const categories = useCategoryStore((s) => s.categories);
   const monthlyAmountsMap = useMonthlyStore((s) => s.monthlyAmountsMap);
@@ -67,10 +66,7 @@ function AnalyticsView() {
     return months * 31;
   }, [period]);
 
-  const forecast = useMemo(
-    () => generateForecast(balance, templates, monthlyAmountsMap, forecastDays),
-    [balance, templates, monthlyAmountsMap, forecastDays],
-  );
+  const forecast = useForecast(forecastDays);
 
   const filteredSnapshots = useMemo(
     () => snapshots.filter((s) => s.date >= pastStartDate),
