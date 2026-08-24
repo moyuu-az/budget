@@ -33,13 +33,21 @@ const costTypeEnum = z.enum(['fixed', 'variable']);
 const nameSchema = (label: string) => z.string().min(1, `${label}は必須です`).max(100);
 
 /**
- * Exactly what <input type="color"> produces.
+ * A colour, bounded in length but not in format.
  *
- * Not an XSS defence -- React assigns these through the CSSOM, so a declaration
- * cannot break out -- but the same unbounded-storage argument as names, and it
- * keeps every stored colour in one comparable form.
+ * The app only ever writes #rrggbb -- that is all <input type="color"> produces
+ * -- so a strict regex was tempting. It would be a trap: categories imported
+ * from the old SQLite database carry whatever colour they had (scripts/
+ * import-sqlite.ts copies the column verbatim), and the settings form sends the
+ * colour on every save. One legacy value in another notation would make that
+ * category permanently uneditable, with a validation message about a field the
+ * user never touched.
+ *
+ * The problem actually worth solving is unbounded storage, and a length cap
+ * solves it. XSS is not a concern here: React assigns these through the CSSOM,
+ * where a declaration cannot break out.
  */
-const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, '色は #rrggbb 形式で指定してください');
+const colorSchema = z.string().max(32);
 
 export const finiteNumberSchema = z.number().finite();
 export const idSchema = z.number().int().positive();

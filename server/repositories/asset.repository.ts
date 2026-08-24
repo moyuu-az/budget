@@ -29,9 +29,9 @@ export function createAssetRepository(client: PoolClient, ledgerId: number): Ass
    * comes back empty and is reported as bad input rather than being confirmed
    * to exist.
    *
-   * `lock` is taken ONLY when the caller is moving a holding into this category
-   * -- see the note on update() for why the unlocked read is safe, and why
-   * taking the lock unconditionally would be worse.
+   * `lock` is taken whenever the caller is putting a holding INTO this category
+   * -- adding one, or moving one here. See the note on update() for the one
+   * case that safely needs no lock, and for why the lock order matters.
    */
   async function loadDefs(categoryId: number, lock: boolean): Promise<AssetFieldDef[]> {
     const { rows } = await client.query<Pick<AssetCategoryRow, 'fields'>>(
@@ -52,27 +52,18 @@ export function createAssetRepository(client: PoolClient, ledgerId: number): Ass
    * constant. It runs on the server even though the form checks the same rules,
    * because the form is not what the server receives -- a body is.
    *
-   * `enforceRequired` is false for a patch that says nothing about the holding's
-   * shape (a name or value edit). Adding a required parameter to a category
-   * would otherwise make every existing holding unsavable until someone filled
-   * it in -- including edits that have nothing to do with it.
+   * `requireFilled` is passed down rather than applied as a filter on the
+   * result: only validateFieldValues knows what counts as blank, and a filter
+   * here would also swallow the type errors it reports, which always matter.
    */
   function validateValues(
     defs: AssetFieldDef[],
     raw: Readonly<Record<string, unknown>> | null | undefined,
-    enforceRequired: boolean,
+    requireFilled: boolean,
   ): AssetFieldValues {
-    const { values, errors } = validateFieldValues(defs, raw);
-    const relevant = enforceRequired
-      ? errors
-      : // Type and length problems still matter; only "you left it blank" is
-        // suppressed, and only because the caller was not asked for it.
-        Object.fromEntries(
-          Object.entries(errors).filter(([key]) => values[key] !== null),
-        );
-
-    if (!hasNoErrors(relevant)) {
-      throw new ValidationError('資産のパラメータが不正です', relevant);
+    const { values, errors } = validateFieldValues(defs, raw, { requireFilled });
+    if (!hasNoErrors(errors)) {
+      throw new ValidationError('資産のパラメータが不正です', errors);
     }
     return values;
   }
@@ -86,7 +77,19 @@ export function createAssetRepository(client: PoolClient, ledgerId: number): Ass
     },
 
     async add(input) {
-      const defs = await loadDefs(input.categoryId, false);
+      // FOR SHARE, and it is load-bearing.
+      //
+      // reshapeHoldings brings a category's holdings in line with its new
+      // definitions by locking the rows it can see -- and it cannot see a row
+      // that does not exist yet. Without this lock, an INSERT running alongside
+      // a definition change slips between the two: the reshape misses it, and
+      // the new holding keeps a value for a parameter the category no longer
+      // defines. That is exactly the state the reshape exists to prevent, and
+      // it comes back as soon as the freed key is handed out again.
+      //
+      // Holding it here makes the definition change wait for this insert. Two
+      // concurrent inserts do not block each other -- FOR SHARE is shared.
+      const defs = await loadDefs(input.categoryId, true);
       const values = validateValues(defs, input.fields, true);
 
       const { rows } = await client.query<AssetRow>(

@@ -151,7 +151,7 @@ describe('updateAsset', () => {
     expect(api.getAssets).not.toHaveBeenCalled();
   });
 
-  it('still reports success when only the refresh fails', async () => {
+  it('still reports success when only the refresh fails, and says nothing else', async () => {
     // The write landed. Calling it a failure would send the user back to redo an
     // edit the server has already stored; the stale list repairs itself on the
     // next fetch.
@@ -162,6 +162,10 @@ describe('updateAsset', () => {
 
     await expect(useAssetStore.getState().updateAsset(1, { name: '更新後' })).resolves.toBe(true);
     expect(useAssetStore.getState().assets).toEqual(before);
+    // No error toast: the caller is about to say 「更新しました」, which is true.
+    // Two contradictory messages for something the user cannot act on is the
+    // confusion this store's boolean return exists to end.
+    expect(useToastStore.getState().toasts).toEqual([]);
   });
 });
 

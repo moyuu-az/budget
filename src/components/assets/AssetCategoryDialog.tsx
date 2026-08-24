@@ -13,6 +13,8 @@ interface Props {
   category: AssetCategory | null;
   /** Pre-filled draft for "start from a template"; ignored when editing. */
   initial?: AssetCategoryInput | null;
+  /** How many holdings this category has, for the removal warning. */
+  holdingCount?: number;
   onSubmit: (input: AssetCategoryInput) => Promise<boolean>;
   onClose: () => void;
 }
@@ -27,20 +29,42 @@ const DEFAULT_COLOR = '#8b5cf6';
  * "edit" component is how the two drift -- a validation rule added to one and
  * not the other.
  */
-function AssetCategoryDialog({ open, category, initial, onSubmit, onClose }: Props): ReactElement {
+function AssetCategoryDialog({
+  open,
+  category,
+  initial,
+  holdingCount = 0,
+  onSubmit,
+  onClose,
+}: Props): ReactElement {
   const [name, setName] = useState('');
   const [color, setColor] = useState(DEFAULT_COLOR);
   const [fields, setFields] = useState<AssetFieldDef[]>([]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  /**
+   * Which subject the draft above currently holds.
+   *
+   * Seeding happens in an effect, so the first render after opening still shows
+   * the PREVIOUS draft -- for an edit that means an empty field list, which
+   * would make the removal warning below claim every parameter is about to be
+   * deleted. It is removed again a moment later, but role="alert" means a
+   * screen reader may already have said it.
+   */
+  const [seededFor, setSeededFor] = useState<number | 'new' | null>(null);
+
+  const subject = category?.id ?? 'new';
 
   // Parameters that exist on the saved category but not in the draft. Saving
   // now DISCARDS their values on every holding (see reshapeHoldings in
   // server/repositories/asset-category.repository.ts), so the user is told
   // before they press save rather than after.
-  const removedFields = (category?.fields ?? []).filter(
-    (saved) => !fields.some((draft) => draft.key === saved.key),
-  );
+  const removedFields =
+    seededFor === subject
+      ? (category?.fields ?? []).filter(
+          (saved) => !fields.some((draft) => draft.key === saved.key),
+        )
+      : [];
 
   // Re-seeded whenever the dialog opens for a different subject. Without the
   // `open` dependency, closing and reopening on the same category would show
@@ -51,6 +75,7 @@ function AssetCategoryDialog({ open, category, initial, onSubmit, onClose }: Pro
     setColor(category?.color ?? initial?.color ?? DEFAULT_COLOR);
     setFields(category?.fields ?? initial?.fields ?? []);
     setErrors({});
+    setSeededFor(category?.id ?? 'new');
   }, [open, category, initial]);
 
   const handleSubmit = async (): Promise<void> => {
@@ -122,12 +147,12 @@ function AssetCategoryDialog({ open, category, initial, onSubmit, onClose }: Pro
         <AssetFieldDefsEditor defs={fields} onChange={setFields} errors={errors} />
 
         {removedFields.length > 0 && (
-          <p
-            role="alert"
-            className="text-xs text-[var(--color-semantic-warning)]"
-          >
-            {removedFields.map((f) => f.label).join('、')}
-            を削除します。保存すると、この分類の資産に入力済みの値も取り除かれます。
+          <p role="alert" className="text-xs text-[var(--color-semantic-warning)]">
+            {removedFields.map((f) => f.label).join('、')}を削除します。保存すると、
+            {holdingCount > 0
+              ? `この分類の資産 ${holdingCount} 件に入力済みの値も取り除かれます。`
+              : 'この分類の資産に入力済みの値も取り除かれます。'}
+            この操作は取り消せません。
           </p>
         )}
       </div>

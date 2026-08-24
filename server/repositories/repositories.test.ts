@@ -727,6 +727,63 @@ describe('asset category field definitions vs existing holdings', () => {
     expect(theirs.fields).toEqual({ f1: 'keep' });
   });
 
+  it('cannot be outrun by a holding inserted while the definitions change', async () => {
+    // REGRESSION, and the reason asset.add() takes FOR SHARE on its category.
+    //
+    // reshapeHoldings locks the rows it can SEE. A row that does not exist yet
+    // cannot be locked, so an INSERT running alongside a definition change used
+    // to slip between the two: the reshape missed it, and the new holding kept a
+    // value for a parameter the category no longer defined -- ready to resurface
+    // under whatever parameter next took the freed key.
+    const category = await inHousehold((r) =>
+      r.assetCategory.add({
+        name: 'NISA',
+        fields: [
+          { key: 'f1', label: '銘柄', type: 'text', required: false, unit: null },
+          { key: 'f2', label: '証券会社', type: 'text', required: false, unit: null },
+        ],
+      }),
+    );
+
+    const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    // Inserts, then holds its transaction open.
+    const inserting = withLedgerRepositories(db.pool, householdId, async (r) => {
+      await r.asset.add({
+        categoryId: category.id,
+        name: '同時追加',
+        value: 1,
+        fields: { f1: 'VTI', f2: '楽天証券' },
+      });
+      await held;
+    });
+    await sleep(200);
+
+    // Removes f2 while that insert is still in flight.
+    let changed = false;
+    const changing = withLedgerRepositories(db.pool, householdId, (r) =>
+      r.assetCategory.update(category.id, {
+        fields: [{ key: 'f1', label: '銘柄', type: 'text', required: false, unit: null }],
+      }),
+    ).then(() => {
+      changed = true;
+    });
+    await sleep(200);
+
+    expect(changed, 'the definition change must wait for the in-flight insert').toBe(false);
+
+    release();
+    await inserting;
+    await changing;
+
+    const [asset] = await inHousehold((r) => r.asset.getAll());
+    expect(asset.fields).toEqual({ f1: 'VTI' });
+  });
+
   it('does not rewrite holdings when the patch leaves the definitions alone', async () => {
     const { categoryId } = await seedWithHolding();
     await inHousehold((r) => r.assetCategory.update(categoryId, { name: '新NISA' }));

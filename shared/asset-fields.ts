@@ -157,6 +157,24 @@ export function normalizeFieldDefs(defs: readonly AssetFieldDef[]): AssetFieldDe
   }));
 }
 
+export interface ValidateValuesOptions {
+  /**
+   * Whether leaving a `required` parameter blank is an error. Default true.
+   *
+   * The server turns this off for a patch that says nothing about a holding's
+   * shape (a name or value edit): adding a required parameter to a category
+   * must not make every existing holding unsavable, including for edits that
+   * have nothing to do with it.
+   *
+   * It is an option HERE rather than a filter at the call site because "blank"
+   * is defined by this function -- an empty string counts, and so does a
+   * missing key. A caller re-deriving that from the returned values cannot tell
+   * a blank apart from a value that failed its type check, and would silence
+   * both.
+   */
+  requireFilled?: boolean;
+}
+
 export interface FieldValueValidation {
   /** The values to store: coerced, trimmed, and stripped of keys the category no longer defines. */
   values: AssetFieldValues;
@@ -180,7 +198,9 @@ export interface FieldValueValidation {
 export function validateFieldValues(
   defs: readonly AssetFieldDef[],
   raw: Readonly<Record<string, unknown>> | null | undefined,
+  options: ValidateValuesOptions = {},
 ): FieldValueValidation {
+  const requireFilled = options.requireFilled ?? true;
   const values: AssetFieldValues = {};
   const errors: Record<string, string> = {};
   const source = raw ?? {};
@@ -190,7 +210,7 @@ export function validateFieldValues(
     const isBlank = input === undefined || input === null || (typeof input === 'string' && input.trim() === '');
 
     if (isBlank) {
-      if (def.required) errors[def.key] = `${def.label}は必須です`;
+      if (def.required && requireFilled) errors[def.key] = `${def.label}は必須です`;
       values[def.key] = null;
       continue;
     }

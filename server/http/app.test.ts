@@ -524,14 +524,26 @@ describe('bounded names', () => {
     expect((await envelopeOf(response)).code).toBe('VALIDATION');
   });
 
-  it('refuses a colour that is not what the picker produces', async () => {
+  it('bounds a colour by length, not by notation', async () => {
+    // The app only ever writes #rrggbb, but categories imported from the old
+    // SQLite database carry whatever they had, and the settings form sends the
+    // colour on every save. A strict format check would make such a category
+    // permanently uneditable -- a worse outcome than an unusual colour.
     const alice = await sessionFor(ALICE);
-    const response = await call('addCategory', {
-      as: ALICE,
-      ledgerId: personalLedgerOf(alice),
-      args: [{ name: 'ok', type: 'expense', color: 'red' }],
-    });
+    const ledgerId = personalLedgerOf(alice);
 
-    expect(response.status).toBe(400);
+    const legacy = await call('addCategory', {
+      as: ALICE,
+      ledgerId,
+      args: [{ name: 'legacy', type: 'expense', color: 'rgb(255, 0, 0)' }],
+    });
+    expect(legacy.status).toBe(200);
+
+    const oversized = await call('addCategory', {
+      as: ALICE,
+      ledgerId,
+      args: [{ name: 'oversized', type: 'expense', color: '#'.repeat(64) }],
+    });
+    expect(oversized.status).toBe(400);
   });
 });

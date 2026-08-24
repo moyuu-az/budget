@@ -198,6 +198,11 @@ function AssetsView(): ReactElement {
         open={categoryDialog !== null}
         category={categoryDialog?.category ?? null}
         initial={categoryDialog?.initial ?? null}
+        holdingCount={
+          categoryDialog?.category
+            ? assetsOfCategory(assets, categoryDialog.category.id).length
+            : 0
+        }
         onSubmit={handleSubmitCategory}
         onClose={() => setCategoryDialog(null)}
       />

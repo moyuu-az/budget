@@ -134,9 +134,9 @@ export function createApp(deps: AppDependencies): Hono<{ Variables: Variables }>
   // must not depend on IAP or on the database being reachable.
   app.get('/healthz', (c) => c.text('ok'));
 
-  // Refused before the body is read, so an oversized request costs nothing to
-  // reject. 413 is the honest status; the envelope keeps the client's error
-  // handling uniform.
+  // Registered before the authentication middleware on purpose: an oversized
+  // body is refused without reading it and without verifying anything. 413 is
+  // the honest status; the envelope keeps the client's error handling uniform.
   app.use(
     '/api/*',
     bodyLimit({

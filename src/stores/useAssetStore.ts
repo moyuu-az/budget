@@ -131,10 +131,15 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     // not a lost edit. Reporting it as a failure would send the user back to
     // redo an edit the server has already stored -- and the next fetch (a
     // ledger switch, a reload) repairs the list on its own.
+    //
+    // Swallowed rather than reported, deliberately: the caller is about to say
+    // 「更新しました」, which is true. Raising an error toast beside it would
+    // put two contradictory messages on screen for a problem the user cannot
+    // act on -- the same confusion this store's boolean return exists to end.
     try {
       set({ assets: await getApi().getAssets() });
-    } catch (e) {
-      reportError(e);
+    } catch {
+      // Intentionally ignored; see above.
     }
     return true;
   },
