@@ -7,6 +7,7 @@ import { useMonthlyStore } from '../../stores/useMonthlyStore';
 import { generateForecast, toYearMonth, periodToDays, periodToMonths } from '../../utils/forecast';
 import ForecastChart from './ForecastChart';
 import KpiHero from './KpiHero';
+import HoldingsCard from './HoldingsCard';
 import MinBalanceCard from './MinBalanceCard';
 import SankeyChart from './SankeyChart';
 import UpcomingEvents from './UpcomingEvents';
@@ -60,6 +61,11 @@ function DashboardView({ onNavigate }: DashboardViewProps) {
     >
       {/* KPI hero - first row */}
       <KpiHero />
+
+      {/* What is held right now. Renders nothing when 資産 is unused, and its
+          cash/net-worth toggle reaches only this card -- everything below stays
+          cash, because that is what the forecast is about. */}
+      <HoldingsCard />
 
       {/* Forecast Chart - full width */}
       <ForecastChart

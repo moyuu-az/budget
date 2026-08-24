@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Theme, AnalyticsPeriod } from '../types/ui';
+import type { Theme, AnalyticsPeriod, HoldingsView } from '../types/ui';
 import { shiftYearMonth } from '../types/ui';
 import { toYearMonth } from '../utils/forecast';
 
@@ -9,6 +9,7 @@ interface UIState {
   selectedYearMonth: string;
   sidebarCollapsed: boolean;
   analyticsPeriod: AnalyticsPeriod;
+  holdingsView: HoldingsView;
   setTheme: (t: Theme) => void;
   toggleTheme: () => void;
   setSelectedYearMonth: (ym: string) => void;
@@ -16,6 +17,7 @@ interface UIState {
   toggleSidebar: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setAnalyticsPeriod: (period: AnalyticsPeriod) => void;
+  setHoldingsView: (view: HoldingsView) => void;
 }
 
 const systemTheme = (): Theme => {
@@ -30,6 +32,9 @@ export const useUIStore = create<UIState>()(
       selectedYearMonth: toYearMonth(new Date()),
       sidebarCollapsed: false,
       analyticsPeriod: '6m',
+      // Cash by default: this app is about the forecast, and the forecast is
+      // cash. Someone who tracks assets can switch, and the choice sticks.
+      holdingsView: 'cash',
       setTheme: (theme) => set({ theme }),
       toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
       setSelectedYearMonth: (selectedYearMonth) => set({ selectedYearMonth }),
@@ -38,6 +43,7 @@ export const useUIStore = create<UIState>()(
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
       setAnalyticsPeriod: (analyticsPeriod) => set({ analyticsPeriod }),
+      setHoldingsView: (holdingsView) => set({ holdingsView }),
     }),
     {
       name: 'balance-forecast-ui',
@@ -45,6 +51,7 @@ export const useUIStore = create<UIState>()(
         theme: state.theme,
         sidebarCollapsed: state.sidebarCollapsed,
         analyticsPeriod: state.analyticsPeriod,
+        holdingsView: state.holdingsView,
       }),
     },
   ),
