@@ -13,9 +13,15 @@ const VIEWS: { value: HoldingsView; label: string }[] = [
   { value: 'netWorth', label: '純資産' },
 ];
 
+/**
+ * Formats only. It does NOT round -- summarizeHoldings already did, once, so
+ * that every figure on this card is derived from the same rounded parts. Adding
+ * a round here would let each number be rounded twice from a different starting
+ * point, which is exactly the one-yen disagreement it was moved out to prevent.
+ */
 function formatYen(amount: number): string {
   const sign = amount < 0 ? '-' : '';
-  return `${sign}¥${Math.abs(Math.round(amount)).toLocaleString('ja-JP')}`;
+  return `${sign}¥${Math.abs(amount).toLocaleString('ja-JP')}`;
 }
 
 /**
@@ -66,7 +72,7 @@ function HoldingsCard(): ReactElement | null {
             <p className="mt-2 text-xs text-[var(--color-content-secondary)] tabular-nums">
               残高 {formatYen(holdings.cash)} ＋ 資産 {formatYen(holdings.assets)}
             </p>
-            {holdings.byCategory.length > 0 && (
+            {(holdings.byCategory.length > 0 || holdings.other !== 0) && (
               <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5">
                 {holdings.byCategory.map((line) => (
                   <li key={line.id} className="flex items-center gap-2 text-xs">
@@ -80,6 +86,21 @@ function HoldingsCard(): ReactElement | null {
                     </span>
                   </li>
                 ))}
+                {/* Holdings whose category this client has not loaded. Normally
+                    absent; shown rather than dropped so the chips always add up
+                    to 資産 above them -- the same rule the total obeys. */}
+                {holdings.other !== 0 && (
+                  <li className="flex items-center gap-2 text-xs">
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: 'var(--color-content-muted)' }}
+                    />
+                    <span className="text-[var(--color-content-muted)]">その他</span>
+                    <span className="tabular-nums text-[var(--color-content-secondary)]">
+                      {formatYen(holdings.other)}
+                    </span>
+                  </li>
+                )}
               </ul>
             )}
           </>

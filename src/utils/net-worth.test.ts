@@ -77,3 +77,41 @@ describe('summarizeHoldings', () => {
     expect(result).toMatchObject({ cash: 500_000, assets: 0, total: 500_000 });
   });
 });
+
+describe('the parts always add up', () => {
+  it('rounds each holding once, so the chips sum to the asset total', () => {
+    // Values are NUMERIC(14,2). Rounding each displayed figure independently
+    // would show ¥101 + ¥101 against a total of ¥201 -- a one-yen contradiction
+    // on the very line whose job is to prove the parts add up.
+    const result = summarizeHoldings(
+      0,
+      [category()],
+      [asset({ id: 1, value: 100.5 }), asset({ id: 2, value: 100.5 })],
+    );
+    const chips = result.byCategory.reduce((sum, line) => sum + line.value, 0);
+    expect(chips + result.other).toBe(result.assets);
+  });
+
+  it('reports holdings whose category is not loaded as その他', () => {
+    // Reachable: a shared ledger where the other member added a category this
+    // client has not fetched. Dropping them would make the chips quietly fail
+    // to reach the asset total.
+    const result = summarizeHoldings(
+      0,
+      [category({ id: 1 })],
+      [asset({ id: 1, categoryId: 1, value: 100 }), asset({ id: 2, categoryId: 99, value: 40 })],
+    );
+    expect(result.other).toBe(40);
+    expect(result.byCategory.reduce((s, l) => s + l.value, 0) + result.other).toBe(result.assets);
+  });
+
+  it('reports nothing extra when every holding has its category', () => {
+    const result = summarizeHoldings(0, [category()], [asset({ value: 100 })]);
+    expect(result.other).toBe(0);
+  });
+
+  it('rounds the balance too, so 残高 ＋ 資産 ＝ 純資産 holds exactly', () => {
+    const result = summarizeHoldings(500_000.4, [category()], [asset({ value: 100.5 })]);
+    expect(result.cash + result.assets).toBe(result.total);
+  });
+});

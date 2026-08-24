@@ -1,4 +1,5 @@
 import type { Asset, AssetCategory } from '../types';
+import { totalAssetValue } from '../stores/useAssetStore';
 
 // ---------------------------------------------------------------------------
 // What the household holds right now.
@@ -40,6 +41,16 @@ export interface Holdings {
   total: number;
   /** One line per category that actually holds something, in display order. */
   byCategory: HoldingsCategoryLine[];
+  /**
+   * Holdings whose category is not in `byCategory`, summed.
+   *
+   * Normally zero. It is non-zero while the client holds a holding whose
+   * category it has not fetched -- which happens, because updating one holding
+   * refetches the holdings. Without this line the chips would quietly fail to
+   * add up to `assets`, which is the very failure this card exists to prevent
+   * one level up.
+   */
+  other: number;
 }
 
 export function summarizeHoldings(
@@ -47,8 +58,21 @@ export function summarizeHoldings(
   categories: readonly AssetCategory[],
   assets: readonly Asset[],
 ): Holdings {
+  // ROUNDED ONCE, HERE, AND NEVER AGAIN.
+  //
+  // Asset values are NUMERIC(14,2), so two holdings of 100.5 sum to 201. Round
+  // for display at each figure independently and the card shows ¥101 + ¥101
+  // against a total of ¥201 -- a one-yen contradiction on the very line whose
+  // job is to prove the parts add up. Rounding the parts first and deriving
+  // every total from the rounded parts makes the arithmetic on screen true by
+  // construction.
+  const rounded = assets.map((asset) => ({
+    categoryId: asset.categoryId,
+    value: Math.round(asset.value),
+  }));
+
   const totals = new Map<number, number>();
-  for (const asset of assets) {
+  for (const asset of rounded) {
     totals.set(asset.categoryId, (totals.get(asset.categoryId) ?? 0) + asset.value);
   }
 
@@ -64,10 +88,17 @@ export function summarizeHoldings(
       value: totals.get(category.id) as number,
     }));
 
-  // Summed from the assets themselves, not from byCategory: a holding whose
-  // category has vanished from the list still belongs in the total, or the
-  // parts on screen would not add up to it.
-  const assetTotal = assets.reduce((sum, asset) => sum + asset.value, 0);
+  // Summed from the holdings themselves, not from byCategory: one whose category
+  // has vanished from the list still belongs in the total. `other` below is what
+  // keeps that difference visible instead of silent.
+  const assetTotal = totalAssetValue(rounded);
+  const shown = byCategory.reduce((sum, line) => sum + line.value, 0);
 
-  return { cash, assets: assetTotal, total: cash + assetTotal, byCategory };
+  return {
+    cash: Math.round(cash),
+    assets: assetTotal,
+    total: Math.round(cash) + assetTotal,
+    byCategory,
+    other: assetTotal - shown,
+  };
 }

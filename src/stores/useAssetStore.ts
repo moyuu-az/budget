@@ -136,8 +136,17 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     // 「更新しました」, which is true. Raising an error toast beside it would
     // put two contradictory messages on screen for a problem the user cannot
     // act on -- the same confusion this store's boolean return exists to end.
+    //
+    // BOTH lists, not just the holdings. In a shared ledger the other member may
+    // have added a category since this client last looked; fetching holdings
+    // alone would bring in one belonging to a category this client does not
+    // have, and nothing on screen could explain it.
     try {
-      set({ assets: await getApi().getAssets() });
+      const [categories, assets] = await Promise.all([
+        getApi().getAssetCategories(),
+        getApi().getAssets(),
+      ]);
+      set({ categories, assets });
     } catch {
       // Intentionally ignored; see above.
     }
@@ -158,8 +167,14 @@ export const useAssetStore = create<AssetState>((set, get) => ({
   },
 }));
 
-/** Sum of every holding. The 資産 view's headline figure. */
-export function totalAssetValue(assets: readonly Asset[]): number {
+/**
+ * Sum of every holding. The 資産 view's headline figure, and the dashboard's.
+ *
+ * Takes anything with a `value` so the dashboard can sum its already-rounded
+ * projection through the same function -- two reduces over the same field is
+ * how the two screens end up disagreeing after only one of them is fixed.
+ */
+export function totalAssetValue(assets: readonly { value: number }[]): number {
   return assets.reduce((sum, asset) => sum + asset.value, 0);
 }
 

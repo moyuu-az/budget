@@ -1,5 +1,4 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { useEffect } from 'react';
 import HoldingsCard from './HoldingsCard';
 import { useAssetStore } from '../../stores/useAssetStore';
 import { useBalanceStore } from '../../stores/useBalanceStore';
@@ -14,13 +13,17 @@ interface StoryArgs {
   view: HoldingsView;
 }
 
-/** Seeds the stores the card reads, since it takes no props of its own. */
+/**
+ * Seeds the stores the card reads, since it takes no props of its own.
+ *
+ * Set during render rather than in an effect: an effect runs AFTER the first
+ * paint, so switching stories would show the previous story's state for a frame.
+ * The card is rendered below, so it mounts against state that is already correct.
+ */
 function Harness({ balance, categories, assets, view }: StoryArgs) {
-  useEffect(() => {
-    useBalanceStore.setState({ balance });
-    useAssetStore.setState({ categories, assets, loading: false });
-    useUIStore.setState({ holdingsView: view });
-  }, [balance, categories, assets, view]);
+  useBalanceStore.setState({ balance });
+  useAssetStore.setState({ categories, assets, loading: false });
+  useUIStore.setState({ holdingsView: view });
 
   return <HoldingsCard />;
 }
