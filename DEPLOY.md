@@ -266,6 +266,40 @@ npm run db:import -- \
 `gcloud sql connect` から `SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'app_user';`
 が両方 `f` であることも確認する。
 
+## 11. 予算アラート
+
+課金アカウントの通貨は **JPY** なので、金額は円で指定する (`3000JPY`)。ドルで
+書くと通貨不一致で弾かれる。
+
+```bash
+gcloud services enable billingbudgets.googleapis.com --project="$PROJECT_ID"
+
+gcloud billing budgets create \
+  --billing-account="$BILLING_ACCOUNT" \
+  --display-name="budget-app-monthly" \
+  --budget-amount=3000JPY \
+  --filter-projects="projects/$PROJECT_NUMBER" \
+  --threshold-rule=percent=0.5 \
+  --threshold-rule=percent=0.9 \
+  --threshold-rule=percent=1.0 \
+  --threshold-rule=percent=1.0,basis=forecasted-spend
+```
+
+`--filter-projects` はプロジェクト **番号** を取る (ID ではない)。省略すると課金
+アカウント全体が対象になる。
+
+`FORECASTED_SPEND` の 1 行が実質的な早期警報で、月末の着地見込みが予算を超えた
+時点で鳴る。`CURRENT_SPEND` だけだと、実際に使い切ってからしか気づけない。
+
+通知先を指定していないため、既定で **課金アカウントの管理者と閲覧者にメールが飛ぶ**
+(現在は `moyuu.kz@gmail.com` のみ)。Slack 等に流したい場合だけ Monitoring の
+通知チャンネルを作って `--notifications-rule-monitoring-notification-channels`
+を足す。
+
+`creditTypesTreatment` は既定の `INCLUDE_ALL_CREDITS` になる。クレジットを
+差し引いた **実際に請求される額** で判定されるため、無料トライアルのクレジットが
+残っている間は鳴らない。これは意図した挙動。
+
 ## ローカルに置く認証情報
 
 | ファイル | 内容 | 管理 |
