@@ -11,6 +11,10 @@ import {
   categoryPatchSchema,
   templateInputSchema,
   templatePatchSchema,
+  assetCategoryInputSchema,
+  assetCategoryPatchSchema,
+  assetInputSchema,
+  assetPatchSchema,
 } from './input-schemas';
 
 /**
@@ -157,6 +161,41 @@ export const METHODS: { [M in DataMethod]: MethodSpec<M> } = {
   deleteSnapshot: {
     args: z.tuple([idSchema]),
     handle: (repos, [id]) => repos.snapshot.remove(id),
+  },
+
+  // --- Assets ---
+  getAssetCategories: {
+    args: z.tuple([]),
+    handle: (repos) => repos.assetCategory.getAll(),
+  },
+  addAssetCategory: {
+    args: z.tuple([assetCategoryInputSchema]),
+    handle: (repos, [input]) => repos.assetCategory.add(input),
+  },
+  updateAssetCategory: {
+    args: z.tuple([idSchema, assetCategoryPatchSchema]),
+    handle: (repos, [id, patch]) => repos.assetCategory.update(id, patch),
+  },
+  deleteAssetCategory: {
+    args: z.tuple([idSchema]),
+    handle: (repos, [id]) => repos.assetCategory.remove(id),
+  },
+
+  getAssets: {
+    args: z.tuple([]),
+    handle: (repos) => repos.asset.getAll(),
+  },
+  addAsset: {
+    args: z.tuple([assetInputSchema]),
+    handle: (repos, [input]) => repos.asset.add(input),
+  },
+  updateAsset: {
+    args: z.tuple([idSchema, assetPatchSchema]),
+    handle: (repos, [id, patch]) => repos.asset.update(id, patch),
+  },
+  deleteAsset: {
+    args: z.tuple([idSchema]),
+    handle: (repos, [id]) => repos.asset.remove(id),
   },
 };
 

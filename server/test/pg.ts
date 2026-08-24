@@ -40,6 +40,11 @@ export const LEDGER_SCOPED_TABLES = [
   'entry_templates',
   'categories',
   'settings',
+  // Assets before their categories: TRUNCATE ... CASCADE would cope either way,
+  // but the order is also what the isolation sweep compares, and a dependent
+  // table listed after its parent reads as an oversight.
+  'assets',
+  'asset_categories',
 ] as const;
 
 export interface TestDb {

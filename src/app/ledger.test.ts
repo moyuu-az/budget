@@ -8,6 +8,7 @@ import { useCategoryStore } from '../stores/useCategoryStore';
 import { useTemplateStore } from '../stores/useTemplateStore';
 import { useSnapshotStore } from '../stores/useSnapshotStore';
 import { useMonthlyStore } from '../stores/useMonthlyStore';
+import { useAssetStore } from '../stores/useAssetStore';
 import type { AppApi, Session } from '../types';
 
 const SESSION: Session = {
@@ -32,7 +33,9 @@ beforeEach(() => {
 function seedStores(): void {
   useBalanceStore.setState({ balance: 1_525_210 });
   useCategoryStore.setState({
-    categories: [{ id: 1, name: '住居費', type: 'expense', color: null, sortOrder: 0 }],
+    categories: [
+      { id: 1, name: '住居費', type: 'expense', color: null, sortOrder: 0, costType: 'fixed' },
+    ],
   });
   useTemplateStore.setState({
     templates: [
@@ -47,6 +50,15 @@ function seedStores(): void {
     snapshots: [{ id: 1, date: '2026-01-01', balance: 1, createdAt: '2026-01-01T00:00:00Z' }],
   });
   useMonthlyStore.setState({ monthlyAmountsMap: new Map([['2026-01', new Map([[1, 100]])]]) });
+  useAssetStore.setState({
+    categories: [{ id: 1, name: 'NISA', color: null, sortOrder: 0, fields: [] }],
+    assets: [
+      {
+        id: 1, categoryId: 1, name: 'つみたて投資枠', value: 1_000_000, fields: {},
+        createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ],
+  });
 }
 
 describe('resetLedgerData', () => {
@@ -60,6 +72,10 @@ describe('resetLedgerData', () => {
     expect(useSnapshotStore.getState().snapshots).toEqual([]);
     expect(useMonthlyStore.getState().monthlyAmountsMap.size).toBe(0);
     expect(useMonthlyStore.getState().monthlyActualsMap.size).toBe(0);
+    // Assets are ledger-scoped like everything else: one household's portfolio
+    // must not survive a switch to another's.
+    expect(useAssetStore.getState().categories).toEqual([]);
+    expect(useAssetStore.getState().assets).toEqual([]);
   });
 
   it('hands out fresh Maps rather than reusing one instance', () => {
@@ -125,6 +141,8 @@ describe('loadLedgerData', () => {
     expect(api.getCategories).toHaveBeenCalled();
     expect(api.getTemplates).toHaveBeenCalled();
     expect(api.getSnapshots).toHaveBeenCalled();
+    expect(api.getAssetCategories).toHaveBeenCalled();
+    expect(api.getAssets).toHaveBeenCalled();
     // Monthly data is fetched per month as the user navigates.
     expect(api.getMonthlyAmounts).not.toHaveBeenCalled();
   });

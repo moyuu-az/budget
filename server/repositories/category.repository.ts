@@ -17,6 +17,7 @@ const COLUMNS: Partial<Record<keyof CategoryInput, string>> = {
   type: 'type',
   color: 'color',
   sortOrder: 'sort_order',
+  costType: 'cost_type',
 };
 
 export function createCategoryRepository(
@@ -41,10 +42,13 @@ export function createCategoryRepository(
       );
       const sortOrder = input.sortOrder ?? maxRows[0].max_order + 1;
 
+      // cost_type on an income category is refused by the CHECK constraint in
+      // migration 003 rather than silently stored -- 固定費/変動費 has no meaning
+      // for income, and a value nothing reads is worse than an error.
       const { rows } = await client.query<CategoryRow>(
-        `INSERT INTO categories (ledger_id, name, type, color, sort_order)
-           VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [ledgerId, input.name, input.type, input.color ?? null, sortOrder],
+        `INSERT INTO categories (ledger_id, name, type, color, sort_order, cost_type)
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [ledgerId, input.name, input.type, input.color ?? null, sortOrder, input.costType ?? null],
       );
       return rowToCategory(rows[0]);
     },

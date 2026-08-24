@@ -7,13 +7,19 @@
 // would invite client code to start making decisions with it.
 
 import type {
+  Asset,
+  AssetCategory,
   Category,
+  CostType,
   EntryTemplate,
   MonthlyAmount,
   MonthlyActual,
   BalanceSnapshot,
 } from '../shared/types';
+import { coerceFieldDefs, coerceFieldValues } from '../shared/asset-fields';
 import type {
+  AssetCategoryRow,
+  AssetRow,
   CategoryRow,
   TemplateRow,
   MonthlyAmountRow,
@@ -28,6 +34,11 @@ export function rowToCategory(row: CategoryRow): Category {
     type: row.type as 'income' | 'expense',
     color: row.color,
     sortOrder: row.sort_order,
+    // The CHECK constraint in migration 003 admits only these two values on
+    // expense categories, so anything else is a row that predates it.
+    costType: row.cost_type === 'fixed' || row.cost_type === 'variable'
+      ? (row.cost_type as CostType)
+      : null,
   };
 }
 
@@ -73,5 +84,29 @@ export function rowToSnapshot(row: SnapshotRow): BalanceSnapshot {
     date: row.date,
     balance: row.balance,
     createdAt: row.created_at,
+  };
+}
+
+export function rowToAssetCategory(row: AssetCategoryRow): AssetCategory {
+  return {
+    id: row.id,
+    name: row.name,
+    color: row.color,
+    sortOrder: row.sort_order,
+    // JSONB guarantees only that this is an array; coerceFieldDefs is what makes
+    // it an array of definitions the UI can render.
+    fields: coerceFieldDefs(row.fields),
+  };
+}
+
+export function rowToAsset(row: AssetRow): Asset {
+  return {
+    id: row.id,
+    categoryId: row.category_id,
+    name: row.name,
+    value: row.value,
+    fields: coerceFieldValues(row.fields),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }

@@ -25,6 +25,7 @@ function makeCategory(overrides: Partial<Category> = {}): Category {
     type: 'expense',
     color: '#ff0000',
     sortOrder: 0,
+    costType: null,
     ...overrides,
   };
 }

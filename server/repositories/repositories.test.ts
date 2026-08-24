@@ -465,3 +465,253 @@ describe('transaction behaviour', () => {
     expect(await inPrivate((r) => r.category.getAll())).toEqual([]);
   });
 });
+
+describe('category cost type', () => {
+  it('round-trips 固定費 / 変動費', async () => {
+    const created = await inHousehold((r) =>
+      r.category.add({ name: 'rent', type: 'expense', costType: 'fixed' }),
+    );
+    expect(created.costType).toBe('fixed');
+
+    await inHousehold((r) => r.category.update(created.id, { costType: 'variable' }));
+    const [after] = await inHousehold((r) => r.category.getAll());
+    expect(after.costType).toBe('variable');
+  });
+
+  it('leaves a new category unclassified rather than guessing', async () => {
+    // Every category that already existed before this feature is unclassified,
+    // and defaulting would put a wrong answer on all of them.
+    const created = await inHousehold((r) => r.category.add({ name: 'food', type: 'expense' }));
+    expect(created.costType).toBeNull();
+  });
+
+  it('can clear the classification with null', async () => {
+    const created = await inHousehold((r) =>
+      r.category.add({ name: 'rent', type: 'expense', costType: 'fixed' }),
+    );
+    await inHousehold((r) => r.category.update(created.id, { costType: null }));
+
+    const [after] = await inHousehold((r) => r.category.getAll());
+    expect(after.costType).toBeNull();
+  });
+
+  it('refuses a classification on an income category', async () => {
+    // 固定費/変動費 has no meaning for income; the CHECK constraint is what makes
+    // that impossible to store rather than merely discouraged.
+    await expect(
+      inHousehold((r) =>
+        r.category.add({ name: 'salary', type: 'income', costType: 'fixed' }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('refuses to turn a classified expense category into an income one', async () => {
+    const created = await inHousehold((r) =>
+      r.category.add({ name: 'rent', type: 'expense', costType: 'fixed' }),
+    );
+    await expect(
+      inHousehold((r) => r.category.update(created.id, { type: 'income' })),
+    ).rejects.toThrow();
+  });
+});
+
+describe('asset category repository', () => {
+  const NISA_FIELDS = [
+    { key: 'f1', label: '銘柄', type: 'text' as const, required: true, unit: null },
+    { key: 'f3', label: '保有数量', type: 'number' as const, required: false, unit: '口' },
+  ];
+
+  it('round-trips the field definitions through JSONB', async () => {
+    // The definitions are a JS ARRAY, which node-postgres would otherwise send
+    // as a PostgreSQL array literal that a jsonb column rejects. This test is
+    // what keeps the explicit JSON.stringify in place.
+    const created = await inHousehold((r) =>
+      r.assetCategory.add({ name: 'NISA', color: '#22c55e', fields: NISA_FIELDS }),
+    );
+    expect(created.fields).toEqual(NISA_FIELDS);
+
+    const [fetched] = await inHousehold((r) => r.assetCategory.getAll());
+    expect(fetched.fields).toEqual(NISA_FIELDS);
+  });
+
+  it('accepts a category with no parameters at all', async () => {
+    // 現金 needs none: the amount IS the value.
+    const created = await inHousehold((r) => r.assetCategory.add({ name: '現金' }));
+    expect(created.fields).toEqual([]);
+  });
+
+  it('numbers sort_order per ledger', async () => {
+    await inHousehold(async (r) => {
+      await r.assetCategory.add({ name: 'a' });
+      await r.assetCategory.add({ name: 'b' });
+    });
+    const mine = await inPrivate((r) => r.assetCategory.add({ name: 'mine' }));
+    expect(mine.sortOrder).toBe(0);
+  });
+
+  it('replaces the whole definition list on update', async () => {
+    const created = await inHousehold((r) =>
+      r.assetCategory.add({ name: 'NISA', fields: NISA_FIELDS }),
+    );
+    await inHousehold((r) => r.assetCategory.update(created.id, { fields: [NISA_FIELDS[0]] }));
+
+    const [after] = await inHousehold((r) => r.assetCategory.getAll());
+    expect(after.fields).toEqual([NISA_FIELDS[0]]);
+  });
+
+  it('rejects definitions the UI could not render', async () => {
+    await expect(
+      inHousehold((r) =>
+        r.assetCategory.add({
+          name: 'bad',
+          fields: [{ key: 'f1', label: '', type: 'text', required: false, unit: null }],
+        }),
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      inHousehold((r) =>
+        r.assetCategory.add({
+          name: 'bad',
+          fields: [
+            { key: 'f1', label: 'a', type: 'text', required: false, unit: null },
+            { key: 'f1', label: 'b', type: 'text', required: false, unit: null },
+          ],
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('takes its holdings with it when deleted', async () => {
+    const category = await inHousehold((r) => r.assetCategory.add({ name: '現金' }));
+    await inHousehold((r) => r.asset.add({ categoryId: category.id, name: '財布', value: 30_000 }));
+
+    await inHousehold((r) => r.assetCategory.remove(category.id));
+
+    // An orphaned holding would carry parameter values with no definitions left
+    // to interpret them, so the cascade is deliberate.
+    expect(await inHousehold((r) => r.asset.getAll())).toEqual([]);
+  });
+
+  it('keeps one ledger\'s categories out of another\'s', async () => {
+    await inHousehold((r) => r.assetCategory.add({ name: 'household' }));
+    expect(await inPrivate((r) => r.assetCategory.getAll())).toEqual([]);
+  });
+});
+
+describe('asset repository', () => {
+  /** A category with one required text parameter and one number parameter. */
+  const seedCategory = (): Promise<{ id: number }> =>
+    inHousehold((r) =>
+      r.assetCategory.add({
+        name: 'NISA',
+        fields: [
+          { key: 'f1', label: '銘柄', type: 'text', required: true, unit: null },
+          { key: 'f3', label: '保有数量', type: 'number', required: false, unit: '口' },
+        ],
+      }),
+    );
+
+  it('stores a number parameter as a number even when the client sent a string', async () => {
+    const category = await seedCategory();
+    const created = await inHousehold((r) =>
+      r.asset.add({
+        categoryId: category.id,
+        name: 'つみたて',
+        value: 1_000_000,
+        fields: { f1: 'eMAXIS Slim', f3: '34000' },
+      }),
+    );
+    expect(created.fields).toEqual({ f1: 'eMAXIS Slim', f3: 34_000 });
+  });
+
+  it('refuses a holding missing a required parameter', async () => {
+    // The rule lives in the category's row, so no static schema can express it;
+    // this is why the check is in the repository rather than in Zod.
+    const category = await seedCategory();
+    await expect(
+      inHousehold((r) =>
+        r.asset.add({ categoryId: category.id, name: 'x', value: 1, fields: { f3: 1 } }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('drops parameters the category does not define', async () => {
+    const category = await seedCategory();
+    const created = await inHousehold((r) =>
+      r.asset.add({
+        categoryId: category.id,
+        name: 'x',
+        value: 1,
+        fields: { f1: 'A', f9: '取り残し' },
+      }),
+    );
+    expect(created.fields).toEqual({ f1: 'A', f3: null });
+  });
+
+  it('stores a negative value, for a balance tracked as an asset', async () => {
+    const category = await inHousehold((r) => r.assetCategory.add({ name: '住宅ローン' }));
+    const created = await inHousehold((r) =>
+      r.asset.add({ categoryId: category.id, name: '残債', value: -28_000_000 }),
+    );
+    expect(created.value).toBe(-28_000_000);
+  });
+
+  it('re-validates against the DESTINATION category when a holding is moved', async () => {
+    // Otherwise a required parameter of the destination could be skipped simply
+    // by not mentioning it in the patch.
+    const source = await inHousehold((r) => r.assetCategory.add({ name: '現金' }));
+    const destination = await seedCategory();
+    const asset = await inHousehold((r) =>
+      r.asset.add({ categoryId: source.id, name: '財布', value: 1 }),
+    );
+
+    await expect(
+      inHousehold((r) => r.asset.update(asset.id, { categoryId: destination.id })),
+    ).rejects.toThrow();
+
+    await inHousehold((r) =>
+      r.asset.update(asset.id, { categoryId: destination.id, fields: { f1: 'VTI' } }),
+    );
+    const [after] = await inHousehold((r) => r.asset.getAll());
+    expect(after.categoryId).toBe(destination.id);
+    expect(after.fields).toEqual({ f1: 'VTI', f3: null });
+  });
+
+  it('rejects a category id belonging to another ledger', async () => {
+    // Reported as bad input rather than "not found": telling the caller which
+    // it is would confirm that the id exists somewhere.
+    const theirs = await inPrivate((r) => r.assetCategory.add({ name: 'theirs' }));
+    await expect(
+      inHousehold((r) => r.asset.add({ categoryId: theirs.id, name: 'intruder', value: 1 })),
+    ).rejects.toThrow();
+
+    expect(await inPrivate((r) => r.asset.getAll())).toEqual([]);
+  });
+
+  it('does nothing for an id this ledger cannot see', async () => {
+    const theirCategory = await inPrivate((r) => r.assetCategory.add({ name: 'theirs' }));
+    const theirs = await inPrivate((r) =>
+      r.asset.add({ categoryId: theirCategory.id, name: 'theirs', value: 500 }),
+    );
+
+    await expect(
+      inHousehold((r) => r.asset.update(theirs.id, { name: 'hijacked', value: 0 })),
+    ).resolves.toBeUndefined();
+
+    const [untouched] = await inPrivate((r) => r.asset.getAll());
+    expect(untouched.name).toBe('theirs');
+    expect(untouched.value).toBe(500);
+  });
+
+  it('touches updated_at on every write', async () => {
+    const category = await inHousehold((r) => r.assetCategory.add({ name: '現金' }));
+    const created = await inHousehold((r) =>
+      r.asset.add({ categoryId: category.id, name: '財布', value: 1 }),
+    );
+    await inHousehold((r) => r.asset.update(created.id, { value: 2 }));
+
+    const [after] = await inHousehold((r) => r.asset.getAll());
+    expect(Date.parse(after.updatedAt)).toBeGreaterThanOrEqual(Date.parse(created.updatedAt));
+  });
+});

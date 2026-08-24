@@ -12,6 +12,11 @@ import {
   type MonthlyActualRepository,
 } from './monthly-actual.repository';
 import { createSnapshotRepository, type SnapshotRepository } from './snapshot.repository';
+import {
+  createAssetCategoryRepository,
+  type AssetCategoryRepository,
+} from './asset-category.repository';
+import { createAssetRepository, type AssetRepository } from './asset.repository';
 
 export interface Repositories {
   settings: SettingsRepository;
@@ -20,6 +25,8 @@ export interface Repositories {
   monthlyAmount: MonthlyAmountRepository;
   monthlyActual: MonthlyActualRepository;
   snapshot: SnapshotRepository;
+  assetCategory: AssetCategoryRepository;
+  asset: AssetRepository;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,6 +66,8 @@ export function createRepositories(client: PoolClient, ledgerId: number): Reposi
     monthlyAmount: createMonthlyAmountRepository(client, ledgerId),
     monthlyActual: createMonthlyActualRepository(client, ledgerId),
     snapshot: createSnapshotRepository(client, ledgerId),
+    assetCategory: createAssetCategoryRepository(client, ledgerId),
+    asset: createAssetRepository(client, ledgerId),
   };
 }
 

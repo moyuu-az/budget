@@ -4,6 +4,7 @@ import { useTemplateStore } from '../stores/useTemplateStore';
 import { useSnapshotStore } from '../stores/useSnapshotStore';
 import { useMonthlyStore } from '../stores/useMonthlyStore';
 import { useSessionStore } from '../stores/useSessionStore';
+import { useAssetStore } from '../stores/useAssetStore';
 
 // ---------------------------------------------------------------------------
 // Everything that has to happen when the active ledger changes.
@@ -25,6 +26,7 @@ const LEDGER_SCOPED_STORES: readonly { getState(): { reset(): void } }[] = [
   useTemplateStore,
   useSnapshotStore,
   useMonthlyStore,
+  useAssetStore,
 ];
 
 export function resetLedgerData(): void {
@@ -44,6 +46,10 @@ export async function loadLedgerData(): Promise<void> {
     useCategoryStore.getState().fetchCategories(),
     useTemplateStore.getState().fetchTemplates(),
     useSnapshotStore.getState().fetchSnapshots(),
+    // Fetched up front even though asset tracking is optional: the request is
+    // two small reads, and loading it lazily would mean the 資産 view flashing
+    // its empty state at households that DO use it.
+    useAssetStore.getState().fetchAssets(),
   ]);
 }
 
