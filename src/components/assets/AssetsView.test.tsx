@@ -74,12 +74,19 @@ describe('when the ledger has never used asset tracking', () => {
     await user.click(screen.getByText('NISA'));
     await user.click(await screen.findByRole('button', { name: '保存' }));
 
-    expect(api.addAssetCategory).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: 'NISA',
-        fields: expect.arrayContaining([expect.objectContaining({ label: '銘柄', required: true })]),
-      }),
-    );
+    // Asserted exactly, not loosely: the keys are the identity that holdings
+    // attach their values to, so a template that quietly renumbered them would
+    // be a different template.
+    expect(api.addAssetCategory).toHaveBeenCalledWith({
+      name: 'NISA',
+      color: '#22c55e',
+      fields: [
+        { key: 'f1', label: '銘柄', type: 'text', required: true, unit: null },
+        { key: 'f2', label: '証券会社', type: 'text', required: false, unit: null },
+        { key: 'f3', label: '保有数量', type: 'number', required: false, unit: '口' },
+        { key: 'f4', label: '取得単価', type: 'number', required: false, unit: '円' },
+      ],
+    });
   });
 });
 
@@ -142,6 +149,28 @@ describe('when the ledger tracks assets', () => {
       value: 500_000,
       fields: { f1: 'オルカン', f3: 1200 },
     });
+  });
+
+  it('warns before saving a category edit that discards stored values', async () => {
+    // Removing a parameter now drops its values from every holding, which is not
+    // recoverable -- so it is said before the save, not after.
+    const user = userEvent.setup();
+    render(<AssetsView />);
+
+    await user.click(screen.getByRole('button', { name: 'NISAの分類を編集' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: '保有数量を削除' }));
+
+    expect(
+      await within(dialog).findByText(/保有数量を削除します/, { selector: 'p' }),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps the templates reachable once a category exists', async () => {
+    // A household that started with 現金 should not have to retype the NISA
+    // shape because the picker only ever appeared on an empty view.
+    render(<AssetsView />);
+    expect(screen.getByText('雛形から分類を追加')).toBeInTheDocument();
   });
 
   it('warns that the holdings go with the category before deleting it', async () => {

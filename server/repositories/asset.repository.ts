@@ -1,6 +1,6 @@
 import type { PoolClient } from '../db/pool';
 import type { Asset, AssetInput } from '../../shared/types';
-import type { AssetFieldValues } from '../../shared/asset-fields';
+import type { AssetFieldDef, AssetFieldValues } from '../../shared/asset-fields';
 import { coerceFieldDefs, hasNoErrors, validateFieldValues } from '../../shared/asset-fields';
 import type { AssetCategoryRow, AssetRow } from './row-types';
 import { rowToAsset } from '../mappers';
@@ -22,6 +22,29 @@ const COLUMNS: Partial<Record<keyof AssetInput, string>> = {
 
 export function createAssetRepository(client: PoolClient, ledgerId: number): AssetRepository {
   /**
+   * The parameter definitions a holding must satisfy.
+   *
+   * The lookup is also an authorization check by construction: the SELECT runs
+   * inside the ledger-scoped transaction, so a category id from another ledger
+   * comes back empty and is reported as bad input rather than being confirmed
+   * to exist.
+   *
+   * `lock` is taken ONLY when the caller is moving a holding into this category
+   * -- see the note on update() for why the unlocked read is safe, and why
+   * taking the lock unconditionally would be worse.
+   */
+  async function loadDefs(categoryId: number, lock: boolean): Promise<AssetFieldDef[]> {
+    const { rows } = await client.query<Pick<AssetCategoryRow, 'fields'>>(
+      `SELECT fields FROM asset_categories WHERE id = $1${lock ? ' FOR SHARE' : ''}`,
+      [categoryId],
+    );
+    if (rows.length === 0) {
+      throw new ValidationError('指定された資産カテゴリが存在しません');
+    }
+    return coerceFieldDefs(rows[0].fields);
+  }
+
+  /**
    * Checks a holding's parameters against the shape its category defines.
    *
    * This is the validation a static schema cannot do: which parameters are
@@ -29,27 +52,27 @@ export function createAssetRepository(client: PoolClient, ledgerId: number): Ass
    * constant. It runs on the server even though the form checks the same rules,
    * because the form is not what the server receives -- a body is.
    *
-   * The category lookup is also an authorization check by construction: the
-   * SELECT is inside the ledger-scoped transaction, so a category id from
-   * another ledger comes back empty and is reported as bad input rather than
-   * being confirmed to exist.
+   * `enforceRequired` is false for a patch that says nothing about the holding's
+   * shape (a name or value edit). Adding a required parameter to a category
+   * would otherwise make every existing holding unsavable until someone filled
+   * it in -- including edits that have nothing to do with it.
    */
-  async function validateAgainstCategory(
-    categoryId: number,
+  function validateValues(
+    defs: AssetFieldDef[],
     raw: Readonly<Record<string, unknown>> | null | undefined,
-  ): Promise<AssetFieldValues> {
-    const { rows } = await client.query<Pick<AssetCategoryRow, 'fields'>>(
-      'SELECT fields FROM asset_categories WHERE id = $1',
-      [categoryId],
-    );
-    if (rows.length === 0) {
-      throw new ValidationError('指定された資産カテゴリが存在しません');
-    }
-
-    const defs = coerceFieldDefs(rows[0].fields);
+    enforceRequired: boolean,
+  ): AssetFieldValues {
     const { values, errors } = validateFieldValues(defs, raw);
-    if (!hasNoErrors(errors)) {
-      throw new ValidationError('資産のパラメータが不正です', errors);
+    const relevant = enforceRequired
+      ? errors
+      : // Type and length problems still matter; only "you left it blank" is
+        // suppressed, and only because the caller was not asked for it.
+        Object.fromEntries(
+          Object.entries(errors).filter(([key]) => values[key] !== null),
+        );
+
+    if (!hasNoErrors(relevant)) {
+      throw new ValidationError('資産のパラメータが不正です', relevant);
     }
     return values;
   }
@@ -63,7 +86,8 @@ export function createAssetRepository(client: PoolClient, ledgerId: number): Ass
     },
 
     async add(input) {
-      const values = await validateAgainstCategory(input.categoryId, input.fields);
+      const defs = await loadDefs(input.categoryId, false);
+      const values = validateValues(defs, input.fields, true);
 
       const { rows } = await client.query<AssetRow>(
         `INSERT INTO assets (ledger_id, category_id, name, value, fields)
@@ -76,8 +100,34 @@ export function createAssetRepository(client: PoolClient, ledgerId: number): Ass
     },
 
     async update(id, input) {
+      // ---------------------------------------------------------------------
+      // LOCK ORDER, AND WHY THE UNLOCKED READ IS SAFE
+      //
+      // Two transactions can touch the same holding: this one, and a change to
+      // its category's definitions (asset-category.repository.ts), which locks
+      // `asset_categories` first and then every holding of that category FOR
+      // UPDATE. Taking those two locks in the opposite order here would produce
+      // a deadlock, so:
+      //
+      //  - Moving a holding to ANOTHER category reads that category FOR SHARE
+      //    FIRST, keeping the order category -> asset. Without the lock the
+      //    destination's definitions could change between the read and the
+      //    write, storing values shaped by definitions that no longer exist.
+      //
+      //  - Staying in the same category takes NO category lock, and does not
+      //    need one: a definition change for that category cannot commit while
+      //    we hold FOR UPDATE on this row, because reshaping the holdings is
+      //    part of that change and would block on this very lock.
+      //
+      // The FOR UPDATE itself is what stops a lost update: this method rewrites
+      // `fields` wholesale, so a concurrent write read without it would be
+      // silently reverted by whichever transaction committed last.
+      // ---------------------------------------------------------------------
+      const lockedDefs =
+        input.categoryId === undefined ? undefined : await loadDefs(input.categoryId, true);
+
       const { rows: existing } = await client.query<Pick<AssetRow, 'category_id' | 'fields'>>(
-        'SELECT category_id, fields FROM assets WHERE id = $1',
+        'SELECT category_id, fields FROM assets WHERE id = $1 FOR UPDATE',
         [id],
       );
       // No row means it does not exist in THIS ledger -- row-level security has
@@ -90,12 +140,18 @@ export function createAssetRepository(client: PoolClient, ledgerId: number): Ass
       // alone. Moving a holding to another category re-checks its parameters
       // against the new shape, which is the only way a required parameter of the
       // destination cannot be skipped by simply not mentioning it.
-      const categoryId = input.categoryId ?? existing[0].category_id;
+      const defs = lockedDefs ?? (await loadDefs(existing[0].category_id, false));
       const rawFields =
         input.fields !== undefined
           ? input.fields
           : (existing[0].fields as Record<string, unknown> | null);
-      const values = await validateAgainstCategory(categoryId, rawFields);
+      const values = validateValues(
+        defs,
+        rawFields,
+        // The caller decided this holding's shape if it supplied values, or if
+        // it moved the holding somewhere with a different shape.
+        input.fields !== undefined || input.categoryId !== undefined,
+      );
 
       const { sets, params } = buildSetClause(input, COLUMNS);
 

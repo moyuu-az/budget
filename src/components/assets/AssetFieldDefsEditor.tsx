@@ -81,8 +81,16 @@ function AssetFieldDefsEditor({ defs, onChange, errors }: Props): ReactElement {
         </p>
       ) : (
         <ul className="flex flex-col gap-2">
-          {defs.map((def) => (
-            <li key={def.key} className="flex flex-wrap items-end gap-2">
+          {defs.map((def, index) => (
+            // Every row shows the same four captions (項目名 / 種類 / 単位 / 必須),
+            // so on their own they say nothing about WHICH parameter is being
+            // edited. The group name is what a screen reader announces on entry.
+            <li
+              key={def.key}
+              role="group"
+              aria-label={def.label.trim() || `パラメータ ${index + 1}`}
+              className="flex flex-wrap items-end gap-2"
+            >
               <div className="min-w-[9rem] flex-1">
                 <Input
                   label="項目名"

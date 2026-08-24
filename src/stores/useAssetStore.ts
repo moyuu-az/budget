@@ -116,21 +116,27 @@ export const useAssetStore = create<AssetState>((set, get) => ({
   },
 
   updateAsset: async (id, input) => {
-    const prev = get().assets;
     // NOT optimistic on `fields`: the server drops any value whose definition
     // the category no longer carries, so merging the patch locally could leave a
     // key on screen that was not stored. The server's answer is the truth, and
     // it is one small round trip away.
     try {
       await getApi().updateAsset(id, input);
-      const assets = await getApi().getAssets();
-      set({ assets });
-      return true;
     } catch (e) {
-      set({ assets: prev });
       reportError(e);
       return false;
     }
+
+    // The write already succeeded, so a failure from here on is a stale LIST,
+    // not a lost edit. Reporting it as a failure would send the user back to
+    // redo an edit the server has already stored -- and the next fetch (a
+    // ledger switch, a reload) repairs the list on its own.
+    try {
+      set({ assets: await getApi().getAssets() });
+    } catch (e) {
+      reportError(e);
+    }
+    return true;
   },
 
   deleteAsset: async (id) => {

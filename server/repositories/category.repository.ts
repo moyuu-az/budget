@@ -54,7 +54,23 @@ export function createCategoryRepository(
     },
 
     async update(id, input) {
-      const { sets, params } = buildSetClause(input, COLUMNS);
+      // Turning a category into an income one clears its 固定費/変動費 rather
+      // than failing.
+      //
+      // The CHECK constraint would otherwise reject the row, and the caller
+      // would get PostgreSQL's own text about a named constraint -- which
+      // reaches the user as the generic CONFLICT message and explains nothing.
+      // Clearing is also the honest reading of the request: the classification
+      // does not exist for income, so there is nothing to preserve. An explicit
+      // costType in the same patch still wins, and is still refused by the
+      // constraint, because that combination is a contradiction rather than a
+      // consequence.
+      const patch =
+        input.type === 'income' && input.costType === undefined
+          ? { ...input, costType: null }
+          : input;
+
+      const { sets, params } = buildSetClause(patch, COLUMNS);
       if (sets.length === 0) return;
 
       await client.query(

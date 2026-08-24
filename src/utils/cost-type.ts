@@ -38,6 +38,23 @@ export function costTypeLabel(costType: CostType | null): string {
   return costType === null ? UNCLASSIFIED_LABEL : COST_TYPE_LABELS[costType];
 }
 
+/**
+ * Badge tone for a classification.
+ *
+ * The label already lived here; the colour did not, and was written out twice --
+ * once as Badge tones in the settings list and once as raw Tailwind classes in
+ * the entries view. Two screens disagreeing about what colour 固定費 is would be
+ * a small bug that nobody files.
+ *
+ * Typed as the literal union rather than imported from Badge so this module
+ * keeps no dependency on a component; the values ARE Badge tones.
+ */
+export function costTypeTone(costType: CostType | null): 'info' | 'accent' | 'neutral' {
+  if (costType === 'fixed') return 'info';
+  if (costType === 'variable') return 'accent';
+  return 'neutral';
+}
+
 export interface CostTypeBreakdown {
   fixed: number;
   variable: number;

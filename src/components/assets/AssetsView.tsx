@@ -80,18 +80,22 @@ function AssetsView(): ReactElement {
     return ok;
   };
 
+  // Both confirmations close BEFORE awaiting. The confirm button has no busy
+  // state, so leaving the dialog open across the round trip lets a second click
+  // fire a second delete -- harmless on the server (DELETE is idempotent) but it
+  // reports success twice, which reads like something happened twice.
   const handleDeleteCategory = async (): Promise<void> => {
     if (!categoryToDelete) return;
-    const ok = await deleteCategory(categoryToDelete.id);
-    notify(ok, '資産分類を削除しました');
+    const target = categoryToDelete;
     setCategoryToDelete(null);
+    notify(await deleteCategory(target.id), '資産分類を削除しました');
   };
 
   const handleDeleteAsset = async (): Promise<void> => {
     if (!assetToDelete) return;
-    const ok = await deleteAsset(assetToDelete.id);
-    notify(ok, '資産を削除しました');
+    const target = assetToDelete;
     setAssetToDelete(null);
+    notify(await deleteAsset(target.id), '資産を削除しました');
   };
 
   const startFromTemplate = (template: AssetCategoryTemplate): void => {
@@ -169,6 +173,18 @@ function AssetsView(): ReactElement {
               onDeleteCategory={() => setCategoryToDelete(category)}
             />
           ))}
+
+          {/* Still reachable after the first category exists. A household that
+              started with 現金 and later wants the NISA shape should not have to
+              retype it because the picker only ever appeared on an empty view. */}
+          <details className="rounded-[var(--radius-lg)] border border-[var(--color-border-subtle)] p-4">
+            <summary className="cursor-pointer text-sm text-[var(--color-content-secondary)]">
+              雛形から分類を追加
+            </summary>
+            <div className="mt-3">
+              <AssetTemplatePicker onPick={startFromTemplate} />
+            </div>
+          </details>
         </div>
       )}
 

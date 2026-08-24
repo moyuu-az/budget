@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import type { Category } from '../../types';
-import { COST_TYPE_OPTIONS, costTypeLabel, parseCostType } from '../../utils/cost-type';
+import { COST_TYPE_OPTIONS, costTypeLabel, costTypeTone, parseCostType } from '../../utils/cost-type';
 import { Badge } from '../ui/Badge';
 import ColorPicker from './ColorPicker';
 import type { CategoryEditState as EditState } from './category-edit-state';
@@ -119,9 +119,7 @@ function CategoryList({
             nobody has classified yet -- an absent badge would read as "no such
             concept here" rather than "not decided". */}
         {category.type === 'expense' && (
-          <Badge tone={category.costType === 'fixed' ? 'info' : category.costType === 'variable' ? 'accent' : 'neutral'}>
-            {costTypeLabel(category.costType)}
-          </Badge>
+          <Badge tone={costTypeTone(category.costType)}>{costTypeLabel(category.costType)}</Badge>
         )}
 
         <span className="flex-1" />

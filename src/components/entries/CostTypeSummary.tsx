@@ -35,9 +35,8 @@ function CostTypeSummary({ breakdown }: Props): ReactElement | null {
     >
       <div className="flex items-baseline justify-between">
         <p className="text-xs font-medium text-slate-400">支出の内訳</p>
-        <p className="text-xs text-slate-500">
-          固定費率 {breakdown.total === 0 ? 0 : share(breakdown.fixed)}%
-        </p>
+        {/* total === 0 already returned above, so share() cannot divide by zero. */}
+        <p className="text-xs text-slate-500">固定費率 {share(breakdown.fixed)}%</p>
       </div>
 
       {/* A single bar rather than three: the comparison being made is between

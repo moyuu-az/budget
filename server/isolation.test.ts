@@ -187,7 +187,10 @@ const ADVERSARIAL_ARGS: { [M in DataMethod]: (victim: Fixture) => unknown[] } = 
   addAssetCategory: () => [{ name: 'intruder', fields: [] }],
   updateAssetCategory: (v) => [v.assetCategoryId, { name: 'hijacked' }],
   deleteAssetCategory: (v) => [v.assetCategoryId],
-  updateAsset: (v) => [v.assetId, { name: 'hijacked', value: 1 }],
+  // Names BOTH of the other ledger's ids at once: the holding to rewrite and the
+  // category to attach it to. add and update are separate code paths, so the
+  // category check has to be proven on each.
+  updateAsset: (v) => [v.assetId, { categoryId: v.assetCategoryId, name: 'hijacked', value: 1 }],
   deleteAsset: (v) => [v.assetId],
   // Attaching a holding to the OTHER ledger's asset category. The category
   // lookup runs inside the ledger-scoped transaction, so it must come back

@@ -42,13 +42,17 @@ function AssetDialog({ open, category, asset, onSubmit, onClose }: Props): React
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
+  // category.id is in the dependency list even though the dialog is currently
+  // mounted per category: moving from one category's "add" dialog straight to
+  // another's without unmounting would otherwise keep the first one's draft,
+  // under inputs generated from the second one's definitions.
   useEffect(() => {
     if (!open) return;
     setName(asset?.name ?? '');
     setValue(asset ? String(asset.value) : '');
     setDraft(toDraft(asset));
     setErrors({});
-  }, [open, asset]);
+  }, [open, asset, category.id]);
 
   const handleSubmit = async (): Promise<void> => {
     const nextErrors: Record<string, string> = {};

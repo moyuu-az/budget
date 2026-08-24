@@ -462,3 +462,76 @@ describe('development verifier', () => {
     await expect(verifier.verify(new Headers())).rejects.toThrow(UnauthorizedError);
   });
 });
+
+describe('request size', () => {
+  it('refuses a body larger than the limit, before parsing it', async () => {
+    // Validation cannot be the limit: Zod builds the whole parsed object before
+    // any refinement runs, and z.record reconstructs it key by key at roughly
+    // 320 bytes each. A body of one-character keys therefore costs ~30x its own
+    // size in heap -- enough for one authenticated member to exhaust a default
+    // Cloud Run instance. The cap has to be at the door.
+    const alice = await sessionFor(ALICE);
+    const fields: Record<string, number> = {};
+    for (let i = 0; i < 20_000; i += 1) fields[`k${i}`] = 0;
+
+    const response = await call('addAsset', {
+      as: ALICE,
+      ledgerId: personalLedgerOf(alice),
+      args: [{ categoryId: 1, name: 'x', value: 0, fields }],
+    });
+
+    expect(response.status).toBe(413);
+    expect((await envelopeOf(response)).message).toContain('大きすぎます');
+  });
+
+  it('lets an ordinary body through', async () => {
+    // The largest legitimate request is an asset category with its twelve
+    // parameter definitions -- well under the cap.
+    const alice = await sessionFor(ALICE);
+    const response = await call('addAssetCategory', {
+      as: ALICE,
+      ledgerId: personalLedgerOf(alice),
+      args: [
+        {
+          name: 'NISA',
+          fields: Array.from({ length: 12 }, (_, i) => ({
+            key: `f${i + 1}`,
+            label: `パラメータ${i + 1}`,
+            type: 'text',
+            required: false,
+            unit: null,
+          })),
+        },
+      ],
+    });
+
+    expect(response.status).toBe(200);
+  });
+});
+
+describe('bounded names', () => {
+  it('refuses a name long enough to slow every other member down', async () => {
+    // The columns are TEXT and the list endpoints return every row, so an
+    // unbounded name is downloaded by everyone sharing the ledger on each load.
+    const alice = await sessionFor(ALICE);
+    const response = await call('addCategory', {
+      as: ALICE,
+      ledgerId: personalLedgerOf(alice),
+      args: [{ name: 'あ'.repeat(101), type: 'expense' }],
+    });
+
+    expect(response.status).toBe(400);
+    expect((await envelopeOf(response)).code).toBe('VALIDATION');
+  });
+
+  it('refuses a colour that is not what the picker produces', async () => {
+    const alice = await sessionFor(ALICE);
+    const response = await call('addCategory', {
+      as: ALICE,
+      ledgerId: personalLedgerOf(alice),
+      args: [{ name: 'ok', type: 'expense', color: 'red' }],
+    });
+
+    expect(response.status).toBe(400);
+  });
+});

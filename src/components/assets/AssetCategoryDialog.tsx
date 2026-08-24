@@ -34,6 +34,14 @@ function AssetCategoryDialog({ open, category, initial, onSubmit, onClose }: Pro
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
+  // Parameters that exist on the saved category but not in the draft. Saving
+  // now DISCARDS their values on every holding (see reshapeHoldings in
+  // server/repositories/asset-category.repository.ts), so the user is told
+  // before they press save rather than after.
+  const removedFields = (category?.fields ?? []).filter(
+    (saved) => !fields.some((draft) => draft.key === saved.key),
+  );
+
   // Re-seeded whenever the dialog opens for a different subject. Without the
   // `open` dependency, closing and reopening on the same category would show
   // whatever half-finished edit was abandoned last time.
@@ -112,6 +120,16 @@ function AssetCategoryDialog({ open, category, initial, onSubmit, onClose }: Pro
         </div>
 
         <AssetFieldDefsEditor defs={fields} onChange={setFields} errors={errors} />
+
+        {removedFields.length > 0 && (
+          <p
+            role="alert"
+            className="text-xs text-[var(--color-semantic-warning)]"
+          >
+            {removedFields.map((f) => f.label).join('、')}
+            を削除します。保存すると、この分類の資産に入力済みの値も取り除かれます。
+          </p>
+        )}
       </div>
     </Dialog>
   );

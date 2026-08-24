@@ -21,6 +21,26 @@ import {
 const typeEnum = z.enum(['income', 'expense']);
 const costTypeEnum = z.enum(['fixed', 'variable']);
 
+/**
+ * Every user-supplied name, bounded.
+ *
+ * The columns are TEXT, which in PostgreSQL has no practical limit, and the
+ * list endpoints return every row. Without a cap here one member of a shared
+ * ledger can store a name of arbitrary size that every other member then
+ * downloads on each page load -- not a leak, but a household budget nobody can
+ * open. 100 characters is far more than any of these names needs.
+ */
+const nameSchema = (label: string) => z.string().min(1, `${label}は必須です`).max(100);
+
+/**
+ * Exactly what <input type="color"> produces.
+ *
+ * Not an XSS defence -- React assigns these through the CSSOM, so a declaration
+ * cannot break out -- but the same unbounded-storage argument as names, and it
+ * keeps every stored colour in one comparable form.
+ */
+const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/, '色は #rrggbb 形式で指定してください');
+
 export const finiteNumberSchema = z.number().finite();
 export const idSchema = z.number().int().positive();
 export const yearMonthSchema = z
@@ -32,10 +52,10 @@ export const isoDateSchema = z
 export const amountSchema = z.number().finite().min(0, '金額は0以上である必要があります');
 
 const categoryFieldsSchema = z.object({
-  name: z.string().min(1, 'カテゴリ名は必須です'),
+  name: nameSchema('カテゴリ名'),
   type: typeEnum,
   // Nullable so a colour can be cleared; see the note on CategoryInput.
-  color: z.string().nullable().optional(),
+  color: colorSchema.nullable().optional(),
   sortOrder: z.number().int().optional(),
   // Nullable for the same reason: null clears the 固定費/変動費 classification.
   costType: costTypeEnum.nullable().optional(),
@@ -65,7 +85,7 @@ export const categoryInputSchema = categoryFieldsSchema.superRefine((input, ctx)
 export const categoryPatchSchema = categoryFieldsSchema.partial();
 
 export const templateInputSchema = z.object({
-  name: z.string().min(1, 'テンプレート名は必須です'),
+  name: nameSchema('テンプレート名'),
   dayOfMonth: z.number().int().min(1).max(31),
   type: typeEnum,
   categoryId: z.number().int().positive().nullable().optional(),
@@ -97,10 +117,14 @@ const assetFieldDefsSchema = z.array(assetFieldDefSchema).max(MAX_ASSET_FIELDS);
 /**
  * A stored parameter value: text, number, or "not filled in".
  *
- * Bounded on purpose. `fields` is JSONB, so without a cap on the string length
- * and on how many keys may arrive, one request could store a megabyte in a row
- * that the whole 資産 view loads at once. Unknown keys are dropped later by the
- * validator, but they have to survive parsing to get there.
+ * Key and value lengths are bounded here. The NUMBER of keys is not, and cannot
+ * usefully be: a `.refine()` runs after Zod has already built the whole object,
+ * which is where the memory goes. That is bounded at the door instead, by the
+ * body limit in server/http/app.ts -- one place, for every method.
+ *
+ * Keys the category does not define are dropped by validateFieldValues before
+ * anything is stored, so what reaches the database is bounded by the category's
+ * own definitions regardless of what arrives.
  */
 const assetFieldValuesSchema = z.record(
   z.string().max(64),
@@ -108,8 +132,8 @@ const assetFieldValuesSchema = z.record(
 );
 
 export const assetCategoryInputSchema = z.object({
-  name: z.string().min(1, '資産カテゴリ名は必須です'),
-  color: z.string().nullable().optional(),
+  name: nameSchema('資産カテゴリ名'),
+  color: colorSchema.nullable().optional(),
   sortOrder: z.number().int().optional(),
   fields: assetFieldDefsSchema.optional(),
 });
@@ -117,7 +141,7 @@ export const assetCategoryPatchSchema = assetCategoryInputSchema.partial();
 
 export const assetInputSchema = z.object({
   categoryId: idSchema,
-  name: z.string().min(1, '資産名は必須です'),
+  name: nameSchema('資産名'),
   // Not amountSchema: a holding may legitimately be negative (a loan balance
   // tracked as an asset category), which is why value has no CHECK either.
   value: finiteNumberSchema,

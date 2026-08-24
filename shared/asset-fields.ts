@@ -101,20 +101,27 @@ export interface FieldDefValidation {
 export function validateFieldDefs(defs: readonly AssetFieldDef[]): FieldDefValidation {
   const errors: Record<string, string> = {};
 
+  // List-level problems all share the '_' slot, so the FIRST one wins. Letting a
+  // later one overwrite would replace 'too many parameters' with a message about
+  // a key the user never typed and cannot see.
+  const listError = (message: string): void => {
+    if (errors._ === undefined) errors._ = message;
+  };
+
   if (defs.length > MAX_ASSET_FIELDS) {
-    errors._ = `パラメータは ${MAX_ASSET_FIELDS} 個までです`;
+    listError(`パラメータは ${MAX_ASSET_FIELDS} 個までです`);
   }
 
   const seen = new Set<string>();
   for (const def of defs) {
     if (!FIELD_KEY_PATTERN.test(def.key)) {
-      errors._ = 'パラメータの識別子が不正です';
+      listError('パラメータの識別子が不正です');
       continue;
     }
     if (seen.has(def.key)) {
       // Two definitions sharing a key means one holding value serves both, and
       // editing either overwrites the other.
-      errors._ = 'パラメータの識別子が重複しています';
+      listError('パラメータの識別子が重複しています');
       continue;
     }
     seen.add(def.key);
@@ -130,6 +137,24 @@ export function validateFieldDefs(defs: readonly AssetFieldDef[]): FieldDefValid
   }
 
   return { errors };
+}
+
+/**
+ * The form a definition list is STORED in.
+ *
+ * Trimming happens here rather than while the user types (which would make a
+ * space impossible to enter mid-label) and rather than only in the dialog
+ * (which would leave the HTTP API able to store untrimmed labels). An empty
+ * unit becomes null so rendering never appends a stray space.
+ */
+export function normalizeFieldDefs(defs: readonly AssetFieldDef[]): AssetFieldDef[] {
+  return defs.map((def) => ({
+    key: def.key,
+    label: def.label.trim(),
+    type: def.type,
+    required: def.required === true,
+    unit: def.unit !== null && def.unit.trim() !== '' ? def.unit.trim() : null,
+  }));
 }
 
 export interface FieldValueValidation {
@@ -214,7 +239,13 @@ export function hasNoErrors(errors: Record<string, string>): boolean {
 /** Display form for one stored value. Keeps list and detail rendering identical. */
 export function formatFieldValue(def: AssetFieldDef, value: AssetFieldValue): string {
   if (value === null || value === '') return '—';
-  const text = def.type === 'number' ? Number(value).toLocaleString('ja-JP') : String(value);
+
+  // A stored value that does not fit the definition's type should be readable,
+  // not 'NaN'. reshapeFieldValues normalises holdings whenever a definition
+  // changes, so this is the belt to that braces -- a row written before that
+  // existed, or edited outside the application.
+  const numeric = def.type === 'number' ? Number(value) : Number.NaN;
+  const text = Number.isFinite(numeric) ? numeric.toLocaleString('ja-JP') : String(value);
   return def.unit ? `${text} ${def.unit}` : text;
 }
 

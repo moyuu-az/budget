@@ -505,12 +505,29 @@ describe('category cost type', () => {
     ).rejects.toThrow();
   });
 
-  it('refuses to turn a classified expense category into an income one', async () => {
+  it('clears the classification when a category becomes an income one', async () => {
+    // The CHECK constraint would reject the row, and the caller would get
+    // PostgreSQL's text about a named constraint -- which reaches the user as a
+    // generic message that explains nothing. Clearing is also the honest
+    // reading: the classification does not exist for income.
+    const created = await inHousehold((r) =>
+      r.category.add({ name: 'rent', type: 'expense', costType: 'fixed' }),
+    );
+    await inHousehold((r) => r.category.update(created.id, { type: 'income' }));
+
+    const [after] = await inHousehold((r) => r.category.getAll());
+    expect(after.type).toBe('income');
+    expect(after.costType).toBeNull();
+  });
+
+  it('still refuses an explicit classification alongside an income type', async () => {
+    // Asking for both is a contradiction, not a consequence -- so it is an
+    // error rather than something to silently resolve.
     const created = await inHousehold((r) =>
       r.category.add({ name: 'rent', type: 'expense', costType: 'fixed' }),
     );
     await expect(
-      inHousehold((r) => r.category.update(created.id, { type: 'income' })),
+      inHousehold((r) => r.category.update(created.id, { type: 'income', costType: 'variable' })),
     ).rejects.toThrow();
   });
 });
@@ -596,6 +613,153 @@ describe('asset category repository', () => {
   it('keeps one ledger\'s categories out of another\'s', async () => {
     await inHousehold((r) => r.assetCategory.add({ name: 'household' }));
     expect(await inPrivate((r) => r.assetCategory.getAll())).toEqual([]);
+  });
+
+  it('normalises labels and units on the way in', async () => {
+    // The dialog trims, but the dialog is not what the server receives.
+    const created = await inHousehold((r) =>
+      r.assetCategory.add({
+        name: 'NISA',
+        fields: [{ key: 'f1', label: '  銘柄  ', type: 'text', required: true, unit: '  ' }],
+      }),
+    );
+    expect(created.fields).toEqual([
+      { key: 'f1', label: '銘柄', type: 'text', required: true, unit: null },
+    ]);
+  });
+});
+
+describe('asset category field definitions vs existing holdings', () => {
+  /** A category with two text parameters, and one holding that fills both. */
+  async function seedWithHolding(): Promise<{ categoryId: number; assetId: number }> {
+    const category = await inHousehold((r) =>
+      r.assetCategory.add({
+        name: 'NISA',
+        fields: [
+          { key: 'f1', label: '銘柄', type: 'text', required: true, unit: null },
+          { key: 'f2', label: '証券会社', type: 'text', required: false, unit: null },
+        ],
+      }),
+    );
+    const asset = await inHousehold((r) =>
+      r.asset.add({
+        categoryId: category.id,
+        name: 'つみたて',
+        value: 100,
+        fields: { f1: 'eMAXIS Slim', f2: 'SBI証券' },
+      }),
+    );
+    return { categoryId: category.id, assetId: asset.id };
+  }
+
+  it('drops a holding value when its definition is removed', async () => {
+    const { categoryId } = await seedWithHolding();
+
+    await inHousehold((r) =>
+      r.assetCategory.update(categoryId, {
+        fields: [{ key: 'f1', label: '銘柄', type: 'text', required: true, unit: null }],
+      }),
+    );
+
+    const [asset] = await inHousehold((r) => r.asset.getAll());
+    expect(asset.fields).toEqual({ f1: 'eMAXIS Slim' });
+  });
+
+  it('does not resurrect a removed value under a recycled key', async () => {
+    // REGRESSION. nextFieldKey hands out the lowest free number, so removing
+    // 証券会社 (f2) and adding 満期日 frees f2 and takes it again. If the old
+    // value survived, 'SBI証券' would reappear in the 満期日 column -- and the
+    // holding could not be saved again until someone cleared a box they never
+    // filled in.
+    const { categoryId } = await seedWithHolding();
+
+    await inHousehold((r) =>
+      r.assetCategory.update(categoryId, {
+        fields: [{ key: 'f1', label: '銘柄', type: 'text', required: true, unit: null }],
+      }),
+    );
+    await inHousehold((r) =>
+      r.assetCategory.update(categoryId, {
+        fields: [
+          { key: 'f1', label: '銘柄', type: 'text', required: true, unit: null },
+          { key: 'f2', label: '満期日', type: 'date', required: false, unit: null },
+        ],
+      }),
+    );
+
+    const [asset] = await inHousehold((r) => r.asset.getAll());
+    expect(asset.fields).toEqual({ f1: 'eMAXIS Slim', f2: null });
+  });
+
+  it('drops a value the new type cannot hold', async () => {
+    const { categoryId } = await seedWithHolding();
+
+    await inHousehold((r) =>
+      r.assetCategory.update(categoryId, {
+        fields: [
+          { key: 'f1', label: '銘柄', type: 'text', required: true, unit: null },
+          { key: 'f2', label: '保有数量', type: 'number', required: false, unit: '口' },
+        ],
+      }),
+    );
+
+    // 'SBI証券' is not a number; keeping it would render as NaN and block the
+    // next save of this holding.
+    const [asset] = await inHousehold((r) => r.asset.getAll());
+    expect(asset.fields).toEqual({ f1: 'eMAXIS Slim', f2: null });
+  });
+
+  it('leaves other ledgers\' holdings alone', async () => {
+    const { categoryId } = await seedWithHolding();
+    const theirCategory = await inPrivate((r) =>
+      r.assetCategory.add({
+        name: 'theirs',
+        fields: [{ key: 'f1', label: 'x', type: 'text', required: false, unit: null }],
+      }),
+    );
+    await inPrivate((r) =>
+      r.asset.add({ categoryId: theirCategory.id, name: 'theirs', value: 1, fields: { f1: 'keep' } }),
+    );
+
+    await inHousehold((r) => r.assetCategory.update(categoryId, { fields: [] }));
+
+    const [theirs] = await inPrivate((r) => r.asset.getAll());
+    expect(theirs.fields).toEqual({ f1: 'keep' });
+  });
+
+  it('does not rewrite holdings when the patch leaves the definitions alone', async () => {
+    const { categoryId } = await seedWithHolding();
+    await inHousehold((r) => r.assetCategory.update(categoryId, { name: '新NISA' }));
+
+    const [asset] = await inHousehold((r) => r.asset.getAll());
+    expect(asset.fields).toEqual({ f1: 'eMAXIS Slim', f2: 'SBI証券' });
+  });
+
+  it('lets a newly required parameter stay empty on holdings that predate it', async () => {
+    // Rejecting them would make every existing holding unsavable -- including
+    // edits that have nothing to do with the new parameter.
+    const { categoryId, assetId } = await seedWithHolding();
+
+    await inHousehold((r) =>
+      r.assetCategory.update(categoryId, {
+        fields: [
+          { key: 'f1', label: '銘柄', type: 'text', required: true, unit: null },
+          { key: 'f2', label: '証券会社', type: 'text', required: true, unit: null },
+          { key: 'f3', label: '口座区分', type: 'text', required: true, unit: null },
+        ],
+      }),
+    );
+
+    // An edit that says nothing about the shape goes through...
+    await inHousehold((r) => r.asset.update(assetId, { value: 200 }));
+    const [after] = await inHousehold((r) => r.asset.getAll());
+    expect(after.value).toBe(200);
+    expect(after.fields.f3).toBeNull();
+
+    // ...but submitting the form without it does not.
+    await expect(
+      inHousehold((r) => r.asset.update(assetId, { fields: { f1: 'A', f2: 'B' } })),
+    ).rejects.toThrow();
   });
 });
 
