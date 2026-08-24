@@ -5,9 +5,11 @@ import { useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
 import { useCategoryStore } from '../../stores/useCategoryStore';
 import { useToastStore } from '../../stores/useToastStore';
 import { toYearMonth } from '../../utils/forecast';
+import { summarizeExpenseByCostType } from '../../utils/cost-type';
 import MonthNavigator from './MonthNavigator';
 import TemplateActions from './TemplateActions';
 import CategoryGroupList from './CategoryGroupList';
+import CostTypeSummary from './CostTypeSummary';
 import TemplateEditor from './TemplateEditor';
 import ConfirmDialog from '../shared/ConfirmDialog';
 
@@ -45,6 +47,17 @@ function EntriesView() {
       .filter((t) => t.type === 'expense' && t.enabled)
       .reduce((sum, t) => sum + resolveAmount(t.id, currentYearMonth, monthlyAmountsMap, templates), 0);
   }, [templates, currentYearMonth, monthlyAmountsMap]);
+
+  // 固定費 / 変動費 for the month on screen. Built from the SAME amount
+  // resolution as totalExpense above, so the parts always add up to the total
+  // shown beside them.
+  const costBreakdown = useMemo(
+    () =>
+      summarizeExpenseByCostType(templates, categories, (t) =>
+        resolveAmount(t.id, currentYearMonth, monthlyAmountsMap, templates),
+      ),
+    [templates, categories, currentYearMonth, monthlyAmountsMap],
+  );
 
   // Copy from previous month
   const handleCopyFromLastMonth = useCallback(async () => {
@@ -118,6 +131,9 @@ function EntriesView() {
           </p>
         </div>
       </div>
+
+      {/* Expense split: what the 固定費/変動費 classification is for */}
+      <CostTypeSummary breakdown={costBreakdown} />
 
       {/* Action bar */}
       <TemplateActions

@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import type { Pool } from '../db/pool';
 import type { IdentityVerifier } from '../auth/identity';
 import type { SessionService } from '../auth/session';
@@ -27,6 +28,27 @@ export interface AppDependencies {
 
 /** Header naming the ledger a data request applies to. */
 export const LEDGER_HEADER = 'x-ledger-id';
+
+/**
+ * Largest request body any method may send.
+ *
+ * The biggest legitimate body in this API is an asset category carrying its
+ * twelve parameter definitions -- comfortably under 2 KB. 64 KB leaves room to
+ * grow while removing a whole class of problem:
+ *
+ *   Validation cannot be the limit. Zod builds the parsed object before any
+ *   refinement runs, and `z.record` reconstructs it key by key at roughly 320
+ *   bytes each -- a measured ~30x amplification. A 15 MB body of single-character
+ *   keys peaks around 440 MB, which is more than a default Cloud Run instance
+ *   has. The caller is authenticated by then (IAP, the allowlist and ledger
+ *   membership are all checked before the body is read), so this is not an
+ *   anonymous attack -- but "a signed-in member can restart the service" is not
+ *   a property worth keeping.
+ *
+ * Enforced here, at the door, for every method at once: one number instead of a
+ * cap on each field of each schema, which is the version that would rot.
+ */
+const MAX_BODY_BYTES = 64 * 1024;
 
 type Variables = { session: Session };
 
@@ -111,6 +133,25 @@ export function createApp(deps: AppDependencies): Hono<{ Variables: Variables }>
   // Liveness only: no authentication, no database. Cloud Run's health checks
   // must not depend on IAP or on the database being reachable.
   app.get('/healthz', (c) => c.text('ok'));
+
+  // Registered before the authentication middleware on purpose: an oversized
+  // body is refused without reading it and without verifying anything. 413 is
+  // the honest status; the envelope keeps the client's error handling uniform.
+  app.use(
+    '/api/*',
+    bodyLimit({
+      maxSize: MAX_BODY_BYTES,
+      onError: (c) =>
+        c.json(
+          {
+            __appError: true,
+            code: 'VALIDATION',
+            message: 'リクエストが大きすぎます',
+          },
+          413,
+        ),
+    }),
+  );
 
   // Everything under /api is authenticated. The session is resolved once per
   // request and reused by the handler.

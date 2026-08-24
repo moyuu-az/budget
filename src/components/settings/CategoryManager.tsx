@@ -1,18 +1,13 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import type { Category, CategoryInput } from '../../types';
+import type { Category, CategoryInput, CostType } from '../../types';
 import { useCategoryStore } from '../../stores/useCategoryStore';
 import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useToastStore } from '../../stores/useToastStore';
 import ConfirmDialog from '../shared/ConfirmDialog';
 import CategoryList from './CategoryList';
 import CategoryForm from './CategoryForm';
-
-interface EditState {
-  id: number;
-  name: string;
-  color: string;
-}
+import type { CategoryEditState } from './category-edit-state';
 
 function CategoryManager() {
   const { categories, addCategory, updateCategory, deleteCategory } =
@@ -20,13 +15,14 @@ function CategoryManager() {
   const { templates } = useTemplateStore();
   const { addToast } = useToastStore();
 
-  const [editing, setEditing] = useState<EditState | null>(null);
+  const [editing, setEditing] = useState<CategoryEditState | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Category | null>(null);
 
   // New category form state
   const [newName, setNewName] = useState('');
   const [newColor, setNewColor] = useState('#8b5cf6');
   const [newType, setNewType] = useState<'income' | 'expense'>('expense');
+  const [newCostType, setNewCostType] = useState<CostType | null>(null);
 
   const incomeCategories = categories
     .filter((c) => c.type === 'income')
@@ -45,21 +41,26 @@ function CategoryManager() {
       id: category.id,
       name: category.name,
       color: category.color || '#8b5cf6',
+      costType: category.costType,
     });
   };
 
+  // Every handler below reads the store's boolean rather than catching: the
+  // store has already swallowed the failure and shown the error toast, so a
+  // try/catch here would never run and the success toast would fire regardless.
   const handleSaveEdit = async () => {
     if (!editing || !editing.name.trim()) return;
-    try {
-      await updateCategory(editing.id, {
-        name: editing.name.trim(),
-        color: editing.color,
-      });
+    const ok = await updateCategory(editing.id, {
+      name: editing.name.trim(),
+      color: editing.color,
+      costType: editing.costType,
+    });
+    if (ok) {
       addToast('カテゴリを更新しました', 'success');
-    } catch {
-      addToast('更新に失敗しました', 'error');
+      setEditing(null);
     }
-    setEditing(null);
+    // On failure the row stays in edit mode with the user's text intact, so the
+    // edit can be retried instead of retyped.
   };
 
   const handleCancelEdit = () => {
@@ -68,12 +69,8 @@ function CategoryManager() {
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    try {
-      await deleteCategory(deleteTarget.id);
-      addToast('カテゴリを削除しました', 'success');
-    } catch {
-      addToast('削除に失敗しました', 'error');
-    }
+    const ok = await deleteCategory(deleteTarget.id);
+    if (ok) addToast('カテゴリを削除しました', 'success');
     setDeleteTarget(null);
   };
 
@@ -91,15 +88,17 @@ function CategoryManager() {
       type: newType,
       color: newColor,
       sortOrder: maxSort + 1,
+      // Never sent for income: the schema and the database both refuse it, and
+      // the form does not offer it either.
+      costType: newType === 'expense' ? newCostType : null,
     };
 
-    try {
-      await addCategory(input);
+    const ok = await addCategory(input);
+    if (ok) {
       setNewName('');
       setNewColor('#8b5cf6');
+      setNewCostType(null);
       addToast('カテゴリを追加しました', 'success');
-    } catch {
-      addToast('追加に失敗しました', 'error');
     }
   };
 
@@ -155,9 +154,11 @@ function CategoryManager() {
           name={newName}
           color={newColor}
           type={newType}
+          costType={newCostType}
           onNameChange={setNewName}
           onColorChange={setNewColor}
           onTypeChange={setNewType}
+          onCostTypeChange={setNewCostType}
           onSubmit={handleAdd}
           inputStyle={inputStyle}
         />

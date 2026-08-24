@@ -429,6 +429,134 @@ describe('money and date representation', () => {
   });
 });
 
+describe('asset schema', () => {
+  it('refuses a holding attached to another ledger\'s category', async () => {
+    const categoryInB = await withLedgerScope(db.pool, ledgerB, async (c) => {
+      const { rows } = await c.query<{ id: number }>(
+        "INSERT INTO asset_categories (ledger_id, name) VALUES ($1, 'B cat') RETURNING id",
+        [ledgerB],
+      );
+      return rows[0].id;
+    });
+
+    // Foreign key checks bypass row security, so this really is the composite
+    // FK refusing -- not the policy hiding the target row.
+    const code = await sqlstateOf(() =>
+      withLedgerScope(db.pool, ledgerA, (c) =>
+        c.query('INSERT INTO assets (ledger_id, category_id, name, value) VALUES ($1, $2, $3, 0)', [
+          ledgerA,
+          categoryInB,
+          'leaky',
+        ]),
+      ),
+    );
+
+    expect(code).toBe('23503'); // foreign_key_violation
+  });
+
+  it('deletes the holdings when their category goes', async () => {
+    await withLedgerScope(db.pool, ledgerA, async (c) => {
+      const { rows } = await c.query<{ id: number }>(
+        "INSERT INTO asset_categories (ledger_id, name) VALUES ($1, 'doomed') RETURNING id",
+        [ledgerA],
+      );
+      await c.query(
+        "INSERT INTO assets (ledger_id, category_id, name, value) VALUES ($1, $2, 'holding', 1)",
+        [ledgerA, rows[0].id],
+      );
+      await c.query('DELETE FROM asset_categories WHERE id = $1', [rows[0].id]);
+    });
+
+    expect(await raw(db.adminPool, 'SELECT * FROM assets')).toEqual([]);
+  });
+
+  it('refuses JSON of the wrong shape in either column', async () => {
+    // The CHECK is the floor under shared/asset-fields.ts: even a bug in the
+    // server cannot store an object where the UI will iterate an array.
+    const defsAsObject = await sqlstateOf(() =>
+      withLedgerScope(db.pool, ledgerA, (c) =>
+        c.query("INSERT INTO asset_categories (ledger_id, name, fields) VALUES ($1, 'x', '{}')", [
+          ledgerA,
+        ]),
+      ),
+    );
+    expect(defsAsObject).toBe('23514'); // check_violation
+
+    const categoryId = await withLedgerScope(db.pool, ledgerA, async (c) => {
+      const { rows } = await c.query<{ id: number }>(
+        "INSERT INTO asset_categories (ledger_id, name) VALUES ($1, 'ok') RETURNING id",
+        [ledgerA],
+      );
+      return rows[0].id;
+    });
+
+    const valuesAsArray = await sqlstateOf(() =>
+      withLedgerScope(db.pool, ledgerA, (c) =>
+        c.query(
+          "INSERT INTO assets (ledger_id, category_id, name, value, fields) VALUES ($1, $2, 'x', 0, '[]')",
+          [ledgerA, categoryId],
+        ),
+      ),
+    );
+    expect(valuesAsArray).toBe('23514');
+  });
+
+  it('stores an asset value exactly, including a negative one', async () => {
+    const value = await withLedgerScope(db.pool, ledgerA, async (c) => {
+      const { rows: category } = await c.query<{ id: number }>(
+        "INSERT INTO asset_categories (ledger_id, name) VALUES ($1, 'loan') RETURNING id",
+        [ledgerA],
+      );
+      const { rows } = await c.query<{ value: number }>(
+        "INSERT INTO assets (ledger_id, category_id, name, value) VALUES ($1, $2, 'x', $3) RETURNING value",
+        [ledgerA, category[0].id, -28_000_000.55],
+      );
+      return rows[0].value;
+    });
+    // No CHECK (value >= 0), unlike monthly_amounts: a loan balance has to be
+    // enterable for the portfolio total to mean anything.
+    expect(value).toBe(-28_000_000.55);
+  });
+});
+
+describe('expense classification', () => {
+  it('refuses 固定費/変動費 on an income category', async () => {
+    const code = await sqlstateOf(() =>
+      withLedgerScope(db.pool, ledgerA, (c) =>
+        c.query(
+          "INSERT INTO categories (ledger_id, name, type, cost_type) VALUES ($1, 'salary', 'income', 'fixed')",
+          [ledgerA],
+        ),
+      ),
+    );
+    expect(code).toBe('23514'); // check_violation
+  });
+
+  it('refuses a classification that is neither fixed nor variable', async () => {
+    const code = await sqlstateOf(() =>
+      withLedgerScope(db.pool, ledgerA, (c) =>
+        c.query(
+          "INSERT INTO categories (ledger_id, name, type, cost_type) VALUES ($1, 'rent', 'expense', 'occasional')",
+          [ledgerA],
+        ),
+      ),
+    );
+    expect(code).toBe('23514');
+  });
+
+  it('leaves NULL legal on an expense category', async () => {
+    // Every category that predates this feature is unclassified; making the
+    // column NOT NULL would have forced a wrong answer onto all of them.
+    await expect(
+      withLedgerScope(db.pool, ledgerA, (c) =>
+        c.query("INSERT INTO categories (ledger_id, name, type) VALUES ($1, 'food', 'expense')", [
+          ledgerA,
+        ]),
+      ),
+    ).resolves.toBeDefined();
+  });
+});
+
 describe('isolation start-up guard', () => {
   it('accepts the least-privilege application role', async () => {
     await expect(assertIsolationEnforceable(db.pool)).resolves.toBeUndefined();

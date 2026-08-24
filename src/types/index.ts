@@ -26,7 +26,7 @@ export interface ForecastPoint {
 }
 
 // --- View ---
-export type ViewType = 'dashboard' | 'entries' | 'history' | 'settings' | 'analytics';
+export type ViewType = 'dashboard' | 'entries' | 'history' | 'settings' | 'analytics' | 'assets';
 
 // --- Analytics (renderer-computed, never cross IPC) ---
 export type ForecastPeriod = '60d' | '3m' | '6m' | '1y';

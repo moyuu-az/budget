@@ -8,7 +8,9 @@ export const createMockApi = (): AppApi => ({
   setBalance: vi.fn().mockResolvedValue(undefined),
 
   getCategories: vi.fn().mockResolvedValue([]),
-  addCategory: vi.fn().mockResolvedValue({ id: 1, name: '', type: 'expense', color: null, sortOrder: 0 }),
+  addCategory: vi
+    .fn()
+    .mockResolvedValue({ id: 1, name: '', type: 'expense', color: null, sortOrder: 0, costType: null }),
   updateCategory: vi.fn().mockResolvedValue(undefined),
   deleteCategory: vi.fn().mockResolvedValue(undefined),
 
@@ -38,6 +40,21 @@ export const createMockApi = (): AppApi => ({
   getSnapshots: vi.fn().mockResolvedValue([]),
   addSnapshot: vi.fn().mockResolvedValue({ id: 1, date: '2026-01-01', balance: 0, createdAt: '2026-01-01T00:00:00Z' }),
   deleteSnapshot: vi.fn().mockResolvedValue(undefined),
+
+  getAssetCategories: vi.fn().mockResolvedValue([]),
+  addAssetCategory: vi
+    .fn()
+    .mockResolvedValue({ id: 1, name: '', color: null, sortOrder: 0, fields: [] }),
+  updateAssetCategory: vi.fn().mockResolvedValue(undefined),
+  deleteAssetCategory: vi.fn().mockResolvedValue(undefined),
+
+  getAssets: vi.fn().mockResolvedValue([]),
+  addAsset: vi.fn().mockResolvedValue({
+    id: 1, categoryId: 1, name: '', value: 0, fields: {},
+    createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+  }),
+  updateAsset: vi.fn().mockResolvedValue(undefined),
+  deleteAsset: vi.fn().mockResolvedValue(undefined),
 
   getSession: vi.fn().mockResolvedValue({
     user: { id: 1, email: 'test@example.com', displayName: 'test' },

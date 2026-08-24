@@ -108,6 +108,15 @@ npm run db:migrate
 `db:migrate` はマイグレーション適用後、`$APP_ROLE` に行レベルの権限だけを付与する
 (スキーマ変更権限は与えない)。同時起動しても pg_advisory_lock で直列化される。
 
+> **初期セットアップ時だけの手順ではない。**
+> `server/db/migrations/` にファイルが増えたリリースでは、**デプロイの前に毎回**この手順を
+> 実行する。新しいリビジョンが先に立ち上がると、まだ存在しない列やテーブルを読みに行って
+> 失敗する。適用済みのファイルは runner がスキップするので、毎回流して問題ない。
+>
+> `ALTER DEFAULT PRIVILEGES` が効いているため、既に一度 grant 済みの環境なら
+> `DATABASE_APP_ROLE` を省いても新テーブルの権限は付く。ただし前回 grant を実行した
+> ロールと今回 migration を流すロールが同じ場合に限るので、迷ったら毎回付けてよい。
+
 ## 5. デプロイ
 
 ```sh
@@ -119,8 +128,13 @@ gcloud run deploy "$SERVICE" \
   --add-cloudsql-instances="$INSTANCE_CONN" \
   --set-env-vars="AUTH_MODE=iap,ALLOWED_EMAILS=$ALLOWED_EMAILS,SHARED_LEDGER_NAME=家計,DATABASE_SSL=false" \
   --set-secrets="DB_PASSWORD=budget-db-password:latest" \
+  --memory=1Gi \
   --no-allow-unauthenticated
 ```
+
+`--memory` は明示する。デフォルトの 512 MiB は、リクエストボディの検証で JSON が
+一時的に数十倍へ膨らむ処理と合わせると余裕がない (入口側の上限は
+`server/http/app.ts` の `MAX_BODY_BYTES` で 64 KB に絞ってある)。
 
 `DATABASE_URL` は unix socket 形式。Cloud SQL コネクタが TLS を終端するので
 `DATABASE_SSL=false` でよい。

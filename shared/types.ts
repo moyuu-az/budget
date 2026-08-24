@@ -2,13 +2,38 @@
 // Import/type-only: no node, http or react runtime imports, so this module is safe
 // to pull into BOTH the server and the browser bundle.
 
+import type { AssetFieldDef, AssetFieldValues } from './asset-fields';
+
+export type { AssetFieldDef, AssetFieldType, AssetFieldValue, AssetFieldValues } from './asset-fields';
+
 // --- Category ---
+
+/**
+ * How an expense behaves month to month.
+ *
+ *  - 'fixed'    (固定費) -- rent, insurance, subscriptions: roughly the same every
+ *                month, and only a decision changes it.
+ *  - 'variable' (変動費) -- groceries, leisure: driven by what actually happened.
+ *
+ * Only meaningful for `type: 'expense'`; income categories carry null, and the
+ * database rejects any other combination (migration 003). The distinction is
+ * what lets a household see how much of a month is already committed before
+ * anyone spends anything.
+ *
+ * Null on an expense category means "not classified yet" rather than a third
+ * kind. Making it non-nullable would force a wrong answer onto every category
+ * that already exists.
+ */
+export type CostType = 'fixed' | 'variable';
+
 export interface Category {
   id: number;
   name: string;
   type: 'income' | 'expense';
   color: string | null;
   sortOrder: number;
+  /** null for income categories, and for expense categories left unclassified. */
+  costType: CostType | null;
 }
 
 export interface CategoryInput {
@@ -19,6 +44,8 @@ export interface CategoryInput {
   // removing a colour impossible to express.
   color?: string | null;
   sortOrder?: number;
+  /** Same nullable-vs-optional rule as `color`: null clears the classification. */
+  costType?: CostType | null;
 }
 
 // --- EntryTemplate ---
@@ -67,6 +94,65 @@ export interface BalanceSnapshot {
   date: string;
   balance: number;
   createdAt: string;
+}
+
+// --- Assets ---
+//
+// Asset tracking is OPTIONAL: a ledger with no asset categories simply has an
+// empty 資産 view, and nothing is created until the user asks for it. That is why
+// nothing here is seeded on ledger creation -- the starting points live in
+// shared/asset-templates.ts and are applied by an explicit action.
+
+/**
+ * One kind of asset holding (NISA, 現金, 定期預金, ...) together with the extra
+ * parameters that kind needs.
+ *
+ * `fields` is the whole point of the type. Every asset has a name and a value,
+ * but what else you must record depends entirely on the kind: a NISA position is
+ * meaningless without its 銘柄, and recording a 銘柄 for cash is noise. Rather
+ * than one table per kind (a migration every time the household starts tracking
+ * something new), the category carries the SHAPE and each asset carries VALUES
+ * matching it.
+ */
+export interface AssetCategory {
+  id: number;
+  name: string;
+  color: string | null;
+  sortOrder: number;
+  /** Definitions of the extra parameters assets in this category must carry. */
+  fields: AssetFieldDef[];
+}
+
+export interface AssetCategoryInput {
+  name: string;
+  color?: string | null;
+  sortOrder?: number;
+  fields?: AssetFieldDef[];
+}
+
+/** One holding. `fields` is keyed by AssetFieldDef.key of its category. */
+export interface Asset {
+  id: number;
+  categoryId: number;
+  name: string;
+  /**
+   * Current worth, in yen.
+   *
+   * Deliberately NOT constrained to be positive: a household that tracks a loan
+   * balance as an asset category needs to enter it negative for the total to
+   * mean anything.
+   */
+  value: number;
+  fields: AssetFieldValues;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AssetInput {
+  categoryId: number;
+  name: string;
+  value: number;
+  fields?: AssetFieldValues;
 }
 
 // --- Identity ---
@@ -157,4 +243,20 @@ export interface AppApi {
   getSnapshots(): Promise<BalanceSnapshot[]>;
   addSnapshot(date: string, balance: number): Promise<BalanceSnapshot>;
   deleteSnapshot(id: number): Promise<void>;
+
+  // --- Assets ---
+  //
+  // Categories and holdings are separate methods rather than one nested payload:
+  // editing a category's field definitions and editing a holding are different
+  // actions with different failure modes, and nesting would make every holding
+  // edit rewrite the category.
+  getAssetCategories(): Promise<AssetCategory[]>;
+  addAssetCategory(input: AssetCategoryInput): Promise<AssetCategory>;
+  updateAssetCategory(id: number, input: Partial<AssetCategoryInput>): Promise<void>;
+  deleteAssetCategory(id: number): Promise<void>;
+
+  getAssets(): Promise<Asset[]>;
+  addAsset(input: AssetInput): Promise<Asset>;
+  updateAsset(id: number, input: Partial<AssetInput>): Promise<void>;
+  deleteAsset(id: number): Promise<void>;
 }

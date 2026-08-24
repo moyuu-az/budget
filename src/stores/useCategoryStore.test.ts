@@ -11,6 +11,7 @@ const makeCategory = (overrides: Partial<Category> = {}): Category => ({
   type: 'expense',
   color: null,
   sortOrder: 0,
+  costType: null,
   ...overrides,
 });
 

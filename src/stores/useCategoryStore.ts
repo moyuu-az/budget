@@ -8,9 +8,17 @@ interface CategoryState {
   loading: boolean;
   reset: () => void;
   fetchCategories: () => Promise<void>;
-  addCategory: (input: CategoryInput) => Promise<void>;
-  updateCategory: (id: number, input: Partial<CategoryInput>) => Promise<void>;
-  deleteCategory: (id: number) => Promise<void>;
+  // Mutations answer whether the change stuck.
+  //
+  // reportError already raised the error toast -- it is the renderer's single
+  // error choke point -- so the caller must not raise another. What the caller
+  // still needs is whether to say 「保存しました」 and close its form, and a
+  // try/catch at the call site cannot tell it: the store swallowed the throw, so
+  // the catch never runs and the success toast fires even on failure. That was a
+  // real bug in CategoryManager before this returned anything.
+  addCategory: (input: CategoryInput) => Promise<boolean>;
+  updateCategory: (id: number, input: Partial<CategoryInput>) => Promise<boolean>;
+  deleteCategory: (id: number) => Promise<boolean>;
 }
 
 export const useCategoryStore = create<CategoryState>((set, get) => ({
@@ -42,8 +50,10 @@ export const useCategoryStore = create<CategoryState>((set, get) => ({
     try {
       const category = await getApi().addCategory(input);
       set({ categories: [...get().categories, category] });
+      return true;
     } catch (e) {
       reportError(e);
+      return false;
     }
   },
 
@@ -55,9 +65,11 @@ export const useCategoryStore = create<CategoryState>((set, get) => ({
     });
     try {
       await getApi().updateCategory(id, input);
+      return true;
     } catch (e) {
       set({ categories: prev });
       reportError(e);
+      return false;
     }
   },
 
@@ -67,9 +79,11 @@ export const useCategoryStore = create<CategoryState>((set, get) => ({
     set({ categories: prev.filter((c) => c.id !== id) });
     try {
       await getApi().deleteCategory(id);
+      return true;
     } catch (e) {
       set({ categories: prev });
       reportError(e);
+      return false;
     }
   },
 }));

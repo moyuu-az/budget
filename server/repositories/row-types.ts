@@ -13,6 +13,8 @@ export interface CategoryRow {
   type: string;
   color: string | null;
   sort_order: number;
+  /** 'fixed' | 'variable' | null -- narrowed by the mapper, constrained by the schema. */
+  cost_type: string | null;
 }
 
 export interface TemplateRow {
@@ -54,4 +56,31 @@ export interface SnapshotRow {
   date: string;
   balance: number;
   created_at: string;
+}
+
+// JSONB columns come back already parsed, but parsed is not the same as valid:
+// the schema's CHECK proves only 'is an array' / 'is an object'. They are typed
+// `unknown` here so nothing can read a field off them without going through the
+// coercion in mappers.ts.
+
+export interface AssetCategoryRow {
+  id: number;
+  ledger_id: number;
+  name: string;
+  color: string | null;
+  sort_order: number;
+  fields: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AssetRow {
+  id: number;
+  ledger_id: number;
+  category_id: number;
+  name: string;
+  value: number;
+  fields: unknown;
+  created_at: string;
+  updated_at: string;
 }

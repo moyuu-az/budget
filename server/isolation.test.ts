@@ -40,6 +40,8 @@ interface Fixture {
   categoryId: number;
   templateId: number;
   snapshotId: number;
+  assetCategoryId: number;
+  assetId: number;
 }
 
 function headerVerifier(): IdentityVerifier {
@@ -94,7 +96,30 @@ async function seed(as: string, ledgerId: number, tag: string): Promise<Fixture>
     await post('addSnapshot', as, ledgerId, ['2026-01-01', 555_555])
   ).json()) as { id: number };
 
-  return { ledgerId, categoryId: category.id, templateId: template.id, snapshotId: snapshot.id };
+  const assetCategory = (await (
+    await post('addAssetCategory', as, ledgerId, [
+      {
+        name: `${tag}-asset-cat`,
+        color: '#654321',
+        fields: [{ key: 'f1', label: '銘柄', type: 'text', required: true, unit: null }],
+      },
+    ])
+  ).json()) as { id: number };
+
+  const asset = (await (
+    await post('addAsset', as, ledgerId, [
+      { categoryId: assetCategory.id, name: `${tag}-asset`, value: 777_777, fields: { f1: `${tag}-銘柄` } },
+    ])
+  ).json()) as { id: number };
+
+  return {
+    ledgerId,
+    categoryId: category.id,
+    templateId: template.id,
+    snapshotId: snapshot.id,
+    assetCategoryId: assetCategory.id,
+    assetId: asset.id,
+  };
 }
 
 /** Every row belonging to one ledger, ordered, as a comparable string. */
@@ -155,6 +180,23 @@ const ADVERSARIAL_ARGS: { [M in DataMethod]: (victim: Fixture) => unknown[] } = 
   // so if row-level security were inert this is where the other ledger's figures
   // would be pulled across.
   copyMonthlyAmounts: () => ['2026-01', '2026-03'],
+
+  // --- Assets ---
+  getAssetCategories: () => [],
+  getAssets: () => [],
+  addAssetCategory: () => [{ name: 'intruder', fields: [] }],
+  updateAssetCategory: (v) => [v.assetCategoryId, { name: 'hijacked' }],
+  deleteAssetCategory: (v) => [v.assetCategoryId],
+  // Names BOTH of the other ledger's ids at once: the holding to rewrite and the
+  // category to attach it to. add and update are separate code paths, so the
+  // category check has to be proven on each.
+  updateAsset: (v) => [v.assetId, { categoryId: v.assetCategoryId, name: 'hijacked', value: 1 }],
+  deleteAsset: (v) => [v.assetId],
+  // Attaching a holding to the OTHER ledger's asset category. The category
+  // lookup runs inside the ledger-scoped transaction, so it must come back
+  // empty -- and if it somehow did not, the composite foreign key is the second
+  // refusal.
+  addAsset: (v) => [{ categoryId: v.assetCategoryId, name: 'intruder', value: 1, fields: { f1: 'x' } }],
 };
 
 beforeAll(async () => {
@@ -216,6 +258,8 @@ describe('exhaustive isolation sweep', () => {
         ['category', victim.categoryId],
         ['template', victim.templateId],
         ['snapshot', victim.snapshotId],
+        ['asset category', victim.assetCategoryId],
+        ['asset', victim.assetId],
       ] as const) {
         expect(
           new RegExp(`"(id|templateId|categoryId)":${id}\\b`).test(body),

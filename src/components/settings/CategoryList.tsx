@@ -1,13 +1,10 @@
 import type { CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import type { Category } from '../../types';
+import { COST_TYPE_OPTIONS, costTypeLabel, costTypeTone, parseCostType } from '../../utils/cost-type';
+import { Badge } from '../ui/Badge';
 import ColorPicker from './ColorPicker';
-
-interface EditState {
-  id: number;
-  name: string;
-  color: string;
-}
+import type { CategoryEditState as EditState } from './category-edit-state';
 
 interface Props {
   incomeCategories: Category[];
@@ -47,13 +44,17 @@ function CategoryList({
           className="flex items-center gap-3 py-2 px-3 rounded-lg"
           style={{ background: 'rgba(100, 116, 170, 0.06)' }}
         >
+          {/* Names are qualified with the category, so a screen reader (and a
+              test) can tell one row's controls from another's. */}
           <ColorPicker
             value={editing.color}
             onChange={(value) => onEditingChange({ ...editing, color: value })}
+            aria-label={`${category.name}の色`}
             className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent"
           />
           <input
             type="text"
+            aria-label={`${category.name}の名前`}
             value={editing.name}
             onChange={(e) => onEditingChange({ ...editing, name: e.target.value })}
             onKeyDown={(e) => {
@@ -64,6 +65,21 @@ function CategoryList({
             style={inputStyle}
             autoFocus
           />
+          {category.type === 'expense' && (
+            <select
+              value={editing.costType ?? ''}
+              aria-label={`${category.name}の費目`}
+              onChange={(e) => onEditingChange({ ...editing, costType: parseCostType(e.target.value) })}
+              className="rounded-lg px-2 py-1.5 text-xs text-white outline-none transition-colors appearance-none"
+              style={inputStyle}
+            >
+              {COST_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             onClick={onSaveEdit}
             className="text-xs px-3 py-1.5 rounded-lg text-white font-medium transition-colors"
@@ -97,7 +113,16 @@ function CategoryList({
         />
 
         {/* Name */}
-        <span className="flex-1 text-sm text-slate-200">{category.name}</span>
+        <span className="text-sm text-slate-200">{category.name}</span>
+
+        {/* 固定費/変動費. Shown on every expense category, including the ones
+            nobody has classified yet -- an absent badge would read as "no such
+            concept here" rather than "not decided". */}
+        {category.type === 'expense' && (
+          <Badge tone={costTypeTone(category.costType)}>{costTypeLabel(category.costType)}</Badge>
+        )}
+
+        <span className="flex-1" />
 
         {/* Sort buttons */}
         <button
