@@ -58,6 +58,8 @@ export const useSnapshotStore = create<SnapshotState>((set, get) => ({
   },
 
   addSnapshot: async (date: string, balance: number) => {
+    // Tagged before the request; see src/app/ledger-generation.ts.
+    const tag = currentGeneration();
     try {
       const snapshot = await getApi().addSnapshot(date, balance);
       // REPLACE, do not append. The server upserts on (ledger, date), so
@@ -67,10 +69,11 @@ export const useSnapshotStore = create<SnapshotState>((set, get) => ({
       const rest = get().snapshots.filter((s) => s.id !== snapshot.id && s.date !== snapshot.date);
       // Newest first, matching what getSnapshots returns; otherwise the new row
       // lands at the bottom of a descending list until the next fetch.
-      set({ snapshots: [...rest, snapshot].sort((a, b) => b.date.localeCompare(a.date)) });
-      return true;
+      return applyIfCurrent(tag, () =>
+        set({ snapshots: [...rest, snapshot].sort((a, b) => b.date.localeCompare(a.date)) }),
+      );
     } catch (e) {
-      reportError(e);
+      applyIfCurrent(tag, () => reportError(e));
       return false;
     }
   },
@@ -79,11 +82,14 @@ export const useSnapshotStore = create<SnapshotState>((set, get) => ({
     const prev = get().snapshots;
     // optimistic removal
     set({ snapshots: prev.filter((s) => s.id !== id) });
+    const tag = currentGeneration();
     try {
       await getApi().deleteSnapshot(id);
     } catch (e) {
-      set({ snapshots: prev });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ snapshots: prev });
+        reportError(e);
+      });
     }
   },
 }));

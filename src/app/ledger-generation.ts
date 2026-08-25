@@ -45,6 +45,11 @@ export function currentGeneration(): number {
   return generation;
 }
 
+/** Whether `taggedAt` is still the current generation. */
+export function isCurrent(taggedAt: number): boolean {
+  return taggedAt === generation;
+}
+
 /**
  * Runs `apply` only if no ledger switch has happened since `taggedAt`.
  *

@@ -46,6 +46,7 @@ function KpiHero(): ReactElement {
     runway,
     minBalanceThreshold,
     status,
+    retry,
   } = useDashboardKpis();
 
   // Never the figures before the inputs arrive. Every KPI here is zero until the
@@ -54,7 +55,7 @@ function KpiHero(): ReactElement {
   // the balance takes one more round trip than the expenses it is compared
   // against.
   if (status !== 'ready') {
-    return <LoadGate status={status} height={116} label="残高" />;
+    return <LoadGate status={status} height={116} label="残高" onRetry={retry} />;
   }
 
   const minDateLabel = minBalance90dDate

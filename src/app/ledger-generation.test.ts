@@ -5,6 +5,7 @@ import { setApi } from '../lib/api';
 import { createMockApi } from '../test/mock-api';
 import { useSettingsStore } from '../stores/useSettingsStore';
 import { useTemplateStore } from '../stores/useTemplateStore';
+import { useAssetStore } from '../stores/useAssetStore';
 import { DEFAULT_LEDGER_SETTINGS } from '../../shared/ledger-settings';
 import { makeTemplate } from '../test/factories';
 import type { AppApi } from '../types';
@@ -29,6 +30,7 @@ beforeEach(() => {
   setApi(api);
   useSettingsStore.setState({ settings: DEFAULT_LEDGER_SETTINGS, status: 'idle' });
   useTemplateStore.setState({ templates: [], status: 'idle' });
+  useAssetStore.setState({ categories: [], assets: [], status: 'idle' });
 });
 
 afterEach(() => {
@@ -131,6 +133,56 @@ describe('a template response that arrives after a switch', () => {
     answer([makeTemplate({ id: 1, name: '相手の家賃' })]);
     await pending;
 
+    expect(useTemplateStore.getState().templates).toEqual([]);
+  });
+});
+
+describe('a MUTATION that lands after a switch', () => {
+  // Guarding only the fetches leaves the more surprising half open: an add or a
+  // delete started in ledger A and answered after the switch splices A's row
+  // into B's list, or rolls an optimistic edit back onto an array that has since
+  // been replaced. Nothing refetches afterwards, so it stays.
+  it('does not splice the previous ledger’s row into this one’s list', async () => {
+    let answer: (value: unknown) => void = () => {};
+    api.addAsset = vi.fn().mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+    );
+
+    const pending = useAssetStore.getState().addAsset({ categoryId: 1, name: 'A の資産', value: 1 });
+    resetLedgerData();
+    answer({
+      id: 1, categoryId: 1, name: 'A の資産', value: 1, fields: {},
+      createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+    });
+
+    // The write itself was correct -- it carried A's header and landed in A.
+    // What must not happen is showing it under B's name, and the caller must not
+    // be told to say 「保存しました」 about a screen that no longer exists.
+    expect(await pending).toBe(false);
+    expect(useAssetStore.getState().assets).toEqual([]);
+  });
+
+  it('does not roll an optimistic edit back onto the new ledger’s data', async () => {
+    useTemplateStore.setState({
+      templates: [makeTemplate({ id: 1, name: 'A の家賃' })],
+      status: 'ready',
+    });
+
+    let fail: (reason: Error) => void = () => {};
+    api.deleteTemplate = vi.fn().mockReturnValue(
+      new Promise((_, reject) => {
+        fail = reject;
+      }),
+    );
+
+    const pending = useTemplateStore.getState().deleteTemplate(1);
+    resetLedgerData();
+    fail(new Error('nope'));
+
+    expect(await pending).toBe(false);
+    // The rollback would have put A's entry back into B's emptied list.
     expect(useTemplateStore.getState().templates).toEqual([]);
   });
 });

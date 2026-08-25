@@ -49,6 +49,8 @@ export interface DashboardKpis {
    * warning useForecast exists to prevent. Render the state, not the numbers.
    */
   status: LoadStatus;
+  /** Re-runs everything `status` depends on; see useDashboardReadiness. */
+  retry: () => Promise<void>;
 }
 
 const KPI_HORIZON_DAYS = 90;
@@ -115,8 +117,9 @@ function computeKpis(points: ForecastPoint[], threshold: number): DashboardKpis 
     safeToSpend: safeToSpend(points, threshold),
     runway: runway(points, threshold),
     minBalanceThreshold: threshold,
-    // Overwritten by the caller; computeKpis has no opinion about loading.
+    // Both overwritten by the caller; computeKpis has no opinion about loading.
     status: 'ready',
+    retry: () => Promise.resolve(),
   };
 }
 
@@ -124,7 +127,7 @@ export function useDashboardKpis(): DashboardKpis {
   // The SAME readiness and the SAME projection every other panel on this screen
   // uses -- see useDashboardReadiness for why that is decided in one place
   // rather than per panel.
-  const { status, points } = useDashboardReadiness(KPI_HORIZON_DAYS);
+  const { status, points, retry } = useDashboardReadiness(KPI_HORIZON_DAYS);
 
   // The household's own floor, not a constant. 50,000 was hard-coded here, which
   // made 「安全」 mean the same thing for every household. Safe to read without
@@ -132,7 +135,7 @@ export function useDashboardKpis(): DashboardKpis {
   const threshold = useSettingsStore((s) => s.settings.minBalanceThreshold);
 
   return useMemo(
-    () => ({ ...computeKpis(points, threshold), status }),
-    [points, threshold, status],
+    () => ({ ...computeKpis(points, threshold), status, retry }),
+    [points, threshold, status, retry],
   );
 }

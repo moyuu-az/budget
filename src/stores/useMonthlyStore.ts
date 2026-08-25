@@ -52,7 +52,19 @@ interface MonthlyState {
   forgetAmountsOutside: (templateId: number, recurrence: Recurrence) => void;
   fetchActualsRange: (startMonth: string, endMonth: string) => Promise<void>;
   fetchMonthlyAmounts: (yearMonth: string) => Promise<void>;
-  fetchMonthlyAmountsRange: (startMonth: string, endMonth: string) => Promise<void>;
+  /**
+   * Loads planned amounts for a whole range.
+   *
+   * Skips months already loaded or in flight unless `force` is set. Two panels
+   * on the dashboard ask for overlapping ranges (the chart for its selected
+   * period, the KPI row for a fixed 90 days) and both must be satisfied without
+   * sending the same request twice -- the browser caps concurrent connections,
+   * and a duplicate here delays whatever is behind it.
+   *
+   * `force` is what the retry button needs: after a failure the months are
+   * marked 'error', and a caller asking again means "try anyway".
+   */
+  fetchMonthlyAmountsRange: (startMonth: string, endMonth: string, force?: boolean) => Promise<void>;
   setMonthlyAmount: (templateId: number, yearMonth: string, amount: number) => Promise<void>;
   deleteMonthlyAmount: (templateId: number, yearMonth: string) => Promise<void>;
   /**
@@ -277,9 +289,22 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     }
   },
 
-  fetchMonthlyAmountsRange: async (startMonth: string, endMonth: string) => {
+  fetchMonthlyAmountsRange: async (startMonth: string, endMonth: string, force = false) => {
     const tag = currentGeneration();
     const months = monthsInRange(startMonth, endMonth);
+
+    // Nothing to do when every month is already loaded or on its way. Without
+    // this the dashboard's two overlapping readiness hooks send the same request
+    // twice on every load.
+    if (!force) {
+      const current = get().monthStatus;
+      const settled = months.every((month) => {
+        const status = (current.get(month) ?? IDLE_MONTH).amounts;
+        return status === 'ready' || status === 'loading';
+      });
+      if (settled) return;
+    }
+
     set({ loading: true, monthStatus: setHalf(get().monthStatus, months, 'amounts', 'loading') });
     try {
       const amounts = await getApi().getMonthlyAmountsRange(startMonth, endMonth);
@@ -333,11 +358,17 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     newMap.set(yearMonth, monthMap);
     set({ monthlyAmountsMap: newMap });
 
+    // Tagged before the request; see src/app/ledger-generation.ts. Rolling the
+    // optimistic edit back onto a map a ledger switch has already replaced would
+    // restore the previous household's figures into this one's cache.
+    const tag = currentGeneration();
     try {
       await getApi().setMonthlyAmount(templateId, yearMonth, amount);
     } catch (e) {
-      set({ monthlyAmountsMap: prevMap });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ monthlyAmountsMap: prevMap });
+        reportError(e);
+      });
     }
   },
 
@@ -353,15 +384,19 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
       set({ monthlyAmountsMap: newMap });
     }
 
+    const tag = currentGeneration();
     try {
       await getApi().deleteMonthlyAmount(templateId, yearMonth);
     } catch (e) {
-      set({ monthlyAmountsMap: prevMap });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ monthlyAmountsMap: prevMap });
+        reportError(e);
+      });
     }
   },
 
   copyMonthlyAmounts: async (fromMonth: string, toMonth: string) => {
+    const tag = currentGeneration();
     set({ loading: true });
     try {
       // WHICH entries get copied is the server's decision, made from the rows
@@ -376,16 +411,17 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
         monthMap.set(a.templateId, a.amount);
       }
       newMap.set(toMonth, monthMap);
-      set({ monthlyAmountsMap: newMap, loading: false });
-      return true;
+      return applyIfCurrent(tag, () => set({ monthlyAmountsMap: newMap, loading: false }));
     } catch (e) {
       // Covers BOTH failures deliberately: the copy itself, and the re-fetch
       // that proves what landed. A copy that succeeded but could not be read
       // back leaves the screen showing the previous month's figures, so
       // reporting success would be true about the database and false about
       // what the user is looking at.
-      set({ loading: false });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ loading: false });
+        reportError(e);
+      });
       return false;
     }
   },
@@ -432,11 +468,14 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     newMap.set(yearMonth, monthMap);
     set({ monthlyActualsMap: newMap });
 
+    const tag = currentGeneration();
     try {
       await getApi().setMonthlyActual(templateId, yearMonth, amount);
     } catch (e) {
-      set({ monthlyActualsMap: prevMap });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ monthlyActualsMap: prevMap });
+        reportError(e);
+      });
     }
   },
 
@@ -452,11 +491,14 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
       set({ monthlyActualsMap: newMap });
     }
 
+    const tag = currentGeneration();
     try {
       await getApi().deleteMonthlyActual(templateId, yearMonth);
     } catch (e) {
-      set({ monthlyActualsMap: prevMap });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ monthlyActualsMap: prevMap });
+        reportError(e);
+      });
     }
   },
 }));

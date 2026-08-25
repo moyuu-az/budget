@@ -26,10 +26,10 @@ import { formatYen, formatSignedYen } from '../../utils/currency';
 const VISIBLE_LINES = 3;
 
 function VarianceCard(): ReactElement {
-  const { variance, status } = useMonthlyVariance();
+  const { variance, status, retry } = useMonthlyVariance();
 
   if (status !== 'ready') {
-    return <LoadGate status={status} height={148} label="先月の予実" />;
+    return <LoadGate status={status} height={148} label="先月の予実" onRetry={retry} />;
   }
 
   const month = Number(variance.yearMonth.slice(5, 7));

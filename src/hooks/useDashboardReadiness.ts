@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useForecast } from './useForecast';
 import { monthsInRange, rangeStatusOf, useMonthlyStore } from '../stores/useMonthlyStore';
 import { useSettingsStore } from '../stores/useSettingsStore';
 import { combineStatus, type LoadStatus } from '../stores/load-status';
+import { loadLedgerData } from '../app/ledger';
 import { toYearMonth } from '../utils/forecast';
 import type { ForecastPoint } from '../types';
 
@@ -35,12 +36,31 @@ import type { ForecastPoint } from '../types';
 //   NOT the recorded actuals: nothing on the forecast side reads them, and
 //   waiting for months ahead that nobody fetches actuals for would leave the
 //   whole dashboard loading forever. 先月の予実 has its own gate for that.
+//
+// AND IT FETCHES WHAT IT WAITS FOR
+//   The first version only OBSERVED the months, leaving DashboardView to fetch
+//   them -- and the two immediately disagreed. The view asked for its selected
+//   60-day period; the KPI row waits on 90. The extra month was fetched by
+//   nobody, so the KPI row spun forever on the default view, and the tests
+//   missed it because their helper marked 90 days ready by hand.
+//
+//   Whatever decides what to WAIT FOR has to be what ASKS for it. Then they
+//   cannot drift, and no test helper can paper over the gap.
 // ---------------------------------------------------------------------------
 
 export interface DashboardReadiness {
   status: LoadStatus;
   /** The projection, empty unless `status` is 'ready'. */
   points: ForecastPoint[];
+  /**
+   * Re-runs everything this readiness depends on.
+   *
+   * Passed to LoadGate, because its default retry (`loadLedgerData`) does NOT
+   * include the per-month amounts -- which are exactly the thing most likely to
+   * have failed here. Without it the button re-fetches everything except what
+   * broke and leaves the error on screen.
+   */
+  retry: () => Promise<void>;
 }
 
 export function useDashboardReadiness(days: number): DashboardReadiness {
@@ -57,11 +77,26 @@ export function useDashboardReadiness(days: number): DashboardReadiness {
     return monthsInRange(toYearMonth(today), toYearMonth(end));
   }, [days]);
 
+  const fetchRange = useMonthlyStore((s) => s.fetchMonthlyAmountsRange);
+  const start = months[0];
+  const end = months[months.length - 1];
+
+  useEffect(() => {
+    void fetchRange(start, end);
+  }, [fetchRange, start, end]);
+
+  // `force`, because after a failure the months are marked 'error' and the
+  // ordinary call would still have to decide whether to try again. Pressing
+  // 再読み込み is that decision.
+  const retry = useCallback(async () => {
+    await Promise.all([loadLedgerData(), fetchRange(start, end, true)]);
+  }, [fetchRange, start, end]);
+
   const amountsStatus = rangeStatusOf(monthStatus, months, 'amounts');
   const status = combineStatus(forecastStatus, settingsStatus, amountsStatus);
 
   return useMemo(
-    () => ({ status, points: status === 'ready' ? points : [] }),
-    [status, points],
+    () => ({ status, points: status === 'ready' ? points : [], retry }),
+    [status, points, retry],
   );
 }

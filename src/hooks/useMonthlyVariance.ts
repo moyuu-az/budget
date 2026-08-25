@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useTemplateStore } from '../stores/useTemplateStore';
 import { useCategoryStore } from '../stores/useCategoryStore';
 import { monthStatusOf, useMonthlyStore } from '../stores/useMonthlyStore';
@@ -24,6 +24,15 @@ import { previousMonth, summarizeVariance, type MonthlyVariance } from '../utils
 export interface MonthlyVarianceResult {
   variance: MonthlyVariance;
   status: LoadStatus;
+  /**
+   * Re-fetches THIS card's month.
+   *
+   * LoadGate's default retry runs `loadLedgerData`, which deliberately skips the
+   * per-month data -- so without this the button would re-fetch everything
+   * except the thing that failed, and the error would stay on screen looking
+   * like a button that does not work.
+   */
+  retry: () => Promise<void>;
 }
 
 export function useMonthlyVariance(): MonthlyVarianceResult {
@@ -41,10 +50,13 @@ export function useMonthlyVariance(): MonthlyVarianceResult {
   // would then be for a month the summary does not read.
   const yearMonth = useMemo(() => previousMonth(new Date()), []);
 
-  useEffect(() => {
-    void fetchMonthlyAmounts(yearMonth);
-    void fetchMonthlyActuals(yearMonth);
+  const retry = useCallback(async () => {
+    await Promise.all([fetchMonthlyAmounts(yearMonth), fetchMonthlyActuals(yearMonth)]);
   }, [yearMonth, fetchMonthlyAmounts, fetchMonthlyActuals]);
+
+  useEffect(() => {
+    void retry();
+  }, [retry]);
 
   // READINESS INCLUDES LAST MONTH'S OWN FETCH, and that is the whole reason the
   // store tracks it per month.
@@ -64,5 +76,5 @@ export function useMonthlyVariance(): MonthlyVarianceResult {
     [templates, categories, amountsMap, actualsMap, yearMonth],
   );
 
-  return { variance, status };
+  return { variance, status, retry };
 }

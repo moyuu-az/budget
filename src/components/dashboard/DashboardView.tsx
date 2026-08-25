@@ -1,9 +1,8 @@
-import { useMemo, useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import type { ForecastPeriod, ViewType } from '../../types';
-import { useMonthlyStore } from '../../stores/useMonthlyStore';
 import { useDashboardReadiness } from '../../hooks/useDashboardReadiness';
-import { toYearMonth, periodToDays, periodToMonths } from '../../utils/forecast';
+import { periodToDays } from '../../utils/forecast';
 import { LoadGate } from '../ui/LoadGate';
 import ForecastChart from './ForecastChart';
 import KpiHero from './KpiHero';
@@ -19,17 +18,14 @@ interface DashboardViewProps {
 
 function DashboardView({ onNavigate }: DashboardViewProps) {
   const [forecastPeriod, setForecastPeriod] = useState<ForecastPeriod>('60d');
-  const fetchMonthlyAmountsRange = useMonthlyStore((s) => s.fetchMonthlyAmountsRange);
 
-  // Fetch monthly amounts for forecast range (current + dynamic months)
-  // Base data (balance, templates, categories) is fetched by App.tsx on mount
-  useEffect(() => {
-    const now = new Date();
-    const startMonth = toYearMonth(now);
-    const endDate = new Date(now.getFullYear(), now.getMonth() + periodToMonths(forecastPeriod) + 1, 0);
-    const endMonth = toYearMonth(endDate);
-    fetchMonthlyAmountsRange(startMonth, endMonth);
-  }, [fetchMonthlyAmountsRange, forecastPeriod]);
+  // The month range is fetched by useDashboardReadiness, not here.
+  //
+  // It used to be this component's effect, and the two immediately disagreed:
+  // this asked for the SELECTED period while KpiHero waited on a fixed 90 days,
+  // so on the default 60-day view the extra month was fetched by nobody and the
+  // KPI row spun forever. Whatever decides what to wait for has to be what asks
+  // for it.
 
   // ONE readiness for every panel here, decided in one place.
   //
@@ -42,7 +38,7 @@ function DashboardView({ onNavigate }: DashboardViewProps) {
   //
   // See useDashboardReadiness for what it waits for and why gating per panel is
   // what produced two contradictory answers on one screen.
-  const { status, points: forecast } = useDashboardReadiness(periodToDays(forecastPeriod));
+  const { status, points: forecast, retry } = useDashboardReadiness(periodToDays(forecastPeriod));
 
   const minimumPoint = useMemo(
     () => forecast.find((p) => p.isMinimum) ?? null,
@@ -73,7 +69,7 @@ function DashboardView({ onNavigate }: DashboardViewProps) {
       <HoldingsCard />
 
       {/* Forecast Chart - full width */}
-      <LoadGate status={status} height={360} label="残高予測">
+      <LoadGate status={status} height={360} label="残高予測" onRetry={retry}>
         <ForecastChart
           data={forecast}
           minimumPoint={minimumPoint}
@@ -91,7 +87,7 @@ function DashboardView({ onNavigate }: DashboardViewProps) {
           fold, which is the point -- it lived only in 分析, and anyone who
           reaches 分析 is already thinking about their spending. */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <LoadGate status={status} height={148} label="最低残高予測">
+        <LoadGate status={status} height={148} label="最低残高予測" onRetry={retry}>
           <MinBalanceCard point={minimumPoint} daysUntil={daysUntilMinimum} />
         </LoadGate>
         <VarianceCard />
@@ -107,7 +103,7 @@ function DashboardView({ onNavigate }: DashboardViewProps) {
         {/* Gated like the rest: its empty state says 「14日以内の予定はありません」,
             which an empty-because-not-loaded list turns into a false statement
             about the user's month. */}
-        <LoadGate status={status} height={200} label="今後の予定">
+        <LoadGate status={status} height={200} label="今後の予定" onRetry={retry}>
           <UpcomingEvents events={forecast} />
         </LoadGate>
       </motion.div>

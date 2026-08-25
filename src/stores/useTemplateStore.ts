@@ -4,7 +4,7 @@ import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
 import { useMonthlyStore } from './useMonthlyStore';
 import type { LoadStatus } from './load-status';
-import { applyIfCurrent, currentGeneration } from '../app/ledger-generation';
+import { applyIfCurrent, currentGeneration, isCurrent } from '../app/ledger-generation';
 
 // ---------------------------------------------------------------------------
 // WHY THE MUTATIONS RETURN boolean
@@ -76,12 +76,17 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
   },
 
   addTemplate: async (input: EntryTemplateInput) => {
+    // Tagged before the request; see src/app/ledger-generation.ts. A ledger
+    // switch mid-flight makes this answer -- success or failure -- belong to a
+    // ledger nobody is looking at, and writing it would splice one household's
+    // row into the other's list, or roll an optimistic edit back onto an array
+    // that has since been replaced.
+    const tag = currentGeneration();
     try {
       const template = await getApi().addTemplate(input);
-      set({ templates: [...get().templates, template] });
-      return true;
+      return applyIfCurrent(tag, () => set({ templates: [...get().templates, template] }));
     } catch (e) {
-      reportError(e);
+      applyIfCurrent(tag, () => reportError(e));
       return false;
     }
   },
@@ -96,6 +101,7 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
         t.id === id ? { ...t, ...input, updatedAt: new Date().toISOString() } : t
       ),
     });
+    const tag = currentGeneration();
     try {
       await getApi().updateTemplate(id, input);
 
@@ -103,13 +109,16 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
       // SERVER-SIDE, in the same transaction. The cache has to follow, or the
       // totals go on using a figure the database no longer holds -- and a reload
       // would change the numbers, which is the screen lying about what is saved.
-      if (input.recurrence !== undefined) {
-        useMonthlyStore.getState().forgetAmountsOutside(id, input.recurrence);
-      }
-      return true;
+      return applyIfCurrent(tag, () => {
+        if (input.recurrence !== undefined) {
+          useMonthlyStore.getState().forgetAmountsOutside(id, input.recurrence);
+        }
+      });
     } catch (e) {
-      set({ templates: prev });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ templates: prev });
+        reportError(e);
+      });
       return false;
     }
   },
@@ -118,12 +127,15 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
     const prev = get().templates;
     // optimistic removal
     set({ templates: prev.filter((t) => t.id !== id) });
+    const tag = currentGeneration();
     try {
       await getApi().deleteTemplate(id);
-      return true;
+      return isCurrent(tag);
     } catch (e) {
-      set({ templates: prev });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ templates: prev });
+        reportError(e);
+      });
       return false;
     }
   },
@@ -136,12 +148,15 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
         t.id === id ? { ...t, enabled, updatedAt: new Date().toISOString() } : t
       ),
     });
+    const tag = currentGeneration();
     try {
       await getApi().toggleTemplate(id, enabled);
-      return true;
+      return isCurrent(tag);
     } catch (e) {
-      set({ templates: prev });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ templates: prev });
+        reportError(e);
+      });
       return false;
     }
   },
