@@ -1,4 +1,5 @@
 import type { Category, CostType, EntryTemplate } from '../types';
+import { occursInMonth } from '../../shared/recurrence';
 
 // ---------------------------------------------------------------------------
 // 固定費 / 変動費.
@@ -64,12 +65,21 @@ export interface CostTypeBreakdown {
 }
 
 /**
- * Splits a month's planned expenses into 固定費 / 変動費 / 未分類.
+ * Splits ONE MONTH's planned expenses into 固定費 / 変動費 / 未分類.
  *
  * `amountOf` is passed in rather than the map it reads, so the caller keeps
  * deciding what an amount is -- planned, actual, or actual-falling-back-to-
  * planned. Baking that choice in here would make this function wrong for the
  * next screen that needs the same split.
+ *
+ * `yearMonth` is NOT passed in for the same kind of reason -- it is passed in
+ * because the alternative was worse. This function used to take whatever list
+ * the caller handed it and trust that the caller had already narrowed it to the
+ * month; since migration 005 that is a real decision (an annual premium is
+ * enabled all year and belongs to one month), and a function whose correctness
+ * depends on an unstated obligation of its caller is a function that will
+ * eventually be called wrongly. Now it narrows itself, and the second caller
+ * cannot get it wrong.
  *
  * Disabled templates are excluded for the same reason they are excluded from the
  * month's expense total: a paused subscription is not a commitment.
@@ -77,6 +87,7 @@ export interface CostTypeBreakdown {
 export function summarizeExpenseByCostType(
   templates: readonly EntryTemplate[],
   categories: readonly Category[],
+  yearMonth: string,
   amountOf: (template: EntryTemplate) => number,
 ): CostTypeBreakdown {
   const costTypeById = new Map<number, CostType | null>(
@@ -87,6 +98,10 @@ export function summarizeExpenseByCostType(
 
   for (const template of templates) {
     if (template.type !== 'expense' || !template.enabled) continue;
+    // The one predicate that answers "does this belong to this month"; see
+    // shared/recurrence.ts. Without it the parts stop summing to the total shown
+    // beside them for any household tracking an irregular expense.
+    if (!occursInMonth(template.recurrence, yearMonth)) continue;
 
     const amount = amountOf(template);
     breakdown.total += amount;

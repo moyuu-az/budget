@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { costTypeLabel, parseCostType, summarizeExpenseByCostType } from './cost-type';
 import type { Category, EntryTemplate } from '../types';
-import { makeTemplate, monthlyOn } from '../test/factories';
+import { makeTemplate, monthlyOn, yearlyOn } from '../test/factories';
 
 const category = (overrides: Partial<Category> = {}): Category => ({
   id: 1,
@@ -42,11 +42,16 @@ describe('summarizeExpenseByCostType', () => {
   const amounts = new Map<number, number>();
   const amountOf = (t: EntryTemplate): number => amounts.get(t.id) ?? 0;
 
+  // The month being summarised. `template()` defaults to monthly, so every
+  // fixture below falls in it unless a test says otherwise.
+  const YM = '2026-06';
+
   it('splits expenses by the classification of their category', () => {
     amounts.set(1, 100).set(2, 30);
     const result = summarizeExpenseByCostType(
       [template({ id: 1, categoryId: 1 }), template({ id: 2, categoryId: 2 })],
       [category({ id: 1, costType: 'fixed' }), category({ id: 2, costType: 'variable' })],
+      YM,
       amountOf,
     );
     expect(result).toEqual({ fixed: 100, variable: 30, unclassified: 0, total: 130 });
@@ -59,6 +64,7 @@ describe('summarizeExpenseByCostType', () => {
     const result = summarizeExpenseByCostType(
       [template({ id: 1, categoryId: 1 })],
       [category({ id: 1, costType: null })],
+      YM,
       amountOf,
     );
     expect(result.unclassified).toBe(100);
@@ -67,7 +73,7 @@ describe('summarizeExpenseByCostType', () => {
 
   it('counts a template with no category as unclassified', () => {
     amounts.set(1, 40);
-    const result = summarizeExpenseByCostType([template({ id: 1, categoryId: null })], [], amountOf);
+    const result = summarizeExpenseByCostType([template({ id: 1, categoryId: null })], [], YM, amountOf);
     expect(result.unclassified).toBe(40);
   });
 
@@ -75,9 +81,34 @@ describe('summarizeExpenseByCostType', () => {
     // The category list can be one render behind a deletion. Dropping the row
     // instead would make the parts disagree with the total beside them.
     amounts.set(1, 55);
-    const result = summarizeExpenseByCostType([template({ id: 1, categoryId: 999 })], [], amountOf);
+    const result = summarizeExpenseByCostType([template({ id: 1, categoryId: 999 })], [], YM, amountOf);
     expect(result.unclassified).toBe(55);
     expect(result.fixed + result.variable + result.unclassified).toBe(result.total);
+  });
+
+  it('ignores an entry that does not fall in the month being summarised', () => {
+    // The reason this function takes a month at all. It used to trust the caller
+    // to have narrowed the list, and a function whose correctness depends on an
+    // unstated obligation of its caller eventually gets called wrongly.
+    amounts.set(1, 100).set(2, 120_000);
+    const result = summarizeExpenseByCostType(
+      [template({ id: 1 }), template({ id: 2, recurrence: yearlyOn(9, 12) })],
+      [category({ id: 1, costType: 'fixed' })],
+      YM,
+      amountOf,
+    );
+    expect(result.total).toBe(100);
+  });
+
+  it('includes it in the month it does fall in', () => {
+    amounts.set(1, 100).set(2, 120_000);
+    const result = summarizeExpenseByCostType(
+      [template({ id: 1 }), template({ id: 2, recurrence: yearlyOn(6, 12) })],
+      [category({ id: 1, costType: 'fixed' })],
+      YM,
+      amountOf,
+    );
+    expect(result.total).toBe(120_100);
   });
 
   it('ignores income and disabled templates', () => {
@@ -89,6 +120,7 @@ describe('summarizeExpenseByCostType', () => {
         template({ id: 3, enabled: false }),
       ],
       [category({ id: 1, costType: 'fixed' })],
+      YM,
       amountOf,
     );
     expect(result.total).toBe(100);

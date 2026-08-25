@@ -80,7 +80,7 @@ function EntriesView() {
   // shown beside them.
   const costBreakdown = useMemo(
     () =>
-      summarizeExpenseByCostType(occurring, categories, (t) =>
+      summarizeExpenseByCostType(occurring, categories, currentYearMonth, (t) =>
         resolveAmount(t.id, currentYearMonth, monthlyAmountsMap, templates),
       ),
     [occurring, templates, categories, currentYearMonth, monthlyAmountsMap],
