@@ -143,6 +143,12 @@ beforeAll(async () => {
   // (6) A 現金 category whose only row is itself ¥0 -- a placeholder someone
   //     created and never filled in. Dropping the balance here would lose money;
   //     adding it to zero cannot double count.
+  //
+  //     DO NOT REMOVE THIS LEDGER as an unused-looking fixture. It is the ONLY
+  //     case that separates "does the cash category hold anything" from "does it
+  //     have any rows", which is the difference between carrying the old balance
+  //     across and silently discarding it. Mutation testing confirmed it: revert
+  //     the migration to counting rows and this is the single test that fails.
   zeroValuedCashRow = await ledger('zero-valued-cash-row');
   await balanceSetting(zeroValuedCashRow, '500000');
   await holding(zeroValuedCashRow, await category(zeroValuedCashRow, '現金', 0), '財布', 0);
