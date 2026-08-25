@@ -121,18 +121,24 @@ BEGIN
      LIMIT 1;
 
     IF cash_id IS NULL THEN
-      -- Ordered by holdings first: see the note above on duplicate 現金.
+      -- Which duplicate 現金 becomes the balance. Two keys, in this order:
       --
-      -- Then by VALUE, which decides the tie the row count cannot. Two
-      -- categories holding one row each are level on the first key, and picking
-      -- by sort_order there would make ¥100,000 the balance while ¥200,000 sat
-      -- beside it as an ordinary asset -- net worth right, forecast starting
-      -- from the smaller half. The count stays the first key because what B1
-      -- needed was "the one that holds anything at all".
+      --   1. DOES IT HOLD ANYTHING -- a boolean, deliberately. An earlier
+      --      version used `count(*) DESC` here, which is a different question:
+      --      it promotes the category with the most ROWS. Three coins totalling
+      --      ¥10,000 outrank one account holding ¥1,000,000, and the balance
+      --      becomes ¥10,000 while ¥1,000,000 sits beside it as an ordinary
+      --      asset. Net worth stays right, so no screen shows it as an error.
+      --
+      --   2. HOW MUCH. Among categories that hold something, the larger total
+      --      is the household's cash; the other is a leftover. This is also
+      --      what the WARNING below claims, so the two have to agree.
+      --
+      -- sort_order and id only break a genuine draw.
       SELECT c.id INTO cash_id
         FROM asset_categories c
        WHERE c.ledger_id = led.id AND c.name = '現金'
-       ORDER BY (SELECT count(*) FROM assets a WHERE a.category_id = c.id) DESC,
+       ORDER BY (EXISTS (SELECT 1 FROM assets a WHERE a.category_id = c.id)) DESC,
                 (SELECT coalesce(sum(a.value), 0) FROM assets a WHERE a.category_id = c.id) DESC,
                 c.sort_order,
                 c.id

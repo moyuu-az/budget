@@ -60,6 +60,7 @@ let unparseableBalance: number;
 let hugeBalance: number;
 let fractionalBalance: number;
 let twoCashCategoriesBothHolding: number;
+let manySmallVersusOneLarge: number;
 
 /**
  * Everything the migration warned about, as the operator would see it.
@@ -198,6 +199,23 @@ beforeAll(async () => {
     200_000,
   );
 
+  // (11) Duplicate 現金 where one holds MANY SMALL rows and the other holds ONE
+  //      LARGE one. This is what separates "does it hold anything" from "how
+  //      many rows does it hold": counting rows promotes the ¥10,000 side and
+  //      leaves ¥1,000,000 outside the balance, with net worth still correct so
+  //      nothing on screen looks wrong.
+  manySmallVersusOneLarge = await ledger('many-small-vs-one-large');
+  const smallCategory = await category(manySmallVersusOneLarge, '現金', 0);
+  await holding(manySmallVersusOneLarge, smallCategory, '小銭入れ', 3_000);
+  await holding(manySmallVersusOneLarge, smallCategory, '封筒', 3_000);
+  await holding(manySmallVersusOneLarge, smallCategory, '車の中', 4_000);
+  await holding(
+    manySmallVersusOneLarge,
+    await category(manySmallVersusOneLarge, '現金', 1),
+    '銀行口座',
+    1_000_000,
+  );
+
   // ... and now the migration under test, applied by the schema owner.
   //
   // console.warn is where migrate() forwards PostgreSQL notices; see the
@@ -250,6 +268,7 @@ describe('every ledger comes out with exactly one cash category', () => {
     ['a ledger with two categories named 現金', () => twoCashCategories],
     ['a ledger whose only cash row is ¥0', () => zeroValuedCashRow],
     ['a ledger whose balance was fractional', () => fractionalBalance],
+    ['a ledger with many small cash rows beside one large one', () => manySmallVersusOneLarge],
   ])('%s', async (_label, id) => {
     const rows = await raw(
       db.adminPool,
@@ -353,6 +372,32 @@ describe('two categories named 現金 that both hold something', () => {
     expect(
       warnings.filter((line) =>
         line.includes(`ledger ${twoCashCategoriesBothHolding}: more than one category is named 現金`),
+      ),
+    ).toHaveLength(1);
+  });
+});
+
+describe('two categories named 現金 with different numbers of rows', () => {
+  it('promotes the one holding the MOST, not the one holding the MANY', async () => {
+    // Row count is not the question. Three coins totalling ¥10,000 must not
+    // outrank one account holding ¥1,000,000 -- that leaves 99% of the
+    // household's cash outside 現在の残高, and the forecast starts from ¥10,000.
+    expect(await cashHoldings(manySmallVersusOneLarge)).toEqual([
+      { name: '銀行口座', value: '1000000.00' },
+    ]);
+  });
+
+  it('still keeps the rest, so net worth is unaffected', async () => {
+    expect(await netWorth(manySmallVersusOneLarge)).toBe('1010000.00');
+  });
+
+  it('warns in terms that match what it actually did', async () => {
+    // The warning says "the one holding the most was promoted". Under row
+    // counting that sentence was simply false for this ledger, and it is the
+    // one sentence an operator reads.
+    expect(
+      warnings.filter((line) =>
+        line.includes(`ledger ${manySmallVersusOneLarge}: more than one category is named 現金`),
       ),
     ).toHaveLength(1);
   });
