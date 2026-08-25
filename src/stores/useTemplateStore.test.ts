@@ -3,6 +3,7 @@ import { useTemplateStore } from './useTemplateStore';
 import { setApi } from '../lib/api';
 import { createMockApi } from '../test/mock-api';
 import { useToastStore } from '../stores/useToastStore';
+import { useMonthlyStore } from './useMonthlyStore';
 import { makeTemplate, monthlyOn, yearlyOn } from '../test/factories';
 import type { AppApi } from '../types';
 
@@ -21,6 +22,7 @@ beforeEach(() => {
   api = createMockApi();
   setApi(api);
   useTemplateStore.setState({ templates: [], status: 'ready' });
+  useMonthlyStore.setState({ monthlyAmountsMap: new Map(), monthlyActualsMap: new Map() });
   useToastStore.setState({ toasts: [], queue: [] });
 });
 
@@ -73,6 +75,68 @@ describe('updateTemplate', () => {
       kind: 'monthly',
       dayOfMonth: 5,
     });
+  });
+
+  it('drops cached amounts the new recurrence no longer covers', async () => {
+    // The server deletes those rows in the same transaction. Without this the
+    // cache keeps them: change an entry to yearly and back without leaving the
+    // screen, and the totals go on using a figure the database no longer holds.
+    // A reload would then change the numbers -- the screen lying about what is
+    // saved.
+    api.updateTemplate = vi.fn().mockResolvedValue(undefined);
+    useMonthlyStore.setState({
+      monthlyAmountsMap: new Map([
+        ['2026-07', new Map([[1, 50_000]])],
+        ['2026-09', new Map([[1, 60_000]])],
+      ]),
+    });
+
+    await useTemplateStore.getState().updateTemplate(1, {
+      recurrence: { kind: 'yearly', month: 9, dayOfMonth: 1 },
+    });
+
+    const map = useMonthlyStore.getState().monthlyAmountsMap;
+    expect(map.get('2026-07')?.has(1)).toBe(false);
+    // September still occurs, so its amount is the household's and stays.
+    expect(map.get('2026-09')?.get(1)).toBe(60_000);
+  });
+
+  it('leaves another entry’s cached amounts alone', async () => {
+    api.updateTemplate = vi.fn().mockResolvedValue(undefined);
+    useMonthlyStore.setState({
+      monthlyAmountsMap: new Map([['2026-07', new Map([[1, 50_000], [2, 70_000]])]]),
+    });
+
+    await useTemplateStore.getState().updateTemplate(1, {
+      recurrence: { kind: 'yearly', month: 9, dayOfMonth: 1 },
+    });
+
+    expect(useMonthlyStore.getState().monthlyAmountsMap.get('2026-07')?.get(2)).toBe(70_000);
+  });
+
+  it('touches the cache not at all when the patch leaves the recurrence alone', async () => {
+    // A rename must not cost the household its overrides.
+    api.updateTemplate = vi.fn().mockResolvedValue(undefined);
+    const before = new Map([['2026-07', new Map([[1, 50_000]])]]);
+    useMonthlyStore.setState({ monthlyAmountsMap: before });
+
+    await useTemplateStore.getState().updateTemplate(1, { name: 'renamed' });
+
+    expect(useMonthlyStore.getState().monthlyAmountsMap).toBe(before);
+  });
+
+  it('does not touch the cache when the save failed', async () => {
+    // The server deleted nothing, so neither should the cache.
+    api.updateTemplate = vi.fn().mockRejectedValue(new Error('nope'));
+    useMonthlyStore.setState({
+      monthlyAmountsMap: new Map([['2026-07', new Map([[1, 50_000]])]]),
+    });
+
+    await useTemplateStore.getState().updateTemplate(1, {
+      recurrence: { kind: 'yearly', month: 9, dayOfMonth: 1 },
+    });
+
+    expect(useMonthlyStore.getState().monthlyAmountsMap.get('2026-07')?.get(1)).toBe(50_000);
   });
 
   it('returns false and rolls the optimistic edit back on failure', async () => {

@@ -92,22 +92,17 @@ function EntriesView() {
     const prevDate = new Date(year, month - 2, 1);
     const prevMonth = toYearMonth(prevDate);
     setCopying(true);
-    // Only the entries that actually fall in THIS month. Copying the rest would
-    // store overrides for months their entries skip -- invisible on every
-    // screen, and silently in force the day someone makes the entry monthly.
-    // `occurring` is the same narrowing the totals above use.
+    // WHICH entries are copied is decided by the server, from the rows under a
+    // lock -- a list computed here would be stale the moment the other member of
+    // a shared ledger changed a recurrence.
     //
-    // Branching on the store's boolean rather than try/catch: the store
-    // swallows the throw (reportError has already raised the toast), so a catch
-    // here could never run and 「コピーしました」 would fire on failure.
-    const copied = await copyMonthlyAmounts(
-      prevMonth,
-      currentYearMonth,
-      occurring.map((t) => t.id),
-    );
+    // Branching on the store's boolean rather than try/catch: the store swallows
+    // the throw (reportError has already raised the toast), so a catch here
+    // could never run and 「コピーしました」 would fire on failure.
+    const copied = await copyMonthlyAmounts(prevMonth, currentYearMonth);
     setCopying(false);
     if (copied) addToast('先月の金額をコピーしました', 'success');
-  }, [currentYearMonth, occurring, copyMonthlyAmounts, addToast]);
+  }, [currentYearMonth, copyMonthlyAmounts, addToast]);
 
   // Reset to defaults
   const handleResetToDefaults = useCallback(async () => {

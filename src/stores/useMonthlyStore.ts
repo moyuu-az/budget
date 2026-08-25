@@ -6,12 +6,29 @@ import type {
 } from '../types';
 import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
+import { occursInMonth } from '../../shared/recurrence';
+import type { Recurrence } from '../types';
 
 interface MonthlyState {
   monthlyAmountsMap: MonthlyAmountsMap;
   monthlyActualsMap: MonthlyActualsMap;
   loading: boolean;
   reset: () => void;
+  /**
+   * Drops cached per-month amounts that `recurrence` no longer covers.
+   *
+   * Called after a recurrence change succeeds, because the SERVER deletes those
+   * rows in the same transaction (see occurrence-guard.ts). Without this the
+   * cache keeps them: change an entry to yearly and back without leaving the
+   * screen, and the totals go on using a figure the database no longer holds --
+   * a reload would change the numbers, which is the definition of the screen
+   * lying.
+   *
+   * Mirrors the server's rule rather than clearing everything for that entry:
+   * blunt clearing would blank the CURRENT month's override until the next
+   * fetch, showing a wrong number on the way to the right one.
+   */
+  forgetAmountsOutside: (templateId: number, recurrence: Recurrence) => void;
   fetchActualsRange: (startMonth: string, endMonth: string) => Promise<void>;
   fetchMonthlyAmounts: (yearMonth: string) => Promise<void>;
   fetchMonthlyAmountsRange: (startMonth: string, endMonth: string) => Promise<void>;
@@ -26,7 +43,7 @@ interface MonthlyState {
    * household its month is budgeted when nothing was written. Same reasoning as
    * useAssetStore and useTemplateStore.
    */
-  copyMonthlyAmounts: (fromMonth: string, toMonth: string, templateIds: number[]) => Promise<boolean>;
+  copyMonthlyAmounts: (fromMonth: string, toMonth: string) => Promise<boolean>;
   fetchMonthlyActuals: (yearMonth: string) => Promise<void>;
   setMonthlyActual: (templateId: number, yearMonth: string, amount: number) => Promise<void>;
   deleteMonthlyActual: (templateId: number, yearMonth: string) => Promise<void>;
@@ -49,6 +66,22 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   // reset would let a stale reference keep mutating live state.
   reset: () =>
     set({ monthlyAmountsMap: new Map(), monthlyActualsMap: new Map(), loading: false }),
+
+  forgetAmountsOutside: (templateId, recurrence) =>
+    set((state) => {
+      const next = new Map(state.monthlyAmountsMap);
+      let changed = false;
+      for (const [yearMonth, monthMap] of next) {
+        if (!monthMap.has(templateId) || occursInMonth(recurrence, yearMonth)) continue;
+        const copy = new Map(monthMap);
+        copy.delete(templateId);
+        next.set(yearMonth, copy);
+        changed = true;
+      }
+      // A new Map only when something actually moved: an unconditional one would
+      // re-render every subscriber on every template edit.
+      return changed ? { monthlyAmountsMap: next } : state;
+    }),
 
   fetchActualsRange: async (startMonth: string, endMonth: string) => {
     set({ loading: true });
@@ -158,14 +191,13 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     }
   },
 
-  copyMonthlyAmounts: async (fromMonth: string, toMonth: string, templateIds: number[]) => {
+  copyMonthlyAmounts: async (fromMonth: string, toMonth: string) => {
     set({ loading: true });
     try {
-      // `templateIds` is the caller's list of entries that actually occur in the
-      // TARGET month. Copying anything else stores an override no screen can
-      // show and no total reads -- until the recurrence changes to include that
-      // month, at which point it silently wins. See AppApi.copyMonthlyAmounts.
-      await getApi().copyMonthlyAmounts(fromMonth, toMonth, templateIds);
+      // WHICH entries get copied is the server's decision, made from the rows
+      // under a lock. A list computed here would be stale the moment another tab
+      // (or the other member of a shared ledger) changed a recurrence.
+      await getApi().copyMonthlyAmounts(fromMonth, toMonth);
       // Re-fetch the target month to get the copied data
       const amounts = await getApi().getMonthlyAmounts(toMonth);
       const newMap = new Map(get().monthlyAmountsMap);

@@ -680,6 +680,13 @@ describe('responses', () => {
     // the conflicting row, cannot see it under the USING policy, and raises
     // 42501. That is the isolation layer working, not the server malfunctioning,
     // so it must not surface as a 500.
+    //
+    // RECORDED ACTUALS, deliberately, not planned amounts. setMonthlyAmount now
+    // looks the entry up first (to check the month is one it occurs in), so a
+    // cross-ledger id is refused by THAT guard before RLS is ever consulted --
+    // and this test would then prove the guard rather than the policy. Actuals
+    // carry no such guard, so the write still reaches the database and the
+    // policy is what answers.
     const bob = await sessionFor(BOB);
     const bobLedger = personalLedgerOf(bob);
     const template = (await (
@@ -687,7 +694,36 @@ describe('responses', () => {
         as: BOB, ledgerId: bobLedger, args: [{ name: 'bob', recurrence: monthlyOn(1), type: 'expense' }],
       })
     ).json()) as { id: number };
-    await call('setMonthlyAmount', { as: BOB, ledgerId: bobLedger, args: [template.id, '2026-01', 111] });
+    await call('setMonthlyActual', { as: BOB, ledgerId: bobLedger, args: [template.id, '2026-01', 111] });
+
+    const alice = await sessionFor(ALICE);
+    const response = await call('setMonthlyActual', {
+      as: ALICE, ledgerId: personalLedgerOf(alice), args: [template.id, '2026-01', 999],
+    });
+
+    expect(response.status).toBe(403);
+    expect((await envelopeOf(response)).code).toBe('FORBIDDEN');
+
+    // Bob's figure is untouched.
+    const actuals = (await (
+      await call('getMonthlyActuals', { as: BOB, ledgerId: bobLedger, args: ['2026-01'] })
+    ).json()) as { actualAmount: number }[];
+    expect(actuals).toEqual([expect.objectContaining({ actualAmount: 111 })]);
+  });
+
+  it('refuses a cross-ledger planned amount before it reaches the database', async () => {
+    // The other half of the pair above: setMonthlyAmount's occurrence guard
+    // looks the entry up first, so a cross-ledger id is refused there. It must
+    // answer FORBIDDEN rather than NOT_FOUND -- distinguishing the two would let
+    // a caller probe which ids exist in someone else's ledger, which is the same
+    // reasoning resolveLedgerId already applies to ledger ids.
+    const bob = await sessionFor(BOB);
+    const bobLedger = personalLedgerOf(bob);
+    const template = (await (
+      await call('addTemplate', {
+        as: BOB, ledgerId: bobLedger, args: [{ name: 'bob', recurrence: monthlyOn(1), type: 'expense' }],
+      })
+    ).json()) as { id: number };
 
     const alice = await sessionFor(ALICE);
     const response = await call('setMonthlyAmount', {
@@ -696,12 +732,33 @@ describe('responses', () => {
 
     expect(response.status).toBe(403);
     expect((await envelopeOf(response)).code).toBe('FORBIDDEN');
+  });
 
-    // Bob's figure is untouched.
-    const amounts = (await (
-      await call('getMonthlyAmounts', { as: BOB, ledgerId: bobLedger, args: ['2026-01'] })
-    ).json()) as { amount: number }[];
-    expect(amounts).toEqual([expect.objectContaining({ amount: 111 })]);
+  it('refuses a planned amount for a month the entry does not occur in', async () => {
+    // The positive rule the guard exists for: an override that does not occur is
+    // invisible on every screen and comes back the day the recurrence changes to
+    // cover that month, silently beating the default.
+    const alice = await sessionFor(ALICE);
+    const ledger = sharedLedgerOf(alice);
+    const template = (await (
+      await call('addTemplate', {
+        as: ALICE, ledgerId: ledger,
+        args: [{ name: '車検', recurrence: { kind: 'yearly', month: 9, dayOfMonth: 20 }, type: 'expense' }],
+      })
+    ).json()) as { id: number };
+
+    const refused = await call('setMonthlyAmount', {
+      as: ALICE, ledgerId: ledger, args: [template.id, '2026-07', 50_000],
+    });
+    expect(refused.status).toBe(400);
+    expect((await envelopeOf(refused)).code).toBe('VALIDATION');
+
+    // September occurs, and is accepted -- a guard that refused everything would
+    // pass the assertion above.
+    const accepted = await call('setMonthlyAmount', {
+      as: ALICE, ledgerId: ledger, args: [template.id, '2026-09', 50_000],
+    });
+    expect(accepted.status).toBe(204);
   });
 
   it('still treats a missing GRANT as a server fault, not a permission answer', async () => {

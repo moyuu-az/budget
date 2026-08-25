@@ -235,10 +235,12 @@ describe('entries that do not fall in this month', () => {
 });
 
 describe('copying last month’s amounts', () => {
-  it('names only the entries that fall in THIS month', async () => {
-    // Copying the rest would store overrides for months their entries skip:
-    // invisible on every screen, read by no total -- and silently in force the
-    // day someone makes the entry monthly.
+  it('names the two months and nothing else', async () => {
+    // WHICH entries are copied is the server's decision, made from the rows
+    // under a lock. An earlier version computed the list here; that looked like
+    // it kept the occurrence rule in one place and actually moved the
+    // ENFORCEMENT to the client, where a stale tab or the other member of a
+    // shared ledger makes the list wrong.
     const user = userEvent.setup();
     api.copyMonthlyAmounts = vi.fn().mockResolvedValue(undefined);
     api.getMonthlyAmounts = vi.fn().mockResolvedValue([]);
@@ -247,19 +249,20 @@ describe('copying last month’s amounts', () => {
 
     await user.click(screen.getByRole('button', { name: '先月からコピー' }));
 
-    expect(api.copyMonthlyAmounts).toHaveBeenCalledWith('2026-05', '2026-06', [RENT.id]);
+    expect(api.copyMonthlyAmounts).toHaveBeenCalledWith('2026-05', '2026-06');
   });
 
-  it('sends an empty list rather than copying everything when nothing occurs', async () => {
+  it('copies into the month on screen, not into today’s', async () => {
     const user = userEvent.setup();
     api.copyMonthlyAmounts = vi.fn().mockResolvedValue(undefined);
     api.getMonthlyAmounts = vi.fn().mockResolvedValue([]);
-    useTemplateStore.setState({ templates: [INSPECTION] });
+    useTemplateStore.setState({ templates: [RENT] });
     render(<EntriesView />);
 
+    await user.click(screen.getByRole('button', { name: '翌月' }));
     await user.click(screen.getByRole('button', { name: '先月からコピー' }));
 
-    expect(api.copyMonthlyAmounts).toHaveBeenCalledWith('2026-05', '2026-06', []);
+    expect(api.copyMonthlyAmounts).toHaveBeenCalledWith('2026-06', '2026-07');
   });
 });
 

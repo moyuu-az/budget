@@ -3,6 +3,7 @@ import type { EntryTemplate, EntryTemplateInput } from '../../shared/types';
 import type { TemplateRow } from './row-types';
 import { recurrenceToColumns, rowToTemplate } from '../mappers';
 import { occursInMonth } from '../../shared/recurrence';
+import { lockRecurrence } from './occurrence-guard';
 import { buildSetClause } from './sql';
 
 export interface TemplateRepository {
@@ -147,6 +148,13 @@ export function createTemplateRepository(
       }
 
       if (sets.length === 0) return;
+
+      // Taken BEFORE the write when the timing changes, so a concurrent amount
+      // save cannot read the old recurrence, pass its occurrence check, and then
+      // commit after the prune below -- recreating exactly the invisible row the
+      // prune exists to remove. Same row, same order as every other writer; see
+      // occurrence-guard.ts.
+      if (recurrence !== undefined) await lockRecurrence(client, id);
 
       sets.push('updated_at = now()');
       await client.query(

@@ -272,25 +272,20 @@ export interface AppApi {
   setMonthlyAmount(templateId: number, yearMonth: string, amount: number): Promise<void>;
   deleteMonthlyAmount(templateId: number, yearMonth: string): Promise<void>;
   /**
-   * Copies last month's per-month amounts forward, for the named entries only.
+   * Copies last month's per-month amounts forward.
    *
-   * WHY THE CALLER SUPPLIES THE IDS
-   *   Since migration 005 an entry can skip a month, and an override stored for
-   *   a month its entry does not occur in is invisible: no screen shows it, no
-   *   total reads it -- and it comes back to life the day someone changes the
-   *   recurrence to include that month, silently overriding the amount they
-   *   expected. Copying blindly manufactures exactly those rows.
+   * Only the entries that occur in the TARGET month are copied, and the server
+   * decides which those are -- an override for a month its entry skips is
+   * invisible on every screen and silently in force the day the recurrence
+   * changes to cover that month.
    *
-   *   The list is passed in rather than derived server-side because the
-   *   occurrence rule lives in ONE place (shared/recurrence.ts) and it is
-   *   TypeScript. Re-expressing it in SQL would be a second implementation of
-   *   the predicate the whole design exists to keep single -- and the one in SQL
-   *   is the one no test would notice drifting.
-   *
-   *   Passing ids is safe: they are still scoped by row-level security, so an id
-   *   from another ledger copies nothing rather than reaching across.
+   * An earlier revision took the id list as an argument. That looked like it
+   * kept the occurrence rule in one place, and actually moved the ENFORCEMENT to
+   * the client, where a stale tab or another member's concurrent edit makes the
+   * list wrong. The rule still has one definition (shared/recurrence.ts); the
+   * server imports it. See server/repositories/occurrence-guard.ts.
    */
-  copyMonthlyAmounts(fromMonth: string, toMonth: string, templateIds: number[]): Promise<void>;
+  copyMonthlyAmounts(fromMonth: string, toMonth: string): Promise<void>;
 
   getMonthlyActuals(yearMonth: string): Promise<MonthlyActual[]>;
   setMonthlyActual(templateId: number, yearMonth: string, actualAmount: number): Promise<void>;

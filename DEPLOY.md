@@ -238,7 +238,52 @@ END
 \$\$"
 ```
 
-**1 件でも出たらリビジョンを戻さない。** 前に進んで直す。
+**1 件でも出たらリビジョンをそのままでは戻さない。** ただし「前に進むしかない」
+わけではない。下記の緊急手順で**戻せる状態に変換してから**戻す。
+
+#### 緊急ロールバック手順（本番障害時）
+
+旧コードが誤読するのは **monthly 以外の行**だけ。それらを無効化すれば旧コードに
+とって存在しないのと同じになるので、リビジョンを安全に戻せる。
+
+```sh
+# 1) 何を無効化するかを記録する（復旧時に戻すため。必ず先に取る）
+psql "$DATABASE_URL" -Atc "
+  SELECT id, ledger_id, name, recurrence_kind, day_of_month, month_of_year,
+         interval_months, anchor_month, on_date, enabled
+    FROM entry_templates WHERE recurrence_kind <> 'monthly'
+" > /tmp/non-monthly-backup.tsv
+wc -l /tmp/non-monthly-backup.tsv   # 0 行なら何もせず戻してよい
+
+# 2) 無効化する（migration は所有者ロールで走るが RLS は FORCE なので
+#    帳簿ごとに set_config が要る。004 / 005 と同じ理由）
+psql "$DATABASE_URL" -c "
+DO \$\$
+DECLARE led RECORD;
+BEGIN
+  FOR led IN SELECT id FROM ledgers ORDER BY id LOOP
+    PERFORM set_config('app.current_ledger_id', led.id::TEXT, true);
+    UPDATE entry_templates SET enabled = FALSE, updated_at = now()
+     WHERE recurrence_kind <> 'monthly' AND enabled;
+  END LOOP;
+END
+\$\$"
+
+# 3) リビジョンを戻す
+gcloud run services update-traffic "$SERVICE" --region="$REGION" --to-revisions=<旧リビジョン>=100
+```
+
+**この手順のコスト**: 年次・数ヶ月ごと・単発の項目が予測から消える。世帯は
+「その支出が予測に無い」状態になるので、**戻したことを必ず利用者に伝える**。
+金額データそのものは失われない（`enabled` を戻せば復帰する）。
+
+復旧後は `UPDATE entry_templates SET enabled = TRUE WHERE id IN (...)` を
+`/tmp/non-monthly-backup.tsv` の元の `enabled = t` だった行に対して実行する。
+
+> **feature flag による段階リリースは採らなかった。** 非月次の書き込みを 1
+> リリース止めることは、要望された機能を無効のまま出荷することであり、
+> 「ロールバックの練習のために価値を届けない」判断になる。上の手順は
+> 演習可能で、失うものが明示されていて、可逆である。
 
 ### 開いたままのタブは自動的にブロックされる
 

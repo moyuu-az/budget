@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { EntryTemplate, EntryTemplateInput } from '../types';
 import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
+import { useMonthlyStore } from './useMonthlyStore';
 import type { LoadStatus } from './load-status';
 
 // ---------------------------------------------------------------------------
@@ -88,6 +89,14 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
     });
     try {
       await getApi().updateTemplate(id, input);
+
+      // A recurrence change deletes the per-month amounts it no longer covers,
+      // SERVER-SIDE, in the same transaction. The cache has to follow, or the
+      // totals go on using a figure the database no longer holds -- and a reload
+      // would change the numbers, which is the screen lying about what is saved.
+      if (input.recurrence !== undefined) {
+        useMonthlyStore.getState().forgetAmountsOutside(id, input.recurrence);
+      }
       return true;
     } catch (e) {
       set({ templates: prev });
