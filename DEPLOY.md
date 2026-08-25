@@ -133,15 +133,32 @@ npm run db:migrate
 適用後は `settings` を読むコードが存在しない。残高は
 `kind = 'cash'` の分類の保有合計であり、それが唯一の場所。
 
+移行結果を確認するときは、**帳簿ごとに `app.current_ledger_id` を設定する**こと。
+`asset_categories` も `assets` も FORCE ROW LEVEL SECURITY なので、**所有者ロールで
+繋いでも RLS は効く**。設定せずに全帳簿を横断するクエリを書くと、ポリシーが
+`ledger_id = NULL` を評価して**必ず 0 件**が返り、「データが無い」と誤読する。
+
 ```sh
-# 移行結果の確認（Cloud SQL Auth Proxy 越し）
-psql "$DATABASE_URL" -c "
-  SELECT l.name, c.name AS cash_category, coalesce(sum(a.value), 0) AS balance
-    FROM ledgers l
-    JOIN asset_categories c ON c.ledger_id = l.id AND c.kind = 'cash'
-    LEFT JOIN assets a ON a.category_id = c.id
-   GROUP BY l.name, c.name ORDER BY l.name"
+psql "$DATABASE_URL" -P pager=off -c "
+DO \$\$
+DECLARE led RECORD; cash_name TEXT; total NUMERIC;
+BEGIN
+  FOR led IN SELECT id, name FROM ledgers ORDER BY id LOOP
+    PERFORM set_config('app.current_ledger_id', led.id::TEXT, true);
+    SELECT c.name, coalesce(sum(a.value), 0)
+      INTO cash_name, total
+      FROM asset_categories c
+      LEFT JOIN assets a ON a.category_id = c.id
+     WHERE c.kind = 'cash'
+     GROUP BY c.name;
+    RAISE NOTICE '% (id %) -> % = %', led.name, led.id, cash_name, total;
+  END LOOP;
+END
+\$\$"
 ```
+
+各帳簿に現金分類が 1 つずつあり、その合計が移行前の残高（または移行前から
+記録されていた現金の合計）になっていれば成功。
 
 ## 5. デプロイ
 
