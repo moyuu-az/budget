@@ -35,6 +35,10 @@ function AssetCategoryCard({
   onDeleteCategory,
 }: Props): ReactElement {
   const subtotal = assets.reduce((sum, asset) => sum + asset.value, 0);
+  // The cash category IS 現在の残高. Deleting it would zero the balance and the
+  // forecast with it, so the button is not offered -- and the server refuses the
+  // call as well, because hiding a button is not an invariant.
+  const isCash = category.kind === 'cash';
 
   return (
     <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
@@ -47,6 +51,11 @@ function AssetCategoryCard({
           <h2 className="text-base font-semibold text-[var(--color-content-primary)]">
             {category.name}
           </h2>
+          {isCash && (
+            <span className="rounded-full border border-[var(--color-border-subtle)] px-2 py-0.5 text-[10px] text-[var(--color-content-muted)]">
+              現在の残高
+            </span>
+          )}
           <span className="text-sm tabular-nums text-[var(--color-content-secondary)]">
             {yen(subtotal)}
           </span>
@@ -66,23 +75,27 @@ function AssetCategoryCard({
                 </svg>
               }
             />
-            <IconButton
-              label={`${category.name}の分類を削除`}
-              size="sm"
-              tone="danger"
-              onClick={onDeleteCategory}
-              icon={
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              }
-            />
+            {!isCash && (
+              <IconButton
+                label={`${category.name}の分類を削除`}
+                size="sm"
+                tone="danger"
+                onClick={onDeleteCategory}
+                icon={
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                }
+              />
+            )}
           </div>
         </header>
 
         {assets.length === 0 ? (
           <p className="px-1 text-sm text-[var(--color-content-muted)]">
-            まだ資産が登録されていません。
+            {isCash
+              ? '手元の現金や口座残高を追加すると、残高予測の起点になります。'
+              : 'まだ資産が登録されていません。'}
           </p>
         ) : (
           // Horizontal scrolling belongs to the table, not the page: a category

@@ -102,7 +102,7 @@ beforeEach(async () => {
 
 describe('authentication', () => {
   it('refuses a request with no verified identity', async () => {
-    const response = await call('getBalance', { ledgerId: 1 });
+    const response = await call('getCategories', { ledgerId: 1 });
     expect(response.status).toBe(401);
     expect((await envelopeOf(response)).code).toBe('UNAUTHORIZED');
   });
@@ -158,7 +158,7 @@ describe('authentication', () => {
 
 describe('ledger authorisation', () => {
   it('requires the ledger header on a data method', async () => {
-    const response = await call('getBalance', { as: ALICE });
+    const response = await call('getCategories', { as: ALICE });
     expect(response.status).toBe(400);
     expect((await envelopeOf(response)).code).toBe('VALIDATION');
   });
@@ -166,7 +166,7 @@ describe('ledger authorisation', () => {
   it('rejects a malformed ledger header', async () => {
     await sessionFor(ALICE);
     for (const value of ['abc', '0', '-1', '1.5']) {
-      const response = await app.request('/api/getBalance', {
+      const response = await app.request('/api/getCategories', {
         method: 'POST',
         headers: { 'x-test-user': ALICE, 'content-type': 'application/json', [LEDGER_HEADER]: value },
         body: JSON.stringify({ args: [] }),
@@ -180,10 +180,12 @@ describe('ledger authorisation', () => {
     // simply asks for Bob's ledger id -- the one thing a client can do that the
     // repository layer would never see.
     const bob = await sessionFor(BOB);
-    await call('setBalance', { as: BOB, ledgerId: personalLedgerOf(bob), args: [50_000] });
+    await call('addCategory', {
+      as: BOB, ledgerId: personalLedgerOf(bob), args: [{ name: 'bob-only', type: 'expense' }],
+    });
 
     await sessionFor(ALICE);
-    const response = await call('getBalance', { as: ALICE, ledgerId: personalLedgerOf(bob) });
+    const response = await call('getCategories', { as: ALICE, ledgerId: personalLedgerOf(bob) });
 
     expect(response.status).toBe(403);
     expect((await envelopeOf(response)).code).toBe('FORBIDDEN');
@@ -193,9 +195,9 @@ describe('ledger authorisation', () => {
     // Distinguishing "not yours" from "no such ledger" would let a caller probe
     // for which ids exist.
     await sessionFor(ALICE);
-    const missing = await call('getBalance', { as: ALICE, ledgerId: 999_999 });
+    const missing = await call('getCategories', { as: ALICE, ledgerId: 999_999 });
     const bob = await sessionFor(BOB);
-    const forbidden = await call('getBalance', { as: ALICE, ledgerId: personalLedgerOf(bob) });
+    const forbidden = await call('getCategories', { as: ALICE, ledgerId: personalLedgerOf(bob) });
 
     expect(missing.status).toBe(forbidden.status);
     expect((await envelopeOf(missing)).message).toBe((await envelopeOf(forbidden)).message);
@@ -206,18 +208,22 @@ describe('ledger authorisation', () => {
     const bob = await sessionFor(BOB);
     const shared = sharedLedgerOf(alice);
 
-    await call('setBalance', { as: ALICE, ledgerId: shared, args: [1_525_210] });
-    const response = await call('getBalance', { as: BOB, ledgerId: sharedLedgerOf(bob) });
+    await call('addCategory', {
+      as: ALICE, ledgerId: shared, args: [{ name: '住居費', type: 'expense' }],
+    });
+    const response = await call('getCategories', { as: BOB, ledgerId: sharedLedgerOf(bob) });
 
-    expect(await response.json()).toBe(1_525_210);
+    expect(((await response.json()) as { name: string }[]).map((c) => c.name)).toEqual(['住居費']);
   });
 
   it('keeps private ledgers private even for the shared household', async () => {
     const alice = await sessionFor(ALICE);
-    await call('setBalance', { as: ALICE, ledgerId: personalLedgerOf(alice), args: [12_345] });
+    await call('addCategory', {
+      as: ALICE, ledgerId: personalLedgerOf(alice), args: [{ name: '個人的な出費', type: 'expense' }],
+    });
 
-    const shared = await call('getBalance', { as: ALICE, ledgerId: sharedLedgerOf(alice) });
-    expect(await shared.json()).toBe(0);
+    const shared = await call('getCategories', { as: ALICE, ledgerId: sharedLedgerOf(alice) });
+    expect(await shared.json()).toEqual([]);
   });
 });
 
@@ -226,26 +232,26 @@ describe('cross-site protection', () => {
     // IAP authenticates with a cookie and injects the assertion itself, so a
     // cross-site POST would arrive fully authenticated. Fetch metadata is the
     // signal that stops it.
-    const response = await call('getBalance', { as: ALICE, ledgerId: 1, fetchSite: 'cross-site' });
+    const response = await call('getCategories', { as: ALICE, ledgerId: 1, fetchSite: 'cross-site' });
     expect(response.status).toBe(403);
   });
 
   it('allows same-origin and direct (non-browser) requests', async () => {
     const alice = await sessionFor(ALICE);
-    const sameOrigin = await call('getBalance', {
+    const sameOrigin = await call('getCategories', {
       as: ALICE, ledgerId: sharedLedgerOf(alice), fetchSite: 'same-origin',
     });
     expect(sameOrigin.status).toBe(200);
 
     // No Sec-Fetch-Site at all: curl, or an older client. IAP has already
     // established who is calling, so this is not the layer that should refuse.
-    const direct = await call('getBalance', { as: ALICE, ledgerId: sharedLedgerOf(alice) });
+    const direct = await call('getCategories', { as: ALICE, ledgerId: sharedLedgerOf(alice) });
     expect(direct.status).toBe(200);
   });
 
   it('requires a JSON content type', async () => {
     const alice = await sessionFor(ALICE);
-    const response = await call('getBalance', {
+    const response = await call('getCategories', {
       as: ALICE, ledgerId: sharedLedgerOf(alice), contentType: 'application/x-www-form-urlencoded',
     });
     expect(response.status).toBe(400);
@@ -290,7 +296,7 @@ describe('argument validation', () => {
 
   it('rejects args that are not an array', async () => {
     const alice = await sessionFor(ALICE);
-    const response = await app.request('/api/getBalance', {
+    const response = await app.request('/api/getCategories', {
       method: 'POST',
       headers: {
         'x-test-user': ALICE,
@@ -313,8 +319,8 @@ describe('responses', () => {
   it('returns 204 with no body for a method whose contract is void', async () => {
     // Otherwise the client would resolve Promise<void> to a meaningless null.
     const alice = await sessionFor(ALICE);
-    const response = await call('setBalance', {
-      as: ALICE, ledgerId: sharedLedgerOf(alice), args: [100],
+    const response = await call('updateCategory', {
+      as: ALICE, ledgerId: sharedLedgerOf(alice), args: [999_999, { name: 'nothing here' }],
     });
 
     expect(response.status).toBe(204);

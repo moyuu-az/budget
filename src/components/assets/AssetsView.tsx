@@ -31,9 +31,14 @@ interface AssetDialogState {
 /**
  * 資産.
  *
- * OPTIONAL BY CONSTRUCTION: a ledger that has never used this feature has no
- * asset categories, so the view is an empty state offering the 雛形. Nothing is
- * created on the user's behalf, here or at ledger creation.
+ * EVERY LEDGER HAS A 現金 CATEGORY, and its holdings are 現在の残高 -- the figure
+ * the whole forecast starts from. The server provisions it on read, so this view
+ * never sees a ledger without one once the fetch has landed, and the card for it
+ * offers no delete button (AssetCategoryCard).
+ *
+ * Everything else stays optional: a household that ignores investments sees one
+ * category with one row in it, which is what it had before under the name
+ * 「現在の残高」.
  */
 function AssetsView(): ReactElement {
   const categories = useAssetStore((s) => s.categories);
@@ -118,7 +123,7 @@ function AssetsView(): ReactElement {
         <div>
           <h1 className="text-2xl font-bold text-[var(--color-content-primary)]">資産</h1>
           <p className="text-sm text-[var(--color-content-muted)]">
-            NISA や現金など、分類ごとに必要な項目を決めて記録します。
+            「現金」の合計が現在の残高です。NISA などは分類ごとに必要な項目を決めて記録します。
           </p>
         </div>
         {sortedCategories.length > 0 && (
@@ -139,26 +144,17 @@ function AssetsView(): ReactElement {
         )}
       </header>
 
+      {/* An empty list now means "not loaded yet", not "not used": the server
+          provisions the 現金 category on read, so after the fetch there is always
+          at least one card. The old empty state offering the 雛形 would be
+          unreachable, and showing it during the fetch would tell the user their
+          data is gone. */}
       {sortedCategories.length === 0 ? (
         <Card padding="lg">
           <EmptyState
-            title="資産管理はまだ使われていません"
-            description="使う場合は雛形から始めるのが簡単です。あとから項目も分類名も自由に変えられます。"
-            action={
-              <Button
-                variant="secondary"
-                onClick={() => setCategoryDialog({ category: null, initial: null })}
-              >
-                自分で分類を作る
-              </Button>
-            }
+            title="読み込み中"
+            description="資産の分類を読み込んでいます。"
           />
-          {/* Rendered even while loading: an empty list and a not-yet-loaded list
-              look the same, and hiding the templates behind a spinner would make
-              the feature look broken on a slow connection. */}
-          <div className="mt-2 px-2 pb-2">
-            <AssetTemplatePicker onPick={startFromTemplate} />
-          </div>
         </Card>
       ) : (
         <div className="space-y-4">

@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { Card } from '../ui/Card';
-import BalanceInput from '../sidebar/BalanceInput';
+import CashBalance from '../sidebar/CashBalance';
 import CategoryManager from './CategoryManager';
 
 function SettingsView() {
@@ -13,7 +13,10 @@ function SettingsView() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         <Card padding="lg">
           <h2 className="text-lg font-semibold text-white mb-4">残高</h2>
-          <BalanceInput />
+          {/* No onEdit: this view has no navigation callback, and a button that
+              cannot go anywhere is worse than none. The sidebar card, which is
+              on screen beside this one, has it. */}
+          <CashBalance />
         </Card>
         <CategoryManager />
       </div>

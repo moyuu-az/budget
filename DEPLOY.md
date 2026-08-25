@@ -117,6 +117,32 @@ npm run db:migrate
 > `DATABASE_APP_ROLE` を省いても新テーブルの権限は付く。ただし前回 grant を実行した
 > ロールと今回 migration を流すロールが同じ場合に限るので、迷ったら毎回付けてよい。
 
+### 004 はデータを動かす
+
+`004_cash_is_an_asset.sql` は列を足すだけでなく、**各帳簿の残高を資産に移す**。
+
+- 帳簿ごとに `kind = 'cash'` の資産分類を 1 つ用意する（`現金` という名前の分類が
+  既にあればそれを昇格させる。新たに作らない）
+- その分類に**保有が 1 件も無い**帳簿では、`settings.current_balance` を
+  `口座残高` という保有として作る
+- **保有が既にある**帳簿では取り込まない。その保有こそが現金であり、
+  古い残高を足すと二重計上をそのまま新しい形で残すことになる
+- 古い値は消さずに `legacy_current_balance` へ改名して残す。移行後に残高が
+  合わないときの比較対象になる
+
+適用後は `settings` を読むコードが存在しない。残高は
+`kind = 'cash'` の分類の保有合計であり、それが唯一の場所。
+
+```sh
+# 移行結果の確認（Cloud SQL Auth Proxy 越し）
+psql "$DATABASE_URL" -c "
+  SELECT l.name, c.name AS cash_category, coalesce(sum(a.value), 0) AS balance
+    FROM ledgers l
+    JOIN asset_categories c ON c.ledger_id = l.id AND c.kind = 'cash'
+    LEFT JOIN assets a ON a.category_id = c.id
+   GROUP BY l.name, c.name ORDER BY l.name"
+```
+
 ## 5. デプロイ
 
 ```sh

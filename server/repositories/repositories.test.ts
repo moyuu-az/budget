@@ -69,31 +69,6 @@ describe('buildSetClause', () => {
   });
 });
 
-describe('settings repository', () => {
-  it('reports zero for a ledger that has never set a balance', async () => {
-    expect(await inHousehold((r) => r.settings.getBalance())).toBe(0);
-  });
-
-  it('round-trips a balance', async () => {
-    await inHousehold((r) => r.settings.setBalance(1_525_210));
-    expect(await inHousehold((r) => r.settings.getBalance())).toBe(1_525_210);
-  });
-
-  it('keeps each ledger on its own balance', async () => {
-    await inHousehold((r) => r.settings.setBalance(1_000_000));
-    await inPrivate((r) => r.settings.setBalance(50_000));
-
-    expect(await inHousehold((r) => r.settings.getBalance())).toBe(1_000_000);
-    expect(await inPrivate((r) => r.settings.getBalance())).toBe(50_000);
-  });
-
-  it('overwrites rather than accumulating rows', async () => {
-    await inHousehold((r) => r.settings.setBalance(1));
-    await inHousehold((r) => r.settings.setBalance(2));
-    expect(await raw(db.adminPool, 'SELECT 1 FROM settings')).toHaveLength(1);
-  });
-});
-
 describe('category repository', () => {
   it('orders by type then sort order', async () => {
     await inHousehold(async (r) => {
@@ -547,8 +522,12 @@ describe('asset category repository', () => {
     );
     expect(created.fields).toEqual(NISA_FIELDS);
 
-    const [fetched] = await inHousehold((r) => r.assetCategory.getAll());
-    expect(fetched.fields).toEqual(NISA_FIELDS);
+    // getAll() provisions the cash category, which sorts ahead of everything
+    // else -- so the created one is found by id rather than by position.
+    const fetched = (await inHousehold((r) => r.assetCategory.getAll())).find(
+      (c) => c.id === created.id,
+    );
+    expect(fetched?.fields).toEqual(NISA_FIELDS);
   });
 
   it('accepts a category with no parameters at all', async () => {
@@ -572,8 +551,10 @@ describe('asset category repository', () => {
     );
     await inHousehold((r) => r.assetCategory.update(created.id, { fields: [NISA_FIELDS[0]] }));
 
-    const [after] = await inHousehold((r) => r.assetCategory.getAll());
-    expect(after.fields).toEqual([NISA_FIELDS[0]]);
+    const after = (await inHousehold((r) => r.assetCategory.getAll())).find(
+      (c) => c.id === created.id,
+    );
+    expect(after?.fields).toEqual([NISA_FIELDS[0]]);
   });
 
   it('rejects definitions the UI could not render', async () => {
@@ -612,7 +593,81 @@ describe('asset category repository', () => {
 
   it('keeps one ledger\'s categories out of another\'s', async () => {
     await inHousehold((r) => r.assetCategory.add({ name: 'household' }));
-    expect(await inPrivate((r) => r.assetCategory.getAll())).toEqual([]);
+
+    // Not empty: every ledger gets its own cash category. What must not be here
+    // is the OTHER ledger's category.
+    const theirs = await inPrivate((r) => r.assetCategory.getAll());
+    expect(theirs.map((c) => c.name)).toEqual(['現金']);
+  });
+
+  // -------------------------------------------------------------------------
+  // The cash category: every ledger has exactly one, and its holdings are the
+  // balance. See migration 004.
+  // -------------------------------------------------------------------------
+
+  it('provisions a cash category for a ledger that has none', async () => {
+    const categories = await inHousehold((r) => r.assetCategory.getAll());
+
+    const cash = categories.filter((c) => c.kind === 'cash');
+    expect(cash).toHaveLength(1);
+    expect(cash[0]).toMatchObject({ name: '現金', sortOrder: -1 });
+    // With a 保管場所 parameter, so a household with several accounts can tell
+    // them apart without inventing the field themselves.
+    expect(cash[0].fields.map((f) => f.label)).toEqual(['保管場所']);
+  });
+
+  it('provisions it once, not on every read', async () => {
+    await inHousehold((r) => r.assetCategory.getAll());
+    await inHousehold((r) => r.assetCategory.getAll());
+    const categories = await inHousehold((r) => r.assetCategory.getAll());
+
+    expect(categories.filter((c) => c.kind === 'cash')).toHaveLength(1);
+  });
+
+  it('keeps the provisioned category after it is renamed', async () => {
+    // The user may rename 現金 to their bank's name. If provisioning matched on
+    // the NAME, the next read would add a second cash category and the balance
+    // would split in two.
+    const [cash] = await inHousehold((r) => r.assetCategory.getAll());
+    await inHousehold((r) => r.assetCategory.update(cash.id, { name: 'ゆうちょ' }));
+
+    const after = await inHousehold((r) => r.assetCategory.getAll());
+    expect(after.filter((c) => c.kind === 'cash')).toHaveLength(1);
+    expect(after.find((c) => c.kind === 'cash')?.name).toBe('ゆうちょ');
+  });
+
+  it('survives two concurrent first reads of the same ledger', async () => {
+    // Both transactions see no cash category and both insert. The partial unique
+    // index turns the loser into a no-op rather than a 500 on someone's first
+    // page load.
+    const [first, second] = await Promise.all([
+      inHousehold((r) => r.assetCategory.getAll()),
+      inHousehold((r) => r.assetCategory.getAll()),
+    ]);
+
+    expect(first.filter((c) => c.kind === 'cash')).toHaveLength(1);
+    expect(second.filter((c) => c.kind === 'cash')).toHaveLength(1);
+    expect(await raw(db.adminPool, "SELECT 1 FROM asset_categories WHERE kind = 'cash'"))
+      .toHaveLength(1);
+  });
+
+  it('refuses to delete the cash category', async () => {
+    // It IS 現在の残高. Deleting it would cascade away every cash holding, zero
+    // the forecast, and then getAll() would provision a fresh empty one -- so
+    // the loss would look like the app simply forgot.
+    const [cash] = await inHousehold((r) => r.assetCategory.getAll());
+
+    await expect(inHousehold((r) => r.assetCategory.remove(cash.id))).rejects.toThrow(
+      /削除できません/,
+    );
+    expect(await inHousehold((r) => r.assetCategory.getAll())).toHaveLength(1);
+  });
+
+  it('still deletes an ordinary category', async () => {
+    const nisa = await inHousehold((r) => r.assetCategory.add({ name: 'NISA' }));
+    await inHousehold((r) => r.assetCategory.remove(nisa.id));
+
+    expect(await inHousehold((r) => r.assetCategory.getAll())).toHaveLength(1);
   });
 
   it('normalises labels and units on the way in', async () => {

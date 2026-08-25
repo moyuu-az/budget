@@ -4,27 +4,20 @@ import { totalAssetValue } from '../utils/net-worth';
 import { useToastStore } from './useToastStore';
 import { setApi } from '../lib/api';
 import { createMockApi } from '../test/mock-api';
+import {
+  makeAsset as makeBaseAsset,
+  makeAssetCategory,
+} from '../test/factories';
 import type { Asset, AssetCategory, AppApi } from '../types';
 
-const makeCategory = (overrides: Partial<AssetCategory> = {}): AssetCategory => ({
-  id: 1,
-  name: 'NISA',
-  color: '#22c55e',
-  sortOrder: 0,
-  fields: [{ key: 'f1', label: '銘柄', type: 'text', required: true, unit: null }],
-  ...overrides,
-});
+const makeCategory = (overrides: Partial<AssetCategory> = {}): AssetCategory =>
+  makeAssetCategory({
+    fields: [{ key: 'f1', label: '銘柄', type: 'text', required: true, unit: null }],
+    ...overrides,
+  });
 
-const makeAsset = (overrides: Partial<Asset> = {}): Asset => ({
-  id: 1,
-  categoryId: 1,
-  name: 'つみたて投資枠',
-  value: 1_000_000,
-  fields: { f1: 'eMAXIS Slim' },
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-  ...overrides,
-});
+const makeAsset = (overrides: Partial<Asset> = {}): Asset =>
+  makeBaseAsset({ name: 'つみたて投資枠', fields: { f1: 'eMAXIS Slim' }, ...overrides });
 
 let api: AppApi;
 

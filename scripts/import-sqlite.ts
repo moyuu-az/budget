@@ -22,6 +22,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createPool } from '../server/db/pool';
 import { withLedgerScope, withoutLedgerScope } from '../server/db/ledger-scope';
 import { loadDatabaseConfig } from '../server/config';
+import { createRepositories } from '../server/repositories';
 import type { PoolClient } from '../server/db/pool';
 
 interface Args {
@@ -118,14 +119,33 @@ async function main(): Promise<void> {
         );
       }
 
-      // --- settings -------------------------------------------------------
+      // --- balance --------------------------------------------------------
+      //
+      // The old SQLite schema kept the balance in settings under
+      // 'current_balance'. It is now the sum of the cash category's holdings
+      // (migration 004), so the import writes it as a holding instead of copying
+      // the row -- a copied row would be read by nothing and the imported ledger
+      // would open showing ¥0.
+      //
+      // Goes through the repositories rather than raw SQL so the cash category
+      // is provisioned by the same code the application uses. Two definitions of
+      // "the cash category" is exactly what this release removed.
       const settings = source.prepare('SELECT key, value FROM settings').all() as unknown as OldSetting[];
-      for (const row of settings) {
-        await client.query(
-          `INSERT INTO settings (ledger_id, key, value) VALUES ($1, $2, $3)
-             ON CONFLICT (ledger_id, key) DO UPDATE SET value = excluded.value, updated_at = now()`,
-          [ledgerId, row.key, row.value],
-        );
+      const oldBalance = Number(settings.find((row) => row.key === 'current_balance')?.value ?? 0);
+      const repos = createRepositories(client, ledgerId);
+      const cash = (await repos.assetCategory.getAll()).find((c) => c.kind === 'cash');
+      if (!cash) throw new Error('cash category was not provisioned; is migration 004 applied?');
+      // Only when the category is empty: re-running with --force must not stack
+      // another 口座残高 on top of the one the previous run created.
+      const existingCash = (await repos.asset.getAll()).filter((a) => a.categoryId === cash.id);
+      if (existingCash.length === 0) {
+        await repos.asset.add({
+          categoryId: cash.id,
+          name: '口座残高',
+          // Whole yen: the column is NUMERIC(14,2) but every screen and the
+          // input schema treat holdings as integers.
+          value: Math.round(oldBalance),
+        });
       }
 
       // --- categories -----------------------------------------------------
@@ -209,7 +229,7 @@ async function main(): Promise<void> {
       }
 
       console.log(
-        `imported: ${settings.length} settings, ${categories.length} categories, ` +
+        `imported: balance ¥${Math.round(oldBalance).toLocaleString()}, ${categories.length} categories, ` +
           `${templates.length} templates, ${amounts.length} amounts, ` +
           `${actuals.length} actuals, ${snapshots.length} snapshots`,
       );

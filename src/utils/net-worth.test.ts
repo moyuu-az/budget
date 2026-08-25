@@ -1,124 +1,107 @@
 import { describe, it, expect } from 'vitest';
-import { summarizeHoldings } from './net-worth';
-import type { Asset, AssetCategory } from '../types';
+import { cashTotal, findCashCategory, summarizeHoldings, totalAssetValue } from './net-worth';
+import { makeAsset, makeAssetCategory, makeCashAsset, makeCashCategory } from '../test/factories';
 
-const category = (overrides: Partial<AssetCategory> = {}): AssetCategory => ({
-  id: 1,
-  name: 'NISA',
-  color: '#22c55e',
-  sortOrder: 0,
-  fields: [],
-  ...overrides,
+describe('findCashCategory', () => {
+  it('matches on kind, not on the name', () => {
+    // The user may rename 現金 to their bank's name. If the balance were found by
+    // name, doing so would silently forecast from zero.
+    const renamed = makeCashCategory({ name: 'ゆうちょ' });
+    const impostor = makeAssetCategory({ id: 2, name: '現金' });
+
+    expect(findCashCategory([impostor, renamed])?.id).toBe(renamed.id);
+  });
+
+  it('is undefined only when the list has not loaded', () => {
+    expect(findCashCategory([])).toBeUndefined();
+  });
 });
 
-const asset = (overrides: Partial<Asset> = {}): Asset => ({
-  id: 1,
-  categoryId: 1,
-  name: 'つみたて',
-  value: 1_000_000,
-  fields: {},
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-  ...overrides,
+describe('cashTotal', () => {
+  it('sums only the cash category', () => {
+    const total = cashTotal(
+      [makeCashCategory(), makeAssetCategory()],
+      [
+        makeCashAsset({ id: 1, name: '財布', value: 30_000 }),
+        makeCashAsset({ id: 2, name: '銀行', value: 470_000 }),
+        makeAsset({ id: 3, value: 1_000_000 }),
+      ],
+    );
+
+    // The NISA holding is excluded: this figure is what the forecast spends, and
+    // a NISA position cannot pay next month's rent.
+    expect(total).toBe(500_000);
+  });
+
+  it('is zero before the categories have loaded', () => {
+    // Not an error, and not the sum of everything: an unloaded list must not be
+    // able to forecast from net worth.
+    expect(cashTotal([], [makeAsset({ value: 1_000_000 })])).toBe(0);
+  });
 });
 
 describe('summarizeHoldings', () => {
-  it('keeps cash and assets separate, and reports the total alongside them', () => {
-    // The parts have to survive into the result: the card shows them beside the
-    // total so a double entry is visible instead of hidden inside one number.
-    const result = summarizeHoldings(500_000, [category()], [asset({ value: 1_000_000 })]);
-    expect(result).toMatchObject({ cash: 500_000, assets: 1_000_000, total: 1_500_000 });
+  it('counts cash INSIDE the total, never beside it', () => {
+    // The whole point of the shape. cash + total would double count -- which is
+    // exactly what the previous version did with a separate balance setting.
+    const result = summarizeHoldings(
+      [makeCashCategory(), makeAssetCategory()],
+      [makeCashAsset({ value: 500_000 }), makeAsset({ value: 1_000_000 })],
+    );
+
+    expect(result).toMatchObject({ cash: 500_000, nonCash: 1_000_000, total: 1_500_000 });
   });
 
   it('sums a loan tracked as a negative asset', () => {
     const result = summarizeHoldings(
-      500_000,
-      [category({ id: 2, name: '住宅ローン' })],
-      [asset({ id: 9, categoryId: 2, value: -28_000_000 })],
+      [makeCashCategory(), makeAssetCategory({ id: 2, name: '住宅ローン' })],
+      [makeCashAsset({ value: 500_000 }), makeAsset({ id: 9, categoryId: 2, value: -28_000_000 })],
     );
-    expect(result.assets).toBe(-28_000_000);
+
+    expect(result.nonCash).toBe(-28_000_000);
     expect(result.total).toBe(-27_500_000);
+    // The loan must not reach the balance: the forecast starts from cash.
+    expect(result.cash).toBe(500_000);
   });
 
-  it('groups holdings by category in display order', () => {
+  it('lists the cash category even when it holds nothing', () => {
+    // ¥0 at hand is a fact worth showing. Every OTHER empty category is hidden,
+    // because there "¥0" reads as a figure rather than as "nothing recorded".
     const result = summarizeHoldings(
-      0,
-      [category({ id: 1, sortOrder: 1, name: 'NISA' }), category({ id: 2, sortOrder: 0, name: '現金' })],
-      [
-        asset({ id: 1, categoryId: 1, value: 100 }),
-        asset({ id: 2, categoryId: 1, value: 200 }),
-        asset({ id: 3, categoryId: 2, value: 50 }),
-      ],
+      [makeCashCategory(), makeAssetCategory()],
+      [],
     );
-    expect(result.byCategory.map((c) => [c.name, c.value])).toEqual([
-      ['現金', 50],
-      ['NISA', 300],
-    ]);
+
+    expect(result.byCategory.map((line) => line.name)).toEqual(['現金']);
+    expect(result.byCategory[0]).toMatchObject({ value: 0, isCash: true });
   });
 
-  it('omits a category that holds nothing', () => {
-    // ¥0 reads as a figure rather than as "nothing recorded here yet".
-    const result = summarizeHoldings(0, [category({ id: 1 }), category({ id: 2, name: '現金' })], [
-      asset({ categoryId: 1 }),
-    ]);
-    expect(result.byCategory.map((c) => c.name)).toEqual(['NISA']);
+  it('orders lines by sortOrder, which puts cash first', () => {
+    const result = summarizeHoldings(
+      [makeAssetCategory({ id: 2, name: 'NISA', sortOrder: 0 }), makeCashCategory()],
+      [makeCashAsset(), makeAsset({ categoryId: 2 })],
+    );
+
+    expect(result.byCategory.map((line) => line.name)).toEqual(['現金', 'NISA']);
   });
 
-  it('still counts a holding whose category has vanished from the list', () => {
-    // The category list can be one render behind. Dropping the holding would
-    // make the lines on screen disagree with the total above them.
-    const result = summarizeHoldings(0, [], [asset({ categoryId: 999, value: 700 })]);
-    expect(result.assets).toBe(700);
-    expect(result.byCategory).toEqual([]);
-  });
+  it('reports holdings whose category is missing rather than dropping them', () => {
+    // Happens on a shared ledger: updateAsset refetches the holdings but
+    // deliberately not the categories. The chips must still add up to the total.
+    const result = summarizeHoldings(
+      [makeCashCategory()],
+      [makeCashAsset({ value: 500_000 }), makeAsset({ id: 7, categoryId: 42, value: 250_000 })],
+    );
 
-  it('reports cash alone when nothing is tracked', () => {
-    const result = summarizeHoldings(500_000, [], []);
-    expect(result).toMatchObject({ cash: 500_000, assets: 0, total: 500_000 });
+    expect(result.total).toBe(750_000);
+    expect(result.unlisted).toBe(250_000);
+    const shown = result.byCategory.reduce((sum, line) => sum + line.value, 0);
+    expect(shown + result.unlisted).toBe(result.total);
   });
 });
 
-describe('the parts always add up', () => {
-  it('does not round, so every screen showing the same data agrees', () => {
-    // An earlier version rounded per holding here so the chips would sum
-    // exactly. It made this card disagree with the 資産 screen, which rounds
-    // only for display. Rounding lives at the edge (utils/currency.ts) and
-    // whole-yen values are enforced at the input instead.
-    const result = summarizeHoldings(0, [category()], [asset({ value: 100 })]);
-    expect(result.assets).toBe(100);
-    expect(result.total).toBe(100);
-  });
-
-  it('keeps the chips summing to the asset total', () => {
-    const result = summarizeHoldings(
-      0,
-      [category()],
-      [asset({ id: 1, value: 100 }), asset({ id: 2, value: 250 })],
-    );
-    const chips = result.byCategory.reduce((sum, line) => sum + line.value, 0);
-    expect(chips + result.other).toBe(result.assets);
-  });
-
-  it('reports holdings whose category is not loaded as その他', () => {
-    // Reachable: a shared ledger where the other member added a category this
-    // client has not fetched. Dropping them would make the chips quietly fail
-    // to reach the asset total.
-    const result = summarizeHoldings(
-      0,
-      [category({ id: 1 })],
-      [asset({ id: 1, categoryId: 1, value: 100 }), asset({ id: 2, categoryId: 99, value: 40 })],
-    );
-    expect(result.other).toBe(40);
-    expect(result.byCategory.reduce((s, l) => s + l.value, 0) + result.other).toBe(result.assets);
-  });
-
-  it('reports nothing extra when every holding has its category', () => {
-    const result = summarizeHoldings(0, [category()], [asset({ value: 100 })]);
-    expect(result.other).toBe(0);
-  });
-
-  it('keeps 残高 ＋ 資産 ＝ 純資産 exact', () => {
-    const result = summarizeHoldings(500_000, [category()], [asset({ value: 100 })]);
-    expect(result.cash + result.assets).toBe(result.total);
+describe('totalAssetValue', () => {
+  it('is the sum of the values it is given', () => {
+    expect(totalAssetValue([{ value: 1 }, { value: 2 }, { value: -3 }])).toBe(0);
   });
 });

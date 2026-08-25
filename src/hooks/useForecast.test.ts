@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { useForecast } from './useForecast';
 import { useDashboardKpis } from './useDashboardKpis';
-import { useBalanceStore } from '../stores/useBalanceStore';
 import { useTemplateStore } from '../stores/useTemplateStore';
 import { useAssetStore } from '../stores/useAssetStore';
 import { useUIStore } from '../stores/useUIStore';
+import { makeAsset, makeAssetCategory, makeCashAsset, makeCashCategory } from '../test/factories';
 import type { Asset, EntryTemplate } from '../types';
 
 const rent: EntryTemplate = {
@@ -21,29 +21,31 @@ const rent: EntryTemplate = {
   updatedAt: '2026-01-01T00:00:00Z',
 };
 
-const nisa: Asset = {
-  id: 1,
-  categoryId: 1,
-  name: 'つみたて',
-  // Deliberately enormous: if it ever reached the forecast, every figure would
-  // move by an amount no rounding could hide.
-  value: 50_000_000,
-  fields: {},
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
+// Deliberately enormous: if it ever reached the forecast, every figure would
+// move by an amount no rounding could hide.
+const nisa: Asset = makeAsset({ id: 1, categoryId: 1, name: 'つみたて', value: 50_000_000 });
+
+/** The cash the forecast is allowed to start from, and nothing else. */
+const cashOnly = (): void => {
+  useAssetStore.setState({
+    categories: [makeCashCategory()],
+    assets: [makeCashAsset({ value: 300_000 })],
+    loading: false,
+  });
 };
 
-const withAssets = (): void => {
+/** The same cash, plus a NISA position the forecast must ignore. */
+const withNonCashAssets = (): void => {
   useAssetStore.setState({
-    categories: [{ id: 1, name: 'NISA', color: null, sortOrder: 0, fields: [] }],
-    assets: [nisa],
+    categories: [makeCashCategory(), makeAssetCategory({ id: 1 })],
+    assets: [makeCashAsset({ value: 300_000 }), nisa],
+    loading: false,
   });
 };
 
 beforeEach(() => {
-  useBalanceStore.setState({ balance: 300_000 });
   useTemplateStore.setState({ templates: [rent] });
-  useAssetStore.setState({ categories: [], assets: [], loading: false });
+  cashOnly();
   useUIStore.setState({ holdingsView: 'cash' });
 });
 
@@ -64,7 +66,7 @@ describe('the forecast is cash, and only cash', () => {
     const { result, rerender } = renderHook(() => useForecast(90));
     const withoutAssets = result.current;
 
-    act(withAssets);
+    act(withNonCashAssets);
     rerender();
 
     expect(result.current).toEqual(withoutAssets);
@@ -73,7 +75,7 @@ describe('the forecast is cash, and only cash', () => {
   it('does not move when the holdings lens changes', () => {
     // Catches contamination that reads the toggle. The lens is a display
     // choice; a NISA position cannot pay next month's rent.
-    withAssets();
+    withNonCashAssets();
     const { result, rerender } = renderHook(() => useForecast(90));
     const asCash = result.current;
 
@@ -85,11 +87,26 @@ describe('the forecast is cash, and only cash', () => {
     expect(result.current).toEqual(asCash);
   });
 
-  it('starts from the account balance', () => {
-    withAssets();
+  it('starts from the cash holdings, not from the asset total', () => {
+    withNonCashAssets();
     const { result } = renderHook(() => useForecast(90));
 
+    // 300,000 -- not 50,300,000. This is the assertion that would have caught
+    // someone reaching for totalAssetValue(assets) instead of useCashBalance().
     expect(result.current[0].balance).toBe(300_000);
+  });
+
+  it('follows an edit to a cash holding', () => {
+    // The balance is no longer a stored figure: editing 現金 on the 資産 screen
+    // IS editing the forecast's starting point, in the same render.
+    const { result, rerender } = renderHook(() => useForecast(90));
+
+    act(() => {
+      useAssetStore.setState({ assets: [makeCashAsset({ value: 450_000 })] });
+    });
+    rerender();
+
+    expect(result.current[0].balance).toBe(450_000);
   });
 });
 
@@ -100,14 +117,14 @@ describe('every dashboard KPI inherits that', () => {
     const { result, rerender } = renderHook(() => useDashboardKpis());
     const withoutAssets = { ...result.current };
 
-    act(withAssets);
+    act(withNonCashAssets);
     rerender();
 
     expect(result.current).toEqual(withoutAssets);
   });
 
   it('projects a floor below the balance, nowhere near the asset total', () => {
-    withAssets();
+    withNonCashAssets();
     const { result } = renderHook(() => useDashboardKpis());
 
     expect(result.current.minBalance90d).toBeLessThan(300_000);

@@ -55,11 +55,27 @@ export interface TestDb {
   stop(): Promise<void>;
 }
 
-export async function startTestDb(): Promise<TestDb> {
+export interface StartTestDbOptions {
+  /**
+   * Where to read migrations from. Defaults to the real directory.
+   *
+   * A test that needs the schema as it stood at some earlier version points this
+   * at a directory holding only the migrations up to that point, then applies
+   * the rest itself -- which is the only way to exercise a migration that MOVES
+   * DATA rather than only changing shapes.
+   */
+  migrationsDir?: string;
+}
+
+export function migrationsDir(): string {
+  return path.join(process.cwd(), 'server', 'db', 'migrations');
+}
+
+export async function startTestDb(options: StartTestDbOptions = {}): Promise<TestDb> {
   const container: StartedPostgreSqlContainer = await new PostgreSqlContainer(IMAGE).start();
 
   const adminPool = createPool({ connectionString: container.getConnectionUri(), max: 4 });
-  await migrate(adminPool, path.join(process.cwd(), 'server', 'db', 'migrations'));
+  await migrate(adminPool, options.migrationsDir ?? migrationsDir());
 
   // The role the "application" uses. NOSUPERUSER/NOBYPASSRLS are the defaults
   // for CREATE ROLE and are spelled out here because they are the entire point.

@@ -8,6 +8,7 @@ import {
   validateFieldDefs,
   validateFieldValues,
 } from '../../shared/asset-fields';
+import { CASH_CATEGORY_DEFAULTS } from '../../shared/asset-templates';
 import type { AssetCategoryRow, AssetRow } from './row-types';
 import { rowToAssetCategory } from '../mappers';
 import { buildSetClause } from './sql';
@@ -113,12 +114,66 @@ export function createAssetCategoryRepository(
     }
   }
 
+  async function selectAll(): Promise<AssetCategoryRow[]> {
+    const { rows } = await client.query<AssetCategoryRow>(
+      'SELECT * FROM asset_categories ORDER BY sort_order ASC, id ASC',
+    );
+    return rows;
+  }
+
+  /**
+   * Makes sure this ledger has its cash category, and returns the list again.
+   *
+   * WHY A READ PROVISIONS
+   *   `kind: 'cash'` is a guarantee the whole application leans on -- it is where
+   *   「現在の残高」 comes from, and a ledger without it would show a balance of
+   *   zero and forecast from zero. Guarantees that matter that much should not
+   *   depend on every creation path remembering to seed.
+   *
+   *   And there are several such paths: the auth layer provisions a shared
+   *   ledger and a personal one, scripts/import-sqlite.ts creates one per
+   *   imported database, the tests create their own. Seeding at creation means
+   *   four places to keep correct, and the failure mode of missing one is a
+   *   household whose money has vanished from the dashboard.
+   *
+   *   Ensuring it HERE means there is one place, it cannot be skipped, and it
+   *   repairs a ledger that predates the guarantee rather than only preventing
+   *   new ones. This mirrors what the auth layer already does with users and
+   *   ledgers: provision just in time, on first sight.
+   *
+   *   The cost is that a GET writes -- but only on the first call for a ledger
+   *   that lacks the row, and never after. The normal path is one SELECT and
+   *   nothing else, because the check reads the rows already fetched.
+   *
+   * CONCURRENCY
+   *   Two requests for the same fresh ledger can both find no cash category. The
+   *   partial unique index (migration 004) turns the loser's insert into a
+   *   no-op instead of an error, and the re-read afterwards gives both callers
+   *   the same single row.
+   */
+  async function provisionCashCategory(): Promise<AssetCategoryRow[]> {
+    await client.query(
+      `INSERT INTO asset_categories (ledger_id, name, color, sort_order, fields, kind)
+         VALUES ($1, $2, $3, $4, $5, 'cash')
+       ON CONFLICT (ledger_id) WHERE kind = 'cash' DO NOTHING`,
+      [
+        ledgerId,
+        CASH_CATEGORY_DEFAULTS.name,
+        CASH_CATEGORY_DEFAULTS.color,
+        CASH_CATEGORY_DEFAULTS.sortOrder,
+        encodeFields(CASH_CATEGORY_DEFAULTS.fields),
+      ],
+    );
+    return selectAll();
+  }
+
   return {
     async getAll() {
-      const { rows } = await client.query<AssetCategoryRow>(
-        'SELECT * FROM asset_categories ORDER BY sort_order ASC, id ASC',
-      );
-      return rows.map(rowToAssetCategory);
+      const rows = await selectAll();
+      const complete = rows.some((row) => row.kind === 'cash')
+        ? rows
+        : await provisionCashCategory();
+      return complete.map(rowToAssetCategory);
     },
 
     async add(input) {
@@ -162,9 +217,29 @@ export function createAssetCategoryRepository(
     },
 
     async remove(id) {
+      // The cash category is the account balance. Deleting it would take every
+      // cash holding with it (the cascade below), leaving the household with a
+      // balance of zero and a forecast to match -- and getAll() would provision
+      // a fresh empty one on the next page load, so the loss would look like the
+      // app simply forgot.
+      //
+      // Refused here rather than only in the UI: the UI hides the button, but
+      // the method is reachable, and this is the invariant every reader of
+      // `kind: 'cash'` depends on.
+      const { rows } = await client.query<Pick<AssetCategoryRow, 'kind'>>(
+        'SELECT kind FROM asset_categories WHERE id = $1',
+        [id],
+      );
+      if (rows[0]?.kind === 'cash') {
+        throw new ValidationError('現金は残高そのものなので削除できません');
+      }
+
       // Holdings cascade from the composite foreign key on assets: an orphaned
       // holding would carry parameter values with no definitions to read them
       // by. The UI says how many will go before asking to confirm.
+      //
+      // No row means another ledger's id (row-level security hides it) or one
+      // already gone; both leave this a silent no-op, as DELETE always was.
       await client.query('DELETE FROM asset_categories WHERE id = $1', [id]);
     },
   };

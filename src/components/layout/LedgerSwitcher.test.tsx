@@ -5,7 +5,8 @@ import LedgerSwitcher from './LedgerSwitcher';
 import { setApi } from '../../lib/api';
 import { createMockApi } from '../../test/mock-api';
 import { useSessionStore } from '../../stores/useSessionStore';
-import { useBalanceStore } from '../../stores/useBalanceStore';
+import { useAssetStore } from '../../stores/useAssetStore';
+import { makeCashAsset } from '../../test/factories';
 import type { AppApi, Session } from '../../types';
 
 const TWO_LEDGERS: Session = {
@@ -61,12 +62,14 @@ describe('LedgerSwitcher', () => {
 
   it('switches the ledger and reloads the data behind it', async () => {
     useSessionStore.getState().setSession(TWO_LEDGERS);
-    (api.getBalance as ReturnType<typeof vi.fn>).mockResolvedValue(50_000);
+    (api.getAssets as ReturnType<typeof vi.fn>).mockResolvedValue([
+      makeCashAsset({ value: 50_000 }),
+    ]);
 
     render(<LedgerSwitcher />);
     await userEvent.selectOptions(screen.getByRole('combobox'), '20');
 
     expect(useSessionStore.getState().activeLedgerId).toBe(20);
-    await vi.waitFor(() => expect(useBalanceStore.getState().balance).toBe(50_000));
+    await vi.waitFor(() => expect(useAssetStore.getState().assets).toHaveLength(1));
   });
 });

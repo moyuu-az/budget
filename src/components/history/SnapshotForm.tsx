@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useSnapshotStore } from '../../stores/useSnapshotStore';
-import { useBalanceStore } from '../../stores/useBalanceStore';
+import { useCashBalance } from '../../hooks/useCashBalance';
 import { useToastStore } from '../../stores/useToastStore';
 import { parseCommaNumber, handleCurrencyInput } from '../../utils/currency';
 
@@ -16,7 +16,7 @@ interface Props {
 
 function SnapshotForm({ onSuccess }: Props) {
   const { addSnapshot } = useSnapshotStore();
-  const { balance: currentBalance, setBalance } = useBalanceStore();
+  const currentBalance = useCashBalance();
   const { addToast } = useToastStore();
 
   const [date, setDate] = useState(() => {
@@ -39,6 +39,16 @@ function SnapshotForm({ onSuccess }: Props) {
     setSaving(false);
   };
 
+  /**
+   * Records a balance for a chosen date -- history, not the current figure.
+   *
+   * It deliberately does NOT change 現在の残高. That number is the sum of the
+   * cash holdings on the 資産 screen, and there is no answer here to "which
+   * holding changed?" -- this form's date is usually in the past, where the
+   * question does not even apply. Writing a past figure into today's cash was
+   * what the old version did, and it silently rewrote the forecast's starting
+   * point every time someone filled in a missing month.
+   */
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const parsed = parseCommaNumber(balanceInput);
@@ -46,13 +56,12 @@ function SnapshotForm({ onSuccess }: Props) {
 
     setSaving(true);
     try {
-      await setBalance(parsed);
       await addSnapshot(date, parsed);
       setBalanceInput('');
-      addToast('残高を更新しました', 'success');
+      addToast('残高を記録しました', 'success');
       onSuccess?.();
     } catch {
-      addToast('更新に失敗しました', 'error');
+      addToast('記録に失敗しました', 'error');
     }
     setSaving(false);
   };
@@ -87,7 +96,10 @@ function SnapshotForm({ onSuccess }: Props) {
         transition={{ duration: 0.3, delay: 0.1 }}
         className="glass rounded-2xl p-6"
       >
-        <h2 className="text-lg font-semibold text-white mb-4">残高を更新</h2>
+        <h2 className="text-lg font-semibold text-white mb-2">過去の残高を記録</h2>
+        <p className="text-xs text-slate-400 mb-4">
+          記録するだけで、現在の残高は変わりません。現在の残高は資産の「現金」から計算されます。
+        </p>
         <form onSubmit={handleManualSubmit} className="flex items-end gap-3">
           <div>
             <label className="block text-xs text-slate-400 mb-1">日付</label>
@@ -122,7 +134,7 @@ function SnapshotForm({ onSuccess }: Props) {
               border: '1px solid rgba(139, 92, 246, 0.3)',
             }}
           >
-            更新
+            記録
           </button>
         </form>
       </motion.div>
