@@ -360,6 +360,39 @@ describe('resetting to defaults', () => {
     expect(api.getMonthlyAmounts).toHaveBeenCalledWith('2026-06');
   });
 
+  it('shows what actually survived a partial failure, not what it hoped', async () => {
+    // THE POINT OF THE `force` ON THAT RE-READ, and what the toast assertion
+    // above cannot see.
+    //
+    // The month is still marked 'ready' after the optimistic deletes, so an
+    // ordinary fetch is deduplicated away -- the screen would keep the values it
+    // cleared on the way out and quietly disagree with the database. Which rows
+    // survived is only knowable from the server, so the figure it returns is
+    // what has to end up on screen.
+    const user = userEvent.setup();
+    api.getMonthlyAmounts = vi
+      .fn()
+      // The month as it loads: an override of ¥90,000.
+      .mockResolvedValueOnce([
+        { id: 1, templateId: 1, yearMonth: '2026-06', amount: 90_000, createdAt: '' },
+      ])
+      // The re-read after the reset partially failed: 家賃's delete was rejected,
+      // so its override is still there -- and now says ¥77,000, a figure that
+      // can only have come from the server.
+      .mockResolvedValue([
+        { id: 1, templateId: 1, yearMonth: '2026-06', amount: 77_000, createdAt: '' },
+      ]);
+    api.deleteMonthlyAmount = vi.fn().mockRejectedValue(new Error('nope'));
+    useTemplateStore.setState({ templates: [RENT] });
+    render(<EntriesView />);
+    await vi.waitFor(() => expect(expenseTotal()).toBe(90_000));
+
+    await user.click(screen.getByRole('button', { name: 'デフォルトにリセット' }));
+    await user.click(await screen.findByRole('button', { name: 'リセット' }));
+
+    await vi.waitFor(() => expect(expenseTotal()).toBe(77_000));
+  });
+
   it('says so when every row was reset', async () => {
     const user = userEvent.setup();
     api.getMonthlyAmounts = vi.fn().mockResolvedValueOnce([

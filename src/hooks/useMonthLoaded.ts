@@ -1,7 +1,9 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useSessionStore } from '../stores/useSessionStore';
-import { monthStatusOf, rangeStatusOf, useMonthlyStore } from '../stores/useMonthlyStore';
-import type { LoadStatus } from '../stores/load-status';
+import {
+  halfStatusOf, monthStatusOf, monthsInRange, rangeStatusOf, useMonthlyStore,
+} from '../stores/useMonthlyStore';
+import { combineStatus, type LoadStatus } from '../stores/load-status';
 
 // ---------------------------------------------------------------------------
 // "Make sure this month's figures are loaded, for the ledger that is open now."
@@ -22,8 +24,11 @@ import type { LoadStatus } from '../stores/load-status';
 // which makes that a spinner across the whole application until the user
 // happens to open 収支管理.
 //
-// The dependency that was missing is the LEDGER. It lives here once, so a panel
-// added later gets it by using this hook rather than by remembering.
+// The dependency that was missing is the LEDGER. It lives in this file once --
+// twice, strictly: a single month and a range of them are two different fetches,
+// so there are two hooks. Between them they are the ONLY places in the
+// application that load per-month figures, and a panel added later gets the
+// ledger by using one of them rather than by remembering.
 //
 // (SettingsView solves the same problem for MinBalanceSetting with
 // `key={activeLedgerId}`, remounting the component. That works, but it is a
@@ -92,7 +97,68 @@ export function useMonthLoaded(yearMonth: string, options: Options = {}): MonthL
   return {
     status: actuals
       ? monthStatusOf(monthStatus, yearMonth)
-      : rangeStatusOf(monthStatus, [yearMonth], 'amounts'),
+      : halfStatusOf(monthStatus, yearMonth, 'amounts'),
+    retry,
+  };
+}
+
+/**
+ * The same guarantee for a RANGE of months.
+ *
+ * Separate from useMonthLoaded rather than folded into it because the fetches
+ * are different endpoints, not the same one in a loop -- one request for the
+ * whole span is the point of them.
+ *
+ * `actualsEndMonth` is optional and, when given, loads the recorded actuals for
+ * `startMonth`..`actualsEndMonth`. It is a separate end because the two spans
+ * genuinely differ: 分析 plots planned figures into the FUTURE and actuals only
+ * up to today, and asking for actuals nobody records for next March would leave
+ * the view waiting forever.
+ *
+ * Scalars rather than a tuple, so the dependency lists compare by value. A
+ * `[start, end]` array built inline is a new identity on every render, which
+ * would re-run the effect every time and lean on deduplication to stay quiet.
+ */
+export function useMonthRangeLoaded(
+  startMonth: string,
+  endMonth: string,
+  actualsEndMonth?: string,
+): MonthLoad {
+  const activeLedgerId = useSessionStore((s) => s.activeLedgerId);
+
+  const monthStatus = useMonthlyStore((s) => s.monthStatus);
+  const fetchAmounts = useMonthlyStore((s) => s.fetchMonthlyAmountsRange);
+  const fetchActuals = useMonthlyStore((s) => s.fetchActualsRange);
+
+  const load = useCallback(
+    async (force: boolean) => {
+      await Promise.all([
+        fetchAmounts(startMonth, endMonth, force),
+        actualsEndMonth === undefined
+          ? Promise.resolve()
+          : fetchActuals(startMonth, actualsEndMonth, force),
+      ]);
+    },
+    [startMonth, endMonth, actualsEndMonth, fetchAmounts, fetchActuals],
+  );
+
+  useEffect(() => {
+    void load(false);
+  }, [load, activeLedgerId]);
+
+  const retry = useCallback(() => load(true), [load]);
+
+  const months = useMemo(() => monthsInRange(startMonth, endMonth), [startMonth, endMonth]);
+  const actualMonths = useMemo(
+    () => (actualsEndMonth === undefined ? [] : monthsInRange(startMonth, actualsEndMonth)),
+    [startMonth, actualsEndMonth],
+  );
+
+  return {
+    status: combineStatus(
+      rangeStatusOf(monthStatus, months, 'amounts'),
+      rangeStatusOf(monthStatus, actualMonths, 'actuals'),
+    ),
     retry,
   };
 }

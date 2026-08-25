@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useForecast } from './useForecast';
-import { monthsInRange, rangeStatusOf, useMonthlyStore } from '../stores/useMonthlyStore';
+import { monthsInRange } from '../stores/useMonthlyStore';
 import { useSettingsStore } from '../stores/useSettingsStore';
 import { combineStatus, type LoadStatus } from '../stores/load-status';
 import { loadLedgerData } from '../app/ledger';
 import { toYearMonth } from '../utils/forecast';
 import type { ForecastPoint } from '../types';
+import { useMonthRangeLoaded } from './useMonthLoaded';
 
 // ---------------------------------------------------------------------------
 // ONE READINESS FOR THE WHOLE DASHBOARD.
@@ -66,7 +67,6 @@ export interface DashboardReadiness {
 export function useDashboardReadiness(days: number): DashboardReadiness {
   const { status: forecastStatus, points } = useForecast(days);
   const settingsStatus = useSettingsStore((s) => s.status);
-  const monthStatus = useMonthlyStore((s) => s.monthStatus);
 
   // The months the projection spans. Derived from `days` rather than from the
   // points, because the points are EMPTY until the forecast is ready -- reading
@@ -77,22 +77,22 @@ export function useDashboardReadiness(days: number): DashboardReadiness {
     return monthsInRange(toYearMonth(today), toYearMonth(end));
   }, [days]);
 
-  const fetchRange = useMonthlyStore((s) => s.fetchMonthlyAmountsRange);
   const start = months[0];
   const end = months[months.length - 1];
 
-  useEffect(() => {
-    void fetchRange(start, end);
-  }, [fetchRange, start, end]);
+  // Through the shared hook, which carries the ACTIVE LEDGER in its
+  // dependencies. Without that, switching ledgers empties every per-month status
+  // and a `[fetch, start, end]` effect never runs again -- so 残高予測 /
+  // 最低残高予測 / 今後の予定 would hold their skeletons for as long as the user
+  // stayed on the dashboard, which is where the ledger switcher lives.
+  const { status: amountsStatus, retry: retryRange } = useMonthRangeLoaded(start, end);
 
-  // `force`, because after a failure the months are marked 'error' and the
-  // ordinary call would still have to decide whether to try again. Pressing
-  // 再読み込み is that decision.
+  // Paired with loadLedgerData: this panel needs the templates and the settings
+  // too, and 再読み込み has to mean all of it, not the half this hook owns.
   const retry = useCallback(async () => {
-    await Promise.all([loadLedgerData(), fetchRange(start, end, true)]);
-  }, [fetchRange, start, end]);
+    await Promise.all([loadLedgerData(), retryRange()]);
+  }, [retryRange]);
 
-  const amountsStatus = rangeStatusOf(monthStatus, months, 'amounts');
   const status = combineStatus(forecastStatus, settingsStatus, amountsStatus);
 
   return useMemo(

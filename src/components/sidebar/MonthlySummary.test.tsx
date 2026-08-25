@@ -44,9 +44,6 @@ beforeEach(() => {
 
 afterEach(() => {
   setApi(null);
-});
-
-afterEach(() => {
   vi.useRealTimers();
 });
 

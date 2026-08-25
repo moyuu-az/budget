@@ -50,7 +50,8 @@ interface MonthlyState {
    * fetch, showing a wrong number on the way to the right one.
    */
   forgetAmountsOutside: (templateId: number, recurrence: Recurrence) => void;
-  fetchActualsRange: (startMonth: string, endMonth: string) => Promise<void>;
+  /** See fetchMonthlyAmounts for the deduplication rule; identical. */
+  fetchActualsRange: (startMonth: string, endMonth: string, force?: boolean) => Promise<void>;
   /**
    * Loads one month's planned overrides.
    *
@@ -59,9 +60,8 @@ interface MonthlyState {
    * per breakpoint) and 収支管理 may be asking for the same month beside it, so
    * an un-deduplicated fetch here sends the identical request three times.
    *
-   * 'error' is NOT skipped. Two callers use one callback for both the first
-   * load and their retry button (SankeyChart, useMonthlyVariance); skipping a
-   * failed month would make that button a no-op that looks like it worked.
+   * 'error' is NOT skipped -- see isSettled for why; it is about remounts, not
+   * about the retry buttons.
    *
    * `force` is for a caller that knows the cached month is stale -- after a
    * write that partially failed, where 'ready' is true and wrong.
@@ -118,15 +118,30 @@ const IDLE_MONTH: MonthFetchStatus = { amounts: 'idle', actuals: 'idle' };
  *
  * The deduplication predicate, defined once so the single-month fetchers and
  * the range fetcher cannot drift into disagreeing about what "already asked
- * for" means. 'error' is deliberately NOT settled: a failed month is one a
- * retry must be able to ask for again.
+ * for" means.
+ *
+ * WHY 'error' IS NOT SETTLED
+ *   Not because of the retry buttons -- every one of those passes `force`, so
+ *   they would work either way. It is about the asks nobody presses a button
+ *   for:
+ *
+ *     - a panel that failed and is then REMOUNTED (leaving the view and coming
+ *       back, which is how App.tsx renders) asks again on mount. Settling
+ *       'error' would make one failed fetch stick for the rest of the session,
+ *       with a retry button as the only way out of a screen the user may have
+ *       already walked away from
+ *     - the second copy of a panel mounted after the first one failed, which the
+ *       two-shell layout produces
+ *
+ *   Both are ordinary "please load this" calls, and both are exactly when
+ *   asking again is right.
  */
 function isSettled(
   monthStatus: ReadonlyMap<string, MonthFetchStatus>,
   yearMonth: string,
   half: keyof MonthFetchStatus,
 ): boolean {
-  const status = (monthStatus.get(yearMonth) ?? IDLE_MONTH)[half];
+  const status = halfStatusOf(monthStatus, yearMonth, half);
   return status === 'ready' || status === 'loading';
 }
 
@@ -205,11 +220,20 @@ export function rangeStatusOf(
 ): LoadStatus {
   let sawPending = false;
   for (const yearMonth of months) {
-    const status = (monthStatus.get(yearMonth) ?? IDLE_MONTH)[half];
+    const status = halfStatusOf(monthStatus, yearMonth, half);
     if (status === 'error') return 'error';
     if (status !== 'ready') sawPending = true;
   }
   return sawPending ? 'loading' : 'ready';
+}
+
+/** How far ONE half of ONE month has got. 'idle' included, unlike the two above. */
+export function halfStatusOf(
+  monthStatus: ReadonlyMap<string, MonthFetchStatus>,
+  yearMonth: string,
+  half: keyof MonthFetchStatus,
+): LoadStatus {
+  return (monthStatus.get(yearMonth) ?? IDLE_MONTH)[half];
 }
 
 export { monthsInRange };
@@ -295,9 +319,14 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
       return changed ? { monthlyAmountsMap: next } : state;
     }),
 
-  fetchActualsRange: async (startMonth: string, endMonth: string) => {
-    const tag = currentGeneration();
+  fetchActualsRange: async (startMonth: string, endMonth: string, force = false) => {
     const months = monthsInRange(startMonth, endMonth);
+    if (!force) {
+      const current = get().monthStatus;
+      if (months.every((month) => isSettled(current, month, 'actuals'))) return;
+    }
+
+    const tag = currentGeneration();
     set({ loading: true, monthStatus: setHalf(get().monthStatus, months, 'actuals', 'loading') });
     try {
       const actuals = await getApi().getMonthlyActualsRange(startMonth, endMonth);
@@ -493,7 +522,18 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
         monthMap.set(a.templateId, a.amount);
       }
       newMap.set(toMonth, monthMap);
-      return applyIfCurrent(tag, () => set({ monthlyAmountsMap: newMap, loading: false }));
+      // The STATUS too, not only the map. This writes a month's amounts without
+      // going through fetchMonthlyAmounts, so leaving the status at 'idle' would
+      // produce a month that has data and does not know it -- and the next panel
+      // to mount would fetch it again for nothing, having been told it was never
+      // asked for.
+      return applyIfCurrent(tag, () =>
+        set({
+          monthlyAmountsMap: newMap,
+          loading: false,
+          monthStatus: setHalf(get().monthStatus, toMonth, 'amounts', 'ready'),
+        }),
+      );
     } catch (e) {
       // Covers BOTH failures deliberately: the copy itself, and the re-fetch
       // that proves what landed. A copy that succeeded but could not be read

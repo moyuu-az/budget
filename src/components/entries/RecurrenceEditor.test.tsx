@@ -236,6 +236,13 @@ describe('bounds', () => {
    * there. An earlier version of these tests used fireEvent directly and was
    * therefore vacuous: all five "malformed" values arrived as '' and would have
    * been rejected by any guard at all, including the one being replaced.
+   *
+   * WHY READING THE FIELD BACK AFTERWARDS IS STILL AN ASSERTION, not this
+   * helper reading its own plant: React's `restoreControlledState` OVERWRITES
+   * that own property after the event whenever the handler leaves the rendered
+   * value unchanged. Seeing the typed text survive is therefore evidence that
+   * the component buffered it. Remove the buffer and the assertion fails --
+   * which is what the mutation run confirmed.
    */
   function typeAsTextFallback(input: HTMLElement, raw: string): void {
     Object.defineProperty(input, 'value', { value: raw, configurable: true, writable: true });
