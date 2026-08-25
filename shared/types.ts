@@ -3,8 +3,10 @@
 // to pull into BOTH the server and the browser bundle.
 
 import type { AssetFieldDef, AssetFieldValues } from './asset-fields';
+import type { Recurrence } from './recurrence';
 
 export type { AssetFieldDef, AssetFieldType, AssetFieldValue, AssetFieldValues } from './asset-fields';
+export type { Recurrence, RecurrenceKind, YearMonth, IsoDate } from './recurrence';
 
 // --- Category ---
 
@@ -49,10 +51,25 @@ export interface CategoryInput {
 }
 
 // --- EntryTemplate ---
+//
+// WHEN AN ENTRY HAPPENS IS A `Recurrence`, NOT A DAY NUMBER.
+//
+// This carried `dayOfMonth: number` until migration 005, which made every
+// planned entry implicitly monthly. The expenses a household is actually caught
+// out by are the ones that skip months -- 車検, 固定資産税, a year-paid premium,
+// a trip -- and they had nowhere to live.
+//
+// Replacing the field rather than adding beside it is deliberate. Two ways to
+// say "the 25th" would mean every reader choosing one, and the five places that
+// total a month would drift apart over which. Removing it makes each of those a
+// compile error, which is how they were all found.
+//
+// See shared/recurrence.ts for the variants and for the ONE predicate that
+// answers whether an entry falls in a given month.
 export interface EntryTemplate {
   id: number;
   name: string;
-  dayOfMonth: number;
+  recurrence: Recurrence;
   type: 'income' | 'expense';
   enabled: boolean;
   sortOrder: number;
@@ -64,7 +81,7 @@ export interface EntryTemplate {
 
 export interface EntryTemplateInput {
   name: string;
-  dayOfMonth: number;
+  recurrence: Recurrence;
   type: 'income' | 'expense';
   categoryId?: number | null;
   defaultAmount?: number;

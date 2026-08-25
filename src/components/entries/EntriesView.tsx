@@ -5,10 +5,12 @@ import { useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
 import { useCategoryStore } from '../../stores/useCategoryStore';
 import { useToastStore } from '../../stores/useToastStore';
 import { toYearMonth } from '../../utils/forecast';
+import { occursInMonth } from '../../../shared/recurrence';
 import { summarizeExpenseByCostType } from '../../utils/cost-type';
 import MonthNavigator from './MonthNavigator';
 import TemplateActions from './TemplateActions';
 import CategoryGroupList from './CategoryGroupList';
+import DormantEntries from './DormantEntries';
 import CostTypeSummary from './CostTypeSummary';
 import TemplateEditor from './TemplateEditor';
 import ConfirmDialog from '../shared/ConfirmDialog';
@@ -35,28 +37,53 @@ function EntriesView() {
     fetchMonthlyActuals(currentYearMonth);
   }, [currentYearMonth, fetchMonthlyAmounts, fetchMonthlyActuals]);
 
+  // WHICH ENTRIES BELONG TO THE MONTH ON SCREEN.
+  //
+  // Since migration 005 an entry can skip months -- a yearly premium, a
+  // bimonthly bill, a one-off trip. `enabled` no longer means "counts this
+  // month", so every figure below is built from `occurring` rather than from
+  // the whole list. Getting this wrong shows a household twelve car
+  // inspections a year.
+  //
+  // The ones that do NOT occur are kept rather than discarded: they still need
+  // to be editable from any month (otherwise a yearly bill is only reachable
+  // in the one month it lands), and showing them in their own section is what
+  // makes their ABSENCE from the totals visible instead of mysterious.
+  const { occurring, dormant } = useMemo(() => {
+    const occurring: typeof templates = [];
+    const dormant: typeof templates = [];
+    for (const template of templates) {
+      (occursInMonth(template.recurrence, currentYearMonth) ? occurring : dormant).push(template);
+    }
+    return { occurring, dormant };
+  }, [templates, currentYearMonth]);
+
   // Totals
+  //
+  // `templates` -- the FULL list -- is still what resolveAmount reads, because
+  // it resolves an amount by id and needs every id to be findable. Only the set
+  // being summed is narrowed.
   const totalIncome = useMemo(() => {
-    return templates
+    return occurring
       .filter((t) => t.type === 'income' && t.enabled)
       .reduce((sum, t) => sum + resolveAmount(t.id, currentYearMonth, monthlyAmountsMap, templates), 0);
-  }, [templates, currentYearMonth, monthlyAmountsMap]);
+  }, [occurring, templates, currentYearMonth, monthlyAmountsMap]);
 
   const totalExpense = useMemo(() => {
-    return templates
+    return occurring
       .filter((t) => t.type === 'expense' && t.enabled)
       .reduce((sum, t) => sum + resolveAmount(t.id, currentYearMonth, monthlyAmountsMap, templates), 0);
-  }, [templates, currentYearMonth, monthlyAmountsMap]);
+  }, [occurring, templates, currentYearMonth, monthlyAmountsMap]);
 
   // 固定費 / 変動費 for the month on screen. Built from the SAME amount
   // resolution as totalExpense above, so the parts always add up to the total
   // shown beside them.
   const costBreakdown = useMemo(
     () =>
-      summarizeExpenseByCostType(templates, categories, (t) =>
+      summarizeExpenseByCostType(occurring, categories, (t) =>
         resolveAmount(t.id, currentYearMonth, monthlyAmountsMap, templates),
       ),
-    [templates, categories, currentYearMonth, monthlyAmountsMap],
+    [occurring, templates, categories, currentYearMonth, monthlyAmountsMap],
   );
 
   // Copy from previous month
@@ -153,12 +180,16 @@ function EntriesView() {
         )}
       </AnimatePresence>
 
-      {/* Category groups */}
+      {/* Category groups -- this month's entries only */}
       <CategoryGroupList
-        templates={templates}
+        templates={occurring}
         categories={categories}
         yearMonth={currentYearMonth}
       />
+
+      {/* Entries that exist but do not fall in this month. Collapsed, and
+          explicitly outside the totals above. */}
+      <DormantEntries templates={dormant} yearMonth={currentYearMonth} />
 
       {/* Reset confirm dialog */}
       <ConfirmDialog

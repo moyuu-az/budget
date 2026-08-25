@@ -3,6 +3,7 @@ import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
 import { useToastStore } from '../../stores/useToastStore';
 import { formatWithCommas, handleCurrencyInput, parseCommaNumber } from '../../utils/currency';
+import { describeRecurrenceShort } from '../../../shared/recurrence';
 import TemplateEditor from './TemplateEditor';
 import type { EntryTemplate } from '../../types';
 
@@ -168,7 +169,13 @@ function EntryRow({ template, yearMonth }: Props) {
           <span className={`text-sm truncate ${template.enabled ? 'text-slate-200' : 'text-slate-500'}`}>
             {template.name}
           </span>
-          <span className="text-xs text-slate-500 ml-1.5">{template.dayOfMonth}日</span>
+          {/* When it happens, from the ONE formatter (shared/recurrence.ts).
+              The short form keeps saying 「年1回」/「2ヶ月ごと」 on purpose: a
+              month carrying an annual premium otherwise reads as an unusually
+              bad month rather than an ordinary one with a yearly bill in it. */}
+          <span className="text-xs text-slate-500 ml-1.5">
+            {describeRecurrenceShort(template.recurrence, yearMonth)}
+          </span>
         </div>
 
         {/* Planned amount */}

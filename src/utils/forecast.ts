@@ -1,20 +1,12 @@
 import type { EntryTemplate, MonthlyAmountsMap, MonthSummary, ForecastPoint, ForecastEventDetail } from '../types';
 import { resolveAmount } from '../stores/useMonthlyStore';
+import { occursOn, toIsoDate, toYearMonth } from '../../shared/recurrence';
 
-function getLastDayOfMonth(year: number, month: number): number {
-  return new Date(year, month + 1, 0).getDate();
-}
-
-function formatDate(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-export function toYearMonth(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-}
+// Re-exported rather than redefined. Both used to live here as private copies,
+// and once an entry could skip a month the same clamping and the same
+// local-time formatting had to hold in shared/recurrence.ts too -- at which
+// point two copies is two answers to "which month is this date in".
+export { toYearMonth };
 
 export function generateForecast(
   currentBalance: number,
@@ -33,16 +25,17 @@ export function generateForecast(
     const isToday = i === 0;
     const date = new Date(today);
     date.setDate(today.getDate() + i);
-    const dayOfMonth = date.getDate();
-    const lastDay = getLastDayOfMonth(date.getFullYear(), date.getMonth());
     const yearMonth = toYearMonth(date);
 
     const dayEvents: string[] = [];
     const dayEventDetails: ForecastEventDetail[] = [];
 
     for (const template of enabledTemplates) {
-      const effectiveDay = template.dayOfMonth > lastDay ? lastDay : template.dayOfMonth;
-      if (dayOfMonth === effectiveDay) {
+      // The ONE occurrence test (shared/recurrence.ts). It already handles the
+      // clamp that used to live here -- an entry on the 31st happens on the 28th
+      // of February rather than skipping the month -- and it is the same test the
+      // month totals and the charts run, which is what keeps them agreeing.
+      if (occursOn(template.recurrence, date)) {
         const amount = resolveAmount(template.id, yearMonth, monthlyAmountsMap, templates);
         if (amount > 0) {
           // Only apply balance changes for future days, not today
@@ -65,7 +58,7 @@ export function generateForecast(
     }
 
     points.push({
-      date: formatDate(date),
+      date: toIsoDate(date),
       balance,
       events: dayEvents,
       eventDetails: dayEventDetails,

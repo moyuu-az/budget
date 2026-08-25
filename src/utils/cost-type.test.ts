@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { costTypeLabel, parseCostType, summarizeExpenseByCostType } from './cost-type';
 import type { Category, EntryTemplate } from '../types';
+import { makeTemplate, monthlyOn } from '../test/factories';
 
 const category = (overrides: Partial<Category> = {}): Category => ({
   id: 1,
@@ -12,19 +13,11 @@ const category = (overrides: Partial<Category> = {}): Category => ({
   ...overrides,
 });
 
-const template = (overrides: Partial<EntryTemplate> = {}): EntryTemplate => ({
-  id: 1,
-  name: '家賃',
-  dayOfMonth: 27,
-  type: 'expense',
-  enabled: true,
-  sortOrder: 0,
-  categoryId: 1,
-  defaultAmount: 0,
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-  ...overrides,
-});
+// Delegates to the shared builder; only the defaults these assertions rely on
+// are restated. `categoryId: 1` matches the `category()` above, which is the
+// pairing every test here is about.
+const template = (overrides: Partial<EntryTemplate> = {}): EntryTemplate =>
+  makeTemplate({ recurrence: monthlyOn(27), categoryId: 1, ...overrides });
 
 describe('parseCostType', () => {
   it('maps the select values back to the domain', () => {

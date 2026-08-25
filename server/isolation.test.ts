@@ -7,6 +7,10 @@ import { METHODS, type DataMethod } from './http/api';
 import { UnauthorizedError } from './http/errors';
 import type { IdentityVerifier } from './auth/identity';
 import type { Session } from '../shared/types';
+import type { Recurrence } from '../shared/recurrence';
+
+/** Shorthand for the shape almost every test template has. */
+const monthlyOn = (dayOfMonth: number): Recurrence => ({ kind: 'monthly', dayOfMonth });
 
 // ---------------------------------------------------------------------------
 // The exhaustive tenant-isolation sweep.
@@ -83,7 +87,7 @@ async function seed(as: string, ledgerId: number, tag: string): Promise<Fixture>
 
   const template = (await (
     await post('addTemplate', as, ledgerId, [
-      { name: `${tag}-tpl`, dayOfMonth: 15, type: 'expense', categoryId: category.id, defaultAmount: 1000 },
+      { name: `${tag}-tpl`, recurrence: monthlyOn(15), type: 'expense', categoryId: category.id, defaultAmount: 1000 },
     ])
   ).json()) as { id: number };
 
@@ -156,7 +160,7 @@ const ADVERSARIAL_ARGS: { [M in DataMethod]: (victim: Fixture) => unknown[] } = 
   // Every one of these names an id from the OTHER ledger.
   updateCategory: (v) => [v.categoryId, { name: 'hijacked', color: '#000000' }],
   deleteCategory: (v) => [v.categoryId],
-  addTemplate: (v) => [{ name: 'intruder', dayOfMonth: 1, type: 'expense', categoryId: v.categoryId }],
+  addTemplate: (v) => [{ name: 'intruder', recurrence: monthlyOn(1), type: 'expense', categoryId: v.categoryId }],
   updateTemplate: (v) => [v.templateId, { name: 'hijacked', defaultAmount: 999 }],
   toggleTemplate: (v) => [v.templateId, false],
   deleteTemplate: (v) => [v.templateId],

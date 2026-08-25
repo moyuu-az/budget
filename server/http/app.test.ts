@@ -8,6 +8,10 @@ import { UnauthorizedError } from './errors';
 import type { IdentityVerifier, VerifiedIdentity } from '../auth/identity';
 import type { ErrorEnvelope } from '../../shared/errors';
 import type { Session } from '../../shared/types';
+import type { Recurrence } from '../../shared/recurrence';
+
+/** Shorthand for the shape almost every test template has. */
+const monthlyOn = (dayOfMonth: number): Recurrence => ({ kind: 'monthly', dayOfMonth });
 
 // ---------------------------------------------------------------------------
 // The HTTP boundary: authentication, authorisation, and argument validation.
@@ -259,6 +263,75 @@ describe('cross-site protection', () => {
 });
 
 describe('argument validation', () => {
+  // -------------------------------------------------------------------------
+  // Recurrence, at the trust boundary.
+  //
+  // The request body is untrusted input, and the recurrence is the one argument
+  // whose validity is not expressible as a field-by-field shape check: which
+  // fields are required depends on `kind`, and a one-off's date has to be a day
+  // that EXISTS. Every case below is rejected here with a VALIDATION the user
+  // can read, rather than reaching the database and coming back as a CONFLICT
+  // naming a constraint.
+  // -------------------------------------------------------------------------
+  it.each([
+    ['an unknown kind', { kind: 'weekly', dayOfWeek: 1 }],
+    ['monthly without a day', { kind: 'monthly' }],
+    ['a day outside 1-31', { kind: 'monthly', dayOfMonth: 32 }],
+    ['yearly without a month', { kind: 'yearly', dayOfMonth: 20 }],
+    ['a month outside 1-12', { kind: 'yearly', month: 13, dayOfMonth: 20 }],
+    ['an interval of 1', { kind: 'interval', everyMonths: 1, anchorMonth: '2026-03', dayOfMonth: 10 }],
+    ['an interval without an anchor', { kind: 'interval', everyMonths: 2, dayOfMonth: 10 }],
+    ['a malformed anchor month', { kind: 'interval', everyMonths: 2, anchorMonth: '2026-3', dayOfMonth: 10 }],
+    ['a one-off without a date', { kind: 'once' }],
+    ['a one-off on a date that does not exist', { kind: 'once', date: '2026-02-31' }],
+    ['a recurrence that is not an object', 'monthly'],
+  ])('rejects %s', async (_label, recurrence) => {
+    const alice = await sessionFor(ALICE);
+    const response = await call('addTemplate', {
+      as: ALICE,
+      ledgerId: sharedLedgerOf(alice),
+      args: [{ name: 't', recurrence, type: 'expense' }],
+    });
+
+    expect(response.status).toBe(400);
+    expect((await envelopeOf(response)).code).toBe('VALIDATION');
+  });
+
+  it('drops fields that do not belong to the recurrence rather than storing them', async () => {
+    // A `monthly` carrying a leftover `month` is not a user error worth
+    // refusing -- it is what an older client or a hand-written request sends --
+    // but storing it would violate entry_templates_recurrence_shape_chk. The
+    // schema narrows before the repository ever sees it.
+    const alice = await sessionFor(ALICE);
+    const response = await call('addTemplate', {
+      as: ALICE,
+      ledgerId: sharedLedgerOf(alice),
+      args: [{ name: 't', recurrence: { kind: 'monthly', dayOfMonth: 5, month: 3, everyMonths: 12 }, type: 'expense' }],
+    });
+
+    expect(response.status).toBe(200);
+    expect((await response.json()) as { recurrence: unknown }).toMatchObject({
+      recurrence: { kind: 'monthly', dayOfMonth: 5 },
+    });
+  });
+
+  it('accepts each of the four shapes', async () => {
+    const alice = await sessionFor(ALICE);
+    const shared = sharedLedgerOf(alice);
+    for (const recurrence of [
+      { kind: 'monthly', dayOfMonth: 25 },
+      { kind: 'yearly', month: 3, dayOfMonth: 20 },
+      { kind: 'interval', everyMonths: 2, anchorMonth: '2026-03', dayOfMonth: 10 },
+      { kind: 'once', date: '2026-11-20' },
+    ]) {
+      const response = await call('addTemplate', {
+        as: ALICE, ledgerId: shared, args: [{ name: 't', recurrence, type: 'expense' }],
+      });
+      expect(response.status).toBe(200);
+      expect((await response.json()) as { recurrence: unknown }).toMatchObject({ recurrence });
+    }
+  });
+
   it('rejects a malformed year-month', async () => {
     const alice = await sessionFor(ALICE);
     const response = await call('getMonthlyAmounts', {
@@ -274,7 +347,7 @@ describe('argument validation', () => {
     const shared = sharedLedgerOf(alice);
     const created = await call('addTemplate', {
       as: ALICE, ledgerId: shared,
-      args: [{ name: 't', dayOfMonth: 1, type: 'expense' }],
+      args: [{ name: 't', recurrence: monthlyOn(1), type: 'expense' }],
     });
     const template = (await created.json()) as { id: number };
 
@@ -395,7 +468,7 @@ describe('responses', () => {
 
     const response = await call('addTemplate', {
       as: ALICE, ledgerId: sharedLedgerOf(alice),
-      args: [{ name: 'leaky', dayOfMonth: 1, type: 'expense', categoryId: category.id }],
+      args: [{ name: 'leaky', recurrence: monthlyOn(1), type: 'expense', categoryId: category.id }],
     });
 
     expect(response.status).toBe(409);
@@ -428,7 +501,7 @@ describe('responses', () => {
     const bobLedger = personalLedgerOf(bob);
     const template = (await (
       await call('addTemplate', {
-        as: BOB, ledgerId: bobLedger, args: [{ name: 'bob', dayOfMonth: 1, type: 'expense' }],
+        as: BOB, ledgerId: bobLedger, args: [{ name: 'bob', recurrence: monthlyOn(1), type: 'expense' }],
       })
     ).json()) as { id: number };
     await call('setMonthlyAmount', { as: BOB, ledgerId: bobLedger, args: [template.id, '2026-01', 111] });

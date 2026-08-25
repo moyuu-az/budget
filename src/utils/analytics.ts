@@ -9,6 +9,7 @@ import type {
   ComparisonRow,
 } from '../types';
 import { resolveAmount } from '../stores/useMonthlyStore';
+import { occursInMonth } from '../../shared/recurrence';
 
 const OTHER_NAME = 'その他';
 const OTHER_COLOR = '#6b7280';
@@ -69,6 +70,14 @@ function aggregateMonthByCategory(
   for (const template of templates) {
     if (!template.enabled || template.type !== type) continue;
     if (monthActuals?.has(template.id)) continue;
+    // Only if it actually falls in this month. Without this an annual premium
+    // would be synthesised into all twelve, turning a trend chart into a
+    // straight line that no month's own total agrees with.
+    //
+    // The ACTUALS loop above deliberately has no such filter: a recorded actual
+    // is a fact about a month, and it stays counted even if the recurrence was
+    // edited afterwards.
+    if (!occursInMonth(template.recurrence, yearMonth)) continue;
     const planned = resolveAmount(template.id, yearMonth, amountsMap, templates);
     addContribution(totals, template, categoryMap, planned);
   }

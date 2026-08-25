@@ -1,5 +1,6 @@
 import type { EntryTemplate, Category, MonthlyAmountsMap } from '../types';
 import { resolveAmount } from '../stores/useMonthlyStore';
+import { occursInMonth } from '../../shared/recurrence';
 
 export interface CashFlowNode {
   name: string;
@@ -38,7 +39,11 @@ export function buildCashFlowData(
   categories: Category[],
   yearMonth: string,
 ): CashFlowData | null {
-  const enabled = templates.filter((t) => t.enabled);
+  // Enabled AND actually happening this month. A yearly premium is enabled all
+  // year; drawing it into every month's flow diagram would show a household
+  // twelve car inspections. occursInMonth is the same test the month totals
+  // beside this chart run -- see shared/recurrence.ts.
+  const enabled = templates.filter((t) => t.enabled && occursInMonth(t.recurrence, yearMonth));
   if (enabled.length === 0) return null;
 
   const categoryMap = new Map(categories.map((c) => [c.id, c]));
