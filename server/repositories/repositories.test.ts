@@ -663,6 +663,19 @@ describe('asset category repository', () => {
     expect(await inHousehold((r) => r.assetCategory.getAll())).toHaveLength(1);
   });
 
+  it("cannot be deleted through another ledger's request either", async () => {
+    // The cash category takes a branch of its own in remove() -- it is the one
+    // row the method refuses. That branch reads `kind` through row-level
+    // security, so the interesting question is what happens when the row is
+    // invisible: it must be a no-op, and it must NOT fall through to the DELETE.
+    const [theirs] = await inHousehold((r) => r.assetCategory.getAll());
+
+    await inPrivate((r) => r.assetCategory.remove(theirs.id));
+
+    const after = await inHousehold((r) => r.assetCategory.getAll());
+    expect(after.map((c) => c.id)).toEqual([theirs.id]);
+  });
+
   it('still deletes an ordinary category', async () => {
     const nisa = await inHousehold((r) => r.assetCategory.add({ name: 'NISA' }));
     await inHousehold((r) => r.assetCategory.remove(nisa.id));

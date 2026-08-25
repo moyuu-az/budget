@@ -130,8 +130,15 @@ async function main(): Promise<void> {
       // Goes through the repositories rather than raw SQL so the cash category
       // is provisioned by the same code the application uses. Two definitions of
       // "the cash category" is exactly what this release removed.
+      // Only `current_balance` is carried across. It is the only key the old
+      // schema ever held, and any other would have no reader on this side.
       const settings = source.prepare('SELECT key, value FROM settings').all() as unknown as OldSetting[];
-      const oldBalance = Number(settings.find((row) => row.key === 'current_balance')?.value ?? 0);
+      const parsedBalance = Number(settings.find((row) => row.key === 'current_balance')?.value ?? 0);
+      // The old column was TEXT and nothing validated it. NaN would sail past
+      // the input schema (typeof number, and `Number.isNaN(NaN)` is what zod's
+      // `.finite()` catches only on the server) and NUMERIC accepts 'NaN' as a
+      // value, leaving that ledger's balance permanently unreadable.
+      const oldBalance = Number.isFinite(parsedBalance) ? parsedBalance : 0;
       const repos = createRepositories(client, ledgerId);
       const cash = (await repos.assetCategory.getAll()).find((c) => c.kind === 'cash');
       if (!cash) throw new Error('cash category was not provisioned; is migration 004 applied?');

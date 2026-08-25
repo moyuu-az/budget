@@ -30,12 +30,19 @@ import { CASH_CATEGORY_DEFAULTS } from '../../../shared/asset-templates';
 let db: TestDb;
 let staging: string;
 
-/** A directory holding migrations 001..003 only. */
+/**
+ * A directory holding migrations 001..003 only.
+ *
+ * Compared with `>=` rather than matched against '004'. With a prefix test, the
+ * day 005 is added it would be copied here and applied BEFORE 004 -- either
+ * failing outright (if it needs something 004 creates) or, worse, passing while
+ * this file silently stops testing what it claims to.
+ */
 function migrationsUpTo003(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'budget-mig-'));
   for (const file of fs.readdirSync(migrationsDir())) {
     if (!file.endsWith('.sql')) continue;
-    if (file.startsWith('004')) continue;
+    if (file >= '004') continue;
     fs.copyFileSync(path.join(migrationsDir(), file), path.join(dir, file));
   }
   return dir;
@@ -50,6 +57,7 @@ let twoCashCategories: number;
 let zeroValuedCashRow: number;
 let unparseableBalance: number;
 let hugeBalance: number;
+let fractionalBalance: number;
 
 /** Creates an asset category at the 003 schema (no `kind` column yet in spirit). */
 async function category(ledgerId: number, name: string, sortOrder: number): Promise<number> {
@@ -148,6 +156,12 @@ beforeAll(async () => {
   hugeBalance = await ledger('huge-balance');
   await balanceSetting(hugeBalance, '99999999999999999');
 
+  // (9) A fraction of a yen. The old setBalance schema was `z.number().finite()`
+  //     with no `.int()`, so this is not hypothetical -- and a holding that is
+  //     not a whole number cannot be saved again without the user retyping it.
+  fractionalBalance = await ledger('fractional-balance');
+  await balanceSetting(fractionalBalance, '1234.56');
+
   // ... and now the migration under test, applied by the schema owner.
   await migrate(db.ownerPool, migrationsDir());
 }, 120_000);
@@ -188,6 +202,7 @@ describe('every ledger comes out with exactly one cash category', () => {
     ['a ledger tracking other assets', () => otherAssetsOnly],
     ['a ledger with two categories named 現金', () => twoCashCategories],
     ['a ledger whose only cash row is ¥0', () => zeroValuedCashRow],
+    ['a ledger whose balance was fractional', () => fractionalBalance],
   ])('%s', async (_label, id) => {
     const rows = await raw(
       db.adminPool,
@@ -300,6 +315,15 @@ describe('balances nothing ever validated', () => {
     // like this aborting the run would block the deployment, not just the ledger.
     expect(await cashHoldings(unparseableBalance)).toEqual([
       { name: '口座残高', value: '0.00' },
+    ]);
+  });
+
+  it('rounds a fractional balance to whole yen', async () => {
+    // Holdings are whole yen now (server/http/input-schemas.ts). Carried across
+    // unrounded, this row could not be saved again without the user retyping a
+    // figure they never entered.
+    expect(await cashHoldings(fractionalBalance)).toEqual([
+      { name: '口座残高', value: '1235.00' },
     ]);
   });
 

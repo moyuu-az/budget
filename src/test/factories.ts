@@ -33,9 +33,11 @@ export function makeAssetCategory(overrides: Partial<AssetCategory> = {}): Asset
  * asserts about a ledger with no balance, which is a state the server never
  * produces.
  */
+const CASH_CATEGORY_ID = 100;
+
 export function makeCashCategory(overrides: Partial<AssetCategory> = {}): AssetCategory {
   return makeAssetCategory({
-    id: 100,
+    id: CASH_CATEGORY_ID,
     name: '現金',
     color: '#38bdf8',
     sortOrder: -1,
@@ -57,7 +59,20 @@ export function makeAsset(overrides: Partial<Asset> = {}): Asset {
   };
 }
 
-/** A cash holding, attached to makeCashCategory()'s id by default. */
+/**
+ * A cash holding, attached to makeCashCategory()'s id by default.
+ *
+ * THE TWO IDS ARE THE SAME CONSTANT ON PURPOSE. A test that overrides one --
+ * `makeCashCategory({ id: 5 })` beside a plain `makeCashAsset()` -- gets a
+ * holding in no category, which reads as "the balance is ¥0" and asserts about
+ * a ledger the server never produces. Override both, or neither.
+ */
 export function makeCashAsset(overrides: Partial<Asset> = {}): Asset {
-  return makeAsset({ id: 900, categoryId: 100, name: '口座残高', value: 500_000, ...overrides });
+  return makeAsset({
+    id: 900,
+    categoryId: CASH_CATEGORY_ID,
+    name: '口座残高',
+    value: 500_000,
+    ...overrides,
+  });
 }

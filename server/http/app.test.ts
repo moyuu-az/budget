@@ -334,6 +334,35 @@ describe('argument validation', () => {
     expect(JSON.stringify(envelope.details)).toContain('評価額が大きすぎます');
   });
 
+  it('ignores a `kind` smuggled into an asset category', async () => {
+    // AssetCategoryInput has no `kind`, so nothing in-process can send one --
+    // but the wire is not TypeScript. A second category claiming to be the
+    // balance would split 現在の残高 in two, and the partial unique index would
+    // then reject whichever write lost the race.
+    const alice = await sessionFor(ALICE);
+    const ledgerId = sharedLedgerOf(alice);
+
+    const created = (await (
+      await call('addAssetCategory', {
+        as: ALICE,
+        ledgerId,
+        args: [{ name: 'にせ現金', kind: 'cash' }],
+      })
+    ).json()) as { id: number; kind: string | null };
+    expect(created.kind).toBeNull();
+
+    await call('updateAssetCategory', {
+      as: ALICE,
+      ledgerId,
+      args: [created.id, { kind: 'cash' }],
+    });
+
+    const categories = (await (
+      await call('getAssetCategories', { as: ALICE, ledgerId })
+    ).json()) as { kind: string | null }[];
+    expect(categories.filter((c) => c.kind === 'cash')).toHaveLength(1);
+  });
+
   it('404s an unknown method', async () => {
     const alice = await sessionFor(ALICE);
     const response = await call('dropEverything', { as: ALICE, ledgerId: sharedLedgerOf(alice) });
