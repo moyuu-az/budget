@@ -120,9 +120,19 @@ afterAll(async () => {
 });
 
 describe('the backfill', () => {
-  it('applies cleanly and warns about nothing', () => {
-    // A warning here means a row escaped the backfill -- an entry that would
-    // never occur again. There is no acceptable non-zero count.
+  it('applies cleanly, with nothing on the operator’s log', () => {
+    // NOT a verification of the backfill, and an earlier version of this test
+    // claimed to be one.
+    //
+    // The migration used to end with a DO block counting rows that had escaped
+    // the backfill -- a count that could never be non-zero, because
+    // entry_templates is FORCE ROW LEVEL SECURITY and a migration opens no
+    // ledger scope, so the SELECT saw nothing at all. This assertion passed for
+    // the same reason the check "succeeded": both were blind.
+    //
+    // What it is worth now is narrow and real: the migration raises no WARNING
+    // of any kind while applying, which would otherwise be the first sign of a
+    // constraint or a cast the file did not expect.
     expect(warnings).toEqual([]);
   });
 
@@ -192,8 +202,109 @@ describe('the shape constraint', () => {
          VALUES (${ledgerId}, 'bad', 'expense', 0, ${values})`,
     );
 
+  it('validates EVERY ledger\'s existing rows, including the ones it cannot see', async () => {
+    // The one substantive claim left in 005 after its verification block was
+    // removed: "ALTER TABLE and a CHECK's existing-row validation both bypass
+    // RLS, which is why the constraints above genuinely do verify every row."
+    //
+    // Nothing else in this file can tell that apart from the alternative -- a
+    // validation that saw no rows and therefore succeeded -- because both look
+    // like a migration that applied cleanly. That is exactly the shape of the
+    // bug this branch deleted, so leaving the replacement claim unproven would
+    // be repeating it in comment form.
+    //
+    // So: hide a violating row in a SECOND ledger, close the scope so a plain
+    // SELECT cannot see it, and demand that ADD CONSTRAINT finds it anyway.
+    const client = await db.ownerPool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows: created } = await client.query<{ id: number }>(
+        "INSERT INTO ledgers (slug, name, kind) VALUES ('other', '別の帳簿', 'personal') RETURNING id",
+      );
+      const otherLedger = created[0].id;
+
+      await client.query(
+        'ALTER TABLE entry_templates DROP CONSTRAINT entry_templates_recurrence_shape_chk',
+      );
+
+      // A scope is needed to WRITE the row: the policy's WITH CHECK applies to
+      // the owner too (FORCE), so even this fixture cannot skip it.
+      await client.query("SELECT set_config('app.current_ledger_id', $1, true)", [
+        String(otherLedger),
+      ]);
+      await client.query(
+        `INSERT INTO entry_templates (ledger_id, name, type, default_amount, recurrence_kind, day_of_month)
+           VALUES ($1, '見えない行', 'expense', 0, 'monthly', NULL)`,
+        [otherLedger],
+      );
+
+      // Scope closed -- the state every migration actually runs in.
+      await client.query("SELECT set_config('app.current_ledger_id', '', true)");
+
+      const { rows: counted } = await client.query<{ count: string }>(
+        'SELECT count(*)::text AS count FROM entry_templates',
+      );
+      // Zero, with a violating row sitting right there. This is what the deleted
+      // DO block was measuring and calling success.
+      expect(counted[0].count).toBe('0');
+
+      await expect(
+        client.query(
+          `ALTER TABLE entry_templates
+             ADD CONSTRAINT entry_templates_recurrence_shape_chk
+             CHECK (recurrence_kind = 'monthly' AND day_of_month IS NOT NULL)`,
+        ),
+      ).rejects.toThrow(/violated by some row/);
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+  });
+
   it('rejects an unknown recurrence kind', async () => {
     await expect(insert("recurrence_kind, day_of_month", "'weekly', 1")).rejects.toThrow();
+  });
+
+  it('rejects an unknown kind on its OWN, without the kind constraint helping', async () => {
+    // The `ELSE FALSE` arm is unreachable while entry_templates_recurrence_kind_chk
+    // stands, so nothing else here proves it exists -- mutation testing confirmed
+    // that deleting it leaves every other test green.
+    //
+    // It has to stay. The day migration 006 adds a fifth kind to the kind
+    // constraint and forgets a WHEN arm here, the CASE returns NULL for that
+    // kind -- and a CHECK that evaluates to NULL PASSES in PostgreSQL. The shape
+    // constraint would switch itself off for exactly the rows it should reject,
+    // silently, in production.
+    //
+    // Dropping the kind constraint is how that future is simulated today.
+    //
+    // INSIDE A TRANSACTION THAT IS ALWAYS ROLLED BACK, and that is not tidiness.
+    // DDL is transactional in PostgreSQL, so the rollback restores the
+    // constraint -- but the point is what happens when this test FAILS. Without
+    // the transaction the offending 'weekly' row would be committed, the
+    // restoring ADD CONSTRAINT would then be rejected by its own existing-row
+    // validation, and the table would be left without the kind constraint for
+    // every test that follows. One real failure would arrive as a cascade with
+    // its cause buried.
+    const client = await db.adminPool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        'ALTER TABLE entry_templates DROP CONSTRAINT entry_templates_recurrence_kind_chk',
+      );
+      // Named: `rejects.toThrow()` alone would also be satisfied by a typo in
+      // the INSERT, which would look like proof of a constraint that is not
+      // there.
+      await expect(
+        client.query(
+          `INSERT INTO entry_templates (ledger_id, name, type, default_amount, recurrence_kind, day_of_month)
+             VALUES (${ledgerId}, 'bad', 'expense', 0, 'weekly', 1)`,
+        ),
+      ).rejects.toThrow(/entry_templates_recurrence_shape_chk/);
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
   });
 
   it('rejects monthly without a day', async () => {

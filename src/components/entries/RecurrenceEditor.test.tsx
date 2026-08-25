@@ -222,6 +222,131 @@ describe('bounds', () => {
     expect(screen.getByLabelText('日')).toHaveValue(5);
   });
 
+  /**
+   * Types into a field the way a browser WITHOUT the native picker does.
+   *
+   * happy-dom implements `<input type="month">` to spec, which means it
+   * sanitizes: assigning '2026-3' through the value setter stores ''. That is
+   * faithful to Chrome and useless here, because the behaviour under test only
+   * happens where the control falls back to a plain text box -- Safari on the
+   * desktop and Firefox.
+   *
+   * Defining `value` as an own property shadows the prototype setter for one
+   * assignment, so the raw string reaches the change handler exactly as it would
+   * there. An earlier version of these tests used fireEvent directly and was
+   * therefore vacuous: all five "malformed" values arrived as '' and would have
+   * been rejected by any guard at all, including the one being replaced.
+   *
+   * WHY READING THE FIELD BACK AFTERWARDS IS STILL AN ASSERTION, not this
+   * helper reading its own plant: React's `restoreControlledState` OVERWRITES
+   * that own property after the event whenever the handler leaves the rendered
+   * value unchanged. Seeing the typed text survive is therefore evidence that
+   * the component buffered it. Remove the buffer and the assertion fails --
+   * which is what the mutation run confirmed.
+   */
+  function typeAsTextFallback(input: HTMLElement, raw: string): void {
+    Object.defineProperty(input, 'value', { value: raw, configurable: true, writable: true });
+    fireEvent.change(input, { target: input });
+  }
+
+  it('never emits a malformed anchor month, even where the field is a text box', () => {
+    // **Safari on the desktop and Firefox do not implement `input type="month"`.**
+    // A truthiness check there would let 「2026-3」 -- or anything at all -- into
+    // `anchorMonth`, and this component's promise that every interaction emits a
+    // COMPLETE, VALID Recurrence would stop being true on two of the three major
+    // engines.
+    const onEmit = vi.fn();
+    render(
+      <Harness
+        initial={{ kind: 'interval', everyMonths: 2, anchorMonth: '2026-03', dayOfMonth: 10 }}
+        onEmit={onEmit}
+      />,
+    );
+
+    for (const bad of ['2026-3', '2026-13', '来年3月', '2026', '2026-00', '']) {
+      typeAsTextFallback(screen.getByLabelText('起点の月'), bad);
+    }
+
+    expect(onEmit).not.toHaveBeenCalled();
+  });
+
+  it('lets that text box be retyped from the first character', () => {
+    // THE OTHER HALF OF THE GUARD, and the half a validity check alone breaks.
+    //
+    // These are controlled inputs. A change handler that does not update state
+    // makes React restore the DOM value from the prop after the event -- so with
+    // the guard and no buffer, selecting the field and typing '2' is undone
+    // instantly, along with the caret. 2026-03 could never be changed to
+    // 2026-09 at all: only overwriting a single character in place happened to
+    // work, by accident.
+    const onEmit = vi.fn();
+    render(
+      <Harness
+        initial={{ kind: 'interval', everyMonths: 2, anchorMonth: '2026-03', dayOfMonth: 10 }}
+        onEmit={onEmit}
+      />,
+    );
+
+    const field = screen.getByLabelText('起点の月');
+    for (const partial of ['2', '20', '202', '2026', '2026-', '2026-0']) {
+      typeAsTextFallback(field, partial);
+      // Still showing what was typed -- NOT snapped back to '2026-03'.
+      expect(field).toHaveValue(partial);
+    }
+    expect(onEmit).not.toHaveBeenCalled();
+
+    typeAsTextFallback(field, '2026-09');
+    expect(onEmit).toHaveBeenCalledWith(expect.objectContaining({ anchorMonth: '2026-09' }));
+  });
+
+  it('snaps a half-typed month back on blur, so it never looks saved', () => {
+    render(
+      <Harness
+        initial={{ kind: 'interval', everyMonths: 2, anchorMonth: '2026-03', dayOfMonth: 10 }}
+        onEmit={vi.fn()}
+      />,
+    );
+
+    const field = screen.getByLabelText('起点の月');
+    typeAsTextFallback(field, '2026-');
+    fireEvent.blur(field);
+
+    expect(field).toHaveValue('2026-03');
+  });
+
+  it('emits a well-formed anchor month', () => {
+    const onEmit = vi.fn();
+    render(
+      <Harness
+        initial={{ kind: 'interval', everyMonths: 2, anchorMonth: '2026-03', dayOfMonth: 10 }}
+        onEmit={onEmit}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('起点の月'), { target: { value: '2026-09' } });
+
+    expect(onEmit).toHaveBeenCalledWith(expect.objectContaining({ anchorMonth: '2026-09' }));
+  });
+
+  it('refuses a day that only LOOKS numeric', () => {
+    // `Number.parseInt` stops at the first non-digit and reports success:
+    // parseInt('1e5') is 1 and parseInt('12abc') is 12. Both land inside the
+    // bounds, so both used to be committed -- and because the field snaps back
+    // on blur, the user saw the number they typed replaced by a different one
+    // with no explanation.
+    //
+    // `type="number"` is NOT sanitized by happy-dom (unlike month/date), so
+    // these strings reach the handler exactly as typed.
+    const onEmit = vi.fn();
+    render(<Harness initial={{ kind: 'monthly', dayOfMonth: 5 }} onEmit={onEmit} />);
+
+    for (const bad of ['1e5', '12abc', '3.5', '-7', '+8', ' 9']) {
+      fireEvent.change(screen.getByLabelText('日'), { target: { value: bad } });
+    }
+
+    expect(onEmit).not.toHaveBeenCalled();
+  });
+
   it('never emits a one-off on a date it cannot verify exists', async () => {
     // 2026-02-31 is well-formed and impossible; an entry carrying it would sit
     // in the list, enabled, and never occur. The empty string a date input emits
@@ -258,5 +383,19 @@ describe('the summary line', () => {
 
     await user.selectOptions(screen.getByLabelText('繰り返し'), 'yearly');
     expect(screen.getByTestId('recurrence-summary')).toHaveTextContent('毎年6月25日');
+  });
+
+  it('names the ANCHOR for an interval, which is what it claims to catch', () => {
+    // The comment on this line says it is where 「an anchor a month off」 gets
+    // caught before saving. That was not true while the anchor was missing from
+    // the summary -- the line printed the same text for two different schedules.
+    render(
+      <Harness
+        initial={{ kind: 'interval', everyMonths: 2, anchorMonth: '2026-03', dayOfMonth: 10 }}
+        onEmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('recurrence-summary')).toHaveTextContent('2026年3月から2ヶ月ごと');
   });
 });

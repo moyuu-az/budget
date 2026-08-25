@@ -133,3 +133,80 @@ describe('the ordinary paths', () => {
     expect(amountsOf().has(1)).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Deduplication: which asks reach the server, and which are answered from what
+// the store already knows.
+//
+// The rule is small and every part of it is load-bearing, so each part is
+// pinned separately. It was added because 今月のサマリー is mounted twice --
+// one shell per breakpoint -- and 収支管理 may be asking for the same month
+// beside them, which made three identical requests for one month.
+// ---------------------------------------------------------------------------
+
+describe('asking for a month that has already been asked for', () => {
+  it('does not ask again', async () => {
+    await useMonthlyStore.getState().fetchMonthlyAmounts(YM);
+    await useMonthlyStore.getState().fetchMonthlyAmounts(YM);
+
+    expect(api.getMonthlyAmounts).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks anyway when the caller FORCES it', async () => {
+    // What a write that partially failed needs: the month is 'ready' and wrong,
+    // and only the server can say which rows survived.
+    await useMonthlyStore.getState().fetchMonthlyAmounts(YM);
+    await useMonthlyStore.getState().fetchMonthlyAmounts(YM, true);
+
+    expect(api.getMonthlyAmounts).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks again after a FAILURE, without being forced', async () => {
+    // THE PART WITH NO BUTTON BEHIND IT.
+    //
+    // Every retry button passes `force`, so settling 'error' would not break
+    // any of them -- which is exactly why this needs its own test. What it
+    // protects is the ordinary ask: a panel that failed and is then remounted
+    // (leaving the view and coming back, which is how App.tsx renders it) asks
+    // plainly, on mount. If a failed month counted as settled, one failed fetch
+    // would stick for the rest of the session and the only way out would be a
+    // button on a screen the user may have walked away from.
+    api.getMonthlyAmounts = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue([]);
+    setApi(api);
+
+    await useMonthlyStore.getState().fetchMonthlyAmounts(YM);
+    expect(useMonthlyStore.getState().monthStatus.get(YM)?.amounts).toBe('error');
+
+    await useMonthlyStore.getState().fetchMonthlyAmounts(YM);
+
+    expect(api.getMonthlyAmounts).toHaveBeenCalledTimes(2);
+    expect(useMonthlyStore.getState().monthStatus.get(YM)?.amounts).toBe('ready');
+  });
+
+  it('holds the same rule for the actuals half, separately', async () => {
+    // The halves are two requests and two statuses. A shared flag would let one
+    // arriving suppress the other.
+    await useMonthlyStore.getState().fetchMonthlyActuals(YM);
+    await useMonthlyStore.getState().fetchMonthlyActuals(YM);
+    await useMonthlyStore.getState().fetchMonthlyAmounts(YM);
+
+    expect(api.getMonthlyActuals).toHaveBeenCalledTimes(1);
+    expect(api.getMonthlyAmounts).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('copying last month’s figures', () => {
+  it('records that the target month is now loaded', async () => {
+    // It writes the month's amounts without going through fetchMonthlyAmounts.
+    // Leaving the status at 'idle' produces a month that HAS data and does not
+    // know it, so the next panel to mount fetches it again for nothing.
+    await useMonthlyStore.getState().copyMonthlyAmounts('2026-05', YM);
+
+    expect(useMonthlyStore.getState().monthStatus.get(YM)?.amounts).toBe('ready');
+
+    api.getMonthlyAmounts = vi.fn().mockResolvedValue([]);
+    setApi(api);
+    await useMonthlyStore.getState().fetchMonthlyAmounts(YM);
+    expect(api.getMonthlyAmounts).not.toHaveBeenCalled();
+  });
+});

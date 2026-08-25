@@ -5,13 +5,34 @@ import { formatWithCommas } from '../../utils/currency';
 import { toYearMonth } from '../../utils/forecast';
 import { occursInMonth } from '../../../shared/recurrence';
 import { LoadGate } from '../ui/LoadGate';
+import { combineStatus } from '../../stores/load-status';
+import { useMonthLoaded } from '../../hooks/useMonthLoaded';
 
 function MonthlySummary() {
   const { templates } = useTemplateStore();
-  const status = useTemplateStore((s) => s.status);
-  const { monthlyAmountsMap } = useMonthlyStore();
+  const templatesStatus = useTemplateStore((s) => s.status);
+  // A selector, not the whole store: this panel is mounted in both shells and
+  // subscribing to everything re-renders both on any month's status changing.
+  const monthlyAmountsMap = useMonthlyStore((s) => s.monthlyAmountsMap);
 
   const yearMonth = useMemo(() => toYearMonth(new Date()), []);
+
+  // THIS PANEL FETCHES ITS OWN MONTH.
+  //
+  // It used to read `monthlyAmountsMap` and nothing else, which meant the map
+  // was EMPTY until 収支管理 was opened -- so the sidebar, which is on screen on
+  // every view, showed figures built from template defaults and then silently
+  // changed the moment the user visited another screen. Two different answers
+  // to 「今月の支出」 for the same month, with nothing to explain the jump.
+  //
+  // Through the shared hook rather than a local effect: it is what re-fetches
+  // after a ledger switch (the status map is emptied and loadLedgerData does not
+  // refetch months), and what deduplicates the two mounted copies of this panel.
+  const { status: monthStatus, retry } = useMonthLoaded(yearMonth);
+
+  // Ready only once the month's own figures have landed. Showing the defaults
+  // in the meantime is the behaviour this fetch exists to end.
+  const status = combineStatus(templatesStatus, monthStatus);
 
   const { totalIncome, totalExpense, net } = useMemo(() => {
     // Enabled AND occurring THIS month. `enabled` alone is not the same question
@@ -50,7 +71,12 @@ function MonthlySummary() {
   // templates yet the sums are 0, and 「収入 +¥0 / 支出 -¥0」 reads as a month
   // with nothing in it rather than as a panel still waiting.
   if (status !== 'ready') {
-    return <LoadGate status={status} height={92} label="今月のサマリー" />;
+    // onRetry is NOT optional here, whatever the default suggests. LoadGate
+    // falls back to loadLedgerData(), which deliberately skips per-month amounts
+    // and actuals -- so the button would refetch everything except the thing
+    // that failed and leave the same error on screen. LoadGate's own header
+    // names this panel's data as exactly that case.
+    return <LoadGate status={status} height={92} label="今月のサマリー" onRetry={retry} />;
   }
 
   return (

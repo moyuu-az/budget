@@ -101,13 +101,36 @@ export function isYearMonth(value: string): boolean {
  * Constructed in LOCAL time to match every other date in this module. Round-
  * tripping through the constructed Date is what rejects the impossible ones:
  * `new Date(2026, 1, 31)` rolls forward to 3 March and no longer matches.
+ *
+ * AT NOON, not at midnight -- a twelve-hour margin against the round trip being
+ * knocked off by an offset error of an hour.
+ *
+ * WHAT THIS IS AND IS NOT PROTECTION AGAINST
+ *   NOT the timezones that move their clocks at midnight. Santiago, Havana,
+ *   Tehran and São Paulo were checked date by date across 1970-2035, and V8
+ *   resolves a local midnight that does not exist using the PRE-transition
+ *   offset, landing at 01:00 on the SAME day. Midnight construction is correct
+ *   there, and an earlier version of this comment claimed otherwise -- which
+ *   mattered, because the next person to "verify" it in Santiago would have
+ *   seen nothing happen and removed the noon.
+ *
+ *   It IS protection against V8's DST cache getting the offset wrong. Sweeping
+ *   a whole year of dates in America/Recife (and Noronha, Boa_Vista) makes
+ *   2000-10-09..14 come back with a self-contradictory offset, and midnight
+ *   construction then lands at 23:00 the PREVIOUS day -- rejecting a date that
+ *   exists. Evaluating those dates alone is fine, so this only appears in a
+ *   process that has been running a while, which describes a page left open.
+ *
+ *   A date that genuinely has no local midnight at all (Pacific/Apia
+ *   2011-12-30, Pacific/Kwajalein 1993-08-21 -- days a country skipped) is
+ *   rejected either way, correctly: it is not on that household's calendar.
  */
 export function isIsoDate(value: string): boolean {
   if (!ISO_DATE_PATTERN.test(value)) return false;
   const year = Number(value.slice(0, 4));
   const month = Number(value.slice(5, 7));
   const day = Number(value.slice(8, 10));
-  const date = new Date(year, month - 1, day);
+  const date = new Date(year, month - 1, day, 12);
   return (
     date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
   );
@@ -241,8 +264,18 @@ export function describeRecurrence(recurrence: Recurrence): string {
       return `毎月${recurrence.dayOfMonth}日`;
     case 'yearly':
       return `毎年${recurrence.month}月${recurrence.dayOfMonth}日`;
-    case 'interval':
-      return `${recurrence.everyMonths}ヶ月ごと ${recurrence.dayOfMonth}日`;
+    case 'interval': {
+      // THE ANCHOR IS PART OF THE ANSWER, and leaving it out made a comment
+      // elsewhere false.
+      //
+      // RecurrenceEditor's summary line claims it is where 「an anchor a month
+      // off」 gets caught before saving. It could not be: the anchor was not in
+      // the string. And this is the value the type's own note calls out as the
+      // one that matters -- without a phase, "every two months" does not say
+      // WHICH two.
+      const [year, month] = recurrence.anchorMonth.split('-');
+      return `${year}年${Number(month)}月から${recurrence.everyMonths}ヶ月ごと ${recurrence.dayOfMonth}日`;
+    }
     case 'once': {
       // THE YEAR IS PART OF THE ANSWER for a one-off, and dropping it was a bug.
       //
@@ -289,18 +322,6 @@ export function describeRecurrenceShort(recurrence: Recurrence, yearMonth: YearM
     case 'once':
       return `${day}日 (1回のみ)`;
   }
-}
-
-/**
- * True for recurrences that do NOT arrive every month.
- *
- * The point of surfacing this is the month it lands in: a household reading its
- * 収支 for March needs to see that the ¥120,000 in it is annual and will not be
- * there in April, or it reads March as a bad month rather than an ordinary one
- * carrying a yearly bill.
- */
-export function isIrregular(recurrence: Recurrence): boolean {
-  return recurrence.kind !== 'monthly';
 }
 
 // --- Validation -------------------------------------------------------------
