@@ -76,6 +76,10 @@ CI は無い。テストを回すのも型検査も手元の責任。
 - **ledger スコープのテーブルを足した**→ migration で `apply_ledger_isolation()` を
   呼ぶ。`server/db/schema.test.ts` の drift guard が `ledger_id` 列でテーブルを
   自動発見して検査する
+- **月単位で集計するコードを足した**→ `occursInMonth` を通したうえで、
+  年次または単発の項目がその月に**入らない**ことのテストを書く。既存の
+  `src/components/entries/EntriesView.test.tsx` と `src/utils/analytics.test.ts`
+  が手本
 - **データを動かす migration を書いた**→ 専用のテストを書く。
   `server/db/migrations/004_cash_is_an_asset.test.ts` が手本：1 つ前の版まで
   migration を適用した DB を立てて、本番にある状況を仕込み、対象の migration を
@@ -106,6 +110,15 @@ CI は無い。テストを回すのも型検査も手元の責任。
   最低残高の警告が黙るのは、このアプリが存在する理由そのものを潰すということ
 - **残高は現金カテゴリの保有の合計**（`src/utils/net-worth.ts`）。残高を別に持つと
   同じお金が二重に数えられる。`kind: 'cash'` の分類は削除できない
+- **契約を非互換に変えたら `shared/contract-version.ts` の `CONTRACT_VERSION` を
+  上げる**。デプロイはタブが開いたままのブラウザの下でサーバーを差し替えるので、
+  上げ忘れると旧ビルドが新レスポンスを誤読する（`dayOfMonth` が消えたとき、旧タブは
+  予測から全項目を落として平坦で安心できる線を描いた）。追加的な変更では上げない
+- **「その項目が今月発生するか」を答えるのは `shared/recurrence.ts` だけ**。
+  `enabled` は「今月の項目」を意味しない（年払い・単発・数ヶ月ごとがあるため）。
+  月単位で集計するコードを書いたら必ず `occursInMonth` を通す。通さないと
+  年払いの保険料が 12 回数えられる。月末クランプ（31日 → 2月は28日）も
+  ここに 1 つだけ置く
 
 ## コミットと PR
 

@@ -2,6 +2,10 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { startTestDb, resetDb, createLedger, raw, type TestDb } from '../test/pg';
 import { withLedgerRepositories, type Repositories } from './index';
 import { buildSetClause } from './sql';
+import type { Recurrence } from '../../shared/recurrence';
+
+/** Shorthand for the shape almost every test template has. */
+const monthlyOn = (dayOfMonth: number): Recurrence => ({ kind: 'monthly', dayOfMonth });
 
 // ---------------------------------------------------------------------------
 // Repository behaviour against a real PostgreSQL.
@@ -149,7 +153,7 @@ describe('category repository', () => {
     const { categoryId, templateId } = await inHousehold(async (r) => {
       const category = await r.category.add({ name: 'doomed', type: 'expense' });
       const template = await r.template.add({
-        name: 't', dayOfMonth: 1, type: 'expense', categoryId: category.id,
+        name: 't', recurrence: monthlyOn(1), type: 'expense', categoryId: category.id,
       });
       return { categoryId: category.id, templateId: template.id };
     });
@@ -167,13 +171,13 @@ describe('template repository', () => {
     const created = await inHousehold(async (r) => {
       const category = await r.category.add({ name: 'rent', type: 'expense' });
       return r.template.add({
-        name: 'Rent', dayOfMonth: 27, type: 'expense',
+        name: 'Rent', recurrence: monthlyOn(27), type: 'expense',
         categoryId: category.id, defaultAmount: 375_000,
       });
     });
 
     expect(created).toMatchObject({
-      name: 'Rent', dayOfMonth: 27, type: 'expense',
+      name: 'Rent', recurrence: monthlyOn(27), type: 'expense',
       defaultAmount: 375_000, enabled: true, sortOrder: 0,
     });
     // BOOLEAN column, not the SQLite 0/1 integer the mapper used to convert.
@@ -182,10 +186,175 @@ describe('template repository', () => {
 
   it('defaults the amount to zero', async () => {
     const created = await inHousehold((r) =>
-      r.template.add({ name: 't', dayOfMonth: 1, type: 'expense' }),
+      r.template.add({ name: 't', recurrence: monthlyOn(1), type: 'expense' }),
     );
     expect(created.defaultAmount).toBe(0);
     expect(created.categoryId).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // Recurrence round-trips.
+  //
+  // The union is stored across five columns and rebuilt on read, so "it went in
+  // and came back the same" is a real claim about two separate translations
+  // (recurrenceToColumns and rowToRecurrence) that nothing else checks. A
+  // mistake in either is invisible in the client -- it just shows a different
+  // date, confidently.
+  // -------------------------------------------------------------------------
+  it.each([
+    ['monthly', { kind: 'monthly', dayOfMonth: 25 } as const],
+    ['yearly', { kind: 'yearly', month: 3, dayOfMonth: 20 } as const],
+    ['interval', { kind: 'interval', everyMonths: 2, anchorMonth: '2026-03', dayOfMonth: 10 } as const],
+    ['once', { kind: 'once', date: '2026-11-20' } as const],
+  ])('stores and reads back a %s recurrence unchanged', async (_label, recurrence) => {
+    const created = await inHousehold((r) =>
+      r.template.add({ name: 'x', recurrence, type: 'expense' }),
+    );
+    expect(created.recurrence).toEqual(recurrence);
+
+    // And again through a fresh read, not only through the INSERT's RETURNING:
+    // the two go through the same mapper, but only this one proves the row
+    // survived the round trip to storage.
+    const [fetched] = await inHousehold((r) => r.template.getAll());
+    expect(fetched.recurrence).toEqual(recurrence);
+  });
+
+  it('clears the previous shape when the recurrence changes', async () => {
+    // The failure this prevents: writing only the columns the NEW shape uses
+    // leaves the old ones populated, and entry_templates_recurrence_shape_chk
+    // then rejects the UPDATE with a constraint error naming a column the user
+    // never touched. Yearly -> monthly is the case that has a leftover
+    // (month_of_year); interval -> once has three.
+    const created = await inHousehold((r) =>
+      r.template.add({ name: 'car', recurrence: { kind: 'yearly', month: 3, dayOfMonth: 20 }, type: 'expense' }),
+    );
+
+    await inHousehold((r) => r.template.update(created.id, { recurrence: monthlyOn(5) }));
+    const [monthly] = await inHousehold((r) => r.template.getAll());
+    expect(monthly.recurrence).toEqual({ kind: 'monthly', dayOfMonth: 5 });
+
+    await inHousehold((r) =>
+      r.template.update(created.id, {
+        recurrence: { kind: 'interval', everyMonths: 3, anchorMonth: '2026-01', dayOfMonth: 9 },
+      }),
+    );
+    await inHousehold((r) => r.template.update(created.id, { recurrence: { kind: 'once', date: '2026-12-01' } }));
+    const [once] = await inHousehold((r) => r.template.getAll());
+    expect(once.recurrence).toEqual({ kind: 'once', date: '2026-12-01' });
+  });
+
+  it('changes the recurrence alongside other fields in one patch', async () => {
+    // The recurrence columns are appended to the same SET clause the other
+    // fields build, so their parameter numbering has to line up. An off-by-one
+    // here writes the name into a date column, or silently updates the wrong
+    // row.
+    const created = await inHousehold((r) =>
+      r.template.add({ name: 'old', recurrence: monthlyOn(1), type: 'expense', defaultAmount: 100 }),
+    );
+
+    await inHousehold((r) =>
+      r.template.update(created.id, {
+        name: 'new',
+        defaultAmount: 250,
+        recurrence: { kind: 'yearly', month: 7, dayOfMonth: 15 },
+      }),
+    );
+
+    const [updated] = await inHousehold((r) => r.template.getAll());
+    expect(updated).toMatchObject({ name: 'new', defaultAmount: 250 });
+    expect(updated.recurrence).toEqual({ kind: 'yearly', month: 7, dayOfMonth: 15 });
+  });
+
+  it('drops per-month amounts for months the new recurrence no longer covers', async () => {
+    // The trap this closes: a `monthly_amounts` row for a month the entry no
+    // longer falls in is invisible -- nothing renders it, no total reads it --
+    // and it comes back the day someone changes the recurrence again, silently
+    // overriding the default the household expected.
+    const templateId = await inHousehold(async (r) => {
+      const t = await r.template.add({ name: 'rent', recurrence: monthlyOn(1), type: 'expense' });
+      await r.monthlyAmount.set(t.id, '2026-07', 50_000);
+      await r.monthlyAmount.set(t.id, '2026-09', 60_000);
+      return t.id;
+    });
+
+    // Every September, and nothing else.
+    await inHousehold((r) =>
+      r.template.update(templateId, { recurrence: { kind: 'yearly', month: 9, dayOfMonth: 1 } }),
+    );
+
+    expect(await inHousehold((r) => r.monthlyAmount.getForMonth('2026-07'))).toHaveLength(0);
+    // September still occurs, so its amount is the household's and stays.
+    expect(await inHousehold((r) => r.monthlyAmount.getForMonth('2026-09'))).toMatchObject([
+      { amount: 60_000 },
+    ]);
+  });
+
+  it('does not resurrect a dropped amount when the recurrence changes back', async () => {
+    // The whole point, stated as the sequence a user actually performs.
+    const templateId = await inHousehold(async (r) => {
+      const t = await r.template.add({ name: 'rent', recurrence: monthlyOn(1), type: 'expense' });
+      await r.monthlyAmount.set(t.id, '2026-07', 50_000);
+      return t.id;
+    });
+
+    await inHousehold((r) =>
+      r.template.update(templateId, { recurrence: { kind: 'yearly', month: 9, dayOfMonth: 1 } }),
+    );
+    await inHousehold((r) => r.template.update(templateId, { recurrence: monthlyOn(1) }));
+
+    expect(await inHousehold((r) => r.monthlyAmount.getForMonth('2026-07'))).toHaveLength(0);
+  });
+
+  it('leaves RECORDED ACTUALS alone, because they are facts', async () => {
+    // The household paid that, in that month. A schedule correction made
+    // afterwards does not unmake it, and deleting one would erase history to
+    // tidy a projection.
+    const templateId = await inHousehold(async (r) => {
+      const t = await r.template.add({ name: 'rent', recurrence: monthlyOn(1), type: 'expense' });
+      await r.monthlyActual.set(t.id, '2026-07', 48_000);
+      return t.id;
+    });
+
+    await inHousehold((r) =>
+      r.template.update(templateId, { recurrence: { kind: 'yearly', month: 9, dayOfMonth: 1 } }),
+    );
+
+    expect(await inHousehold((r) => r.monthlyActual.getForMonth('2026-07'))).toMatchObject([
+      { actualAmount: 48_000 },
+    ]);
+  });
+
+  it('touches no amounts when the patch leaves the recurrence alone', async () => {
+    // A rename must not cost the household its overrides.
+    const templateId = await inHousehold(async (r) => {
+      const t = await r.template.add({ name: 'rent', recurrence: monthlyOn(1), type: 'expense' });
+      await r.monthlyAmount.set(t.id, '2026-07', 50_000);
+      return t.id;
+    });
+
+    await inHousehold((r) => r.template.update(templateId, { name: 'renamed' }));
+
+    expect(await inHousehold((r) => r.monthlyAmount.getForMonth('2026-07'))).toHaveLength(1);
+  });
+
+  it('orders a one-off by its date rather than pushing it to the end', async () => {
+    // getAll orders by COALESCE(day_of_month, day of on_date). Without the
+    // COALESCE, day_of_month is NULL for every one-off, PostgreSQL sorts NULLs
+    // last, and a trip on the 5th lands below an entry on the 28th.
+    await inHousehold(async (r) => {
+      await r.template.add({ name: 'late', recurrence: monthlyOn(28), type: 'expense' });
+      await r.template.add({ name: 'trip', recurrence: { kind: 'once', date: '2026-11-05' }, type: 'expense' });
+      await r.template.add({ name: 'early', recurrence: monthlyOn(2), type: 'expense' });
+    });
+
+    // sort_order is assigned incrementally on insert and is the FIRST ordering
+    // key, so it would decide the result on its own. Flattened here through raw
+    // SQL -- the repository has no way to set it -- so what is left to compare
+    // is exactly the day tiebreaker this test is about.
+    await raw(db.adminPool, 'UPDATE entry_templates SET sort_order = 0');
+
+    const names = (await inHousehold((r) => r.template.getAll())).map((t) => t.name);
+    expect(names).toEqual(['early', 'trip', 'late']);
   });
 
   it('refuses a category from another ledger', async () => {
@@ -193,14 +362,14 @@ describe('template repository', () => {
 
     await expect(
       inHousehold((r) =>
-        r.template.add({ name: 'leaky', dayOfMonth: 1, type: 'expense', categoryId: foreign.id }),
+        r.template.add({ name: 'leaky', recurrence: monthlyOn(1), type: 'expense', categoryId: foreign.id }),
       ),
     ).rejects.toMatchObject({ code: '23503' });
   });
 
   it('touches updated_at on update but not on a no-op patch', async () => {
     const created = await inHousehold((r) =>
-      r.template.add({ name: 't', dayOfMonth: 1, type: 'expense' }),
+      r.template.add({ name: 't', recurrence: monthlyOn(1), type: 'expense' }),
     );
 
     await inHousehold((r) => r.template.update(created.id, {}));
@@ -215,7 +384,7 @@ describe('template repository', () => {
 
   it('toggles enabled', async () => {
     const created = await inHousehold((r) =>
-      r.template.add({ name: 't', dayOfMonth: 1, type: 'expense' }),
+      r.template.add({ name: 't', recurrence: monthlyOn(1), type: 'expense' }),
     );
     await inHousehold((r) => r.template.toggle(created.id, false));
 
@@ -225,7 +394,7 @@ describe('template repository', () => {
 
   it('cannot toggle a template in another ledger', async () => {
     const mine = await inPrivate((r) =>
-      r.template.add({ name: 'mine', dayOfMonth: 1, type: 'expense' }),
+      r.template.add({ name: 'mine', recurrence: monthlyOn(1), type: 'expense' }),
     );
     await inHousehold((r) => r.template.toggle(mine.id, false));
 
@@ -235,7 +404,7 @@ describe('template repository', () => {
 
   it('takes its planned and actual amounts with it when deleted', async () => {
     const templateId = await inHousehold(async (r) => {
-      const t = await r.template.add({ name: 't', dayOfMonth: 1, type: 'expense' });
+      const t = await r.template.add({ name: 't', recurrence: monthlyOn(1), type: 'expense' });
       await r.monthlyAmount.set(t.id, '2026-01', 100);
       await r.monthlyActual.set(t.id, '2026-01', 90);
       return t.id;
@@ -250,7 +419,7 @@ describe('template repository', () => {
 
 describe('monthly amount repository', () => {
   async function seedTemplate(scope: typeof inHousehold, name = 't'): Promise<number> {
-    const created = await scope((r) => r.template.add({ name, dayOfMonth: 1, type: 'expense' }));
+    const created = await scope((r) => r.template.add({ name, recurrence: monthlyOn(1), type: 'expense' }));
     return created.id;
   }
 
@@ -289,8 +458,8 @@ describe('monthly amount repository', () => {
 
   it('copies a month, preserving amounts already in the target', async () => {
     const [a, b] = await inHousehold(async (r) => {
-      const first = await r.template.add({ name: 'a', dayOfMonth: 1, type: 'expense' });
-      const second = await r.template.add({ name: 'b', dayOfMonth: 2, type: 'expense' });
+      const first = await r.template.add({ name: 'a', recurrence: monthlyOn(1), type: 'expense' });
+      const second = await r.template.add({ name: 'b', recurrence: monthlyOn(2), type: 'expense' });
       await r.monthlyAmount.set(first.id, '2026-01', 100);
       await r.monthlyAmount.set(second.id, '2026-01', 200);
       // Already set in the target month: the copy must not clobber it.
@@ -323,6 +492,87 @@ describe('monthly amount repository', () => {
     expect(await inPrivate((r) => r.monthlyAmount.getForMonth('2026-02'))).toHaveLength(0);
   });
 
+  it('copies ONLY the entries that occur in the target month', async () => {
+    // Decided from the rows, not from anything the caller sent. An override for
+    // a month its entry skips is invisible -- no screen shows it, no total reads
+    // it -- and it comes back the day the recurrence changes to cover that
+    // month, silently beating the default the household expects.
+    const monthlyId = await inHousehold(async (r) => {
+      const monthly = await r.template.add({ name: 'rent', recurrence: monthlyOn(1), type: 'expense' });
+      const yearly = await r.template.add({
+        name: 'car', recurrence: { kind: 'yearly', month: 1, dayOfMonth: 20 }, type: 'expense',
+      });
+      await r.monthlyAmount.set(monthly.id, '2026-01', 100);
+      await r.monthlyAmount.set(yearly.id, '2026-01', 120_000);
+      return monthly.id;
+    });
+
+    // February: only the monthly entry occurs.
+    await inHousehold((r) => r.monthlyAmount.copyMonth('2026-01', '2026-02'));
+
+    const target = await inHousehold((r) => r.monthlyAmount.getForMonth('2026-02'));
+    expect(target.map((row) => row.templateId)).toEqual([monthlyId]);
+    expect(target.map((row) => row.amount)).toEqual([100]);
+  });
+
+  it('copies nothing into a month where nothing occurs', async () => {
+    await inHousehold(async (r) => {
+      const t = await r.template.add({
+        name: 'car', recurrence: { kind: 'yearly', month: 1, dayOfMonth: 20 }, type: 'expense',
+      });
+      await r.monthlyAmount.set(t.id, '2026-01', 120_000);
+    });
+
+    await inHousehold((r) => r.monthlyAmount.copyMonth('2026-01', '2026-02'));
+
+    expect(await inHousehold((r) => r.monthlyAmount.getForMonth('2026-02'))).toHaveLength(0);
+  });
+
+  it('refuses to set an amount for a month the entry does not occur in', async () => {
+    // The positive rule, at the writer. Every previous attempt at this invariant
+    // was a CLEANUP -- filter what copy copies, delete what an edit orphans --
+    // and each one left a different gap, because each one guarded a different
+    // write path.
+    const templateId = await inHousehold(async (r) => {
+      const t = await r.template.add({
+        name: 'car', recurrence: { kind: 'yearly', month: 9, dayOfMonth: 20 }, type: 'expense',
+      });
+      return t.id;
+    });
+
+    await expect(
+      inHousehold((r) => r.monthlyAmount.set(templateId, '2026-07', 50_000)),
+    ).rejects.toThrow();
+
+    expect(await inHousehold((r) => r.monthlyAmount.getForMonth('2026-07'))).toHaveLength(0);
+  });
+
+  it('allows an amount for a month the entry does occur in', async () => {
+    // The rule has to admit the ordinary case, or every test above would pass
+    // for a repository that refused everything.
+    const templateId = await inHousehold(async (r) => {
+      const t = await r.template.add({
+        name: 'car', recurrence: { kind: 'yearly', month: 9, dayOfMonth: 20 }, type: 'expense',
+      });
+      return t.id;
+    });
+
+    await inHousehold((r) => r.monthlyAmount.set(templateId, '2026-09', 50_000));
+
+    expect(await inHousehold((r) => r.monthlyAmount.getForMonth('2026-09'))).toMatchObject([
+      { amount: 50_000 },
+    ]);
+  });
+
+  it('refuses an amount for an entry in another ledger', async () => {
+    // Row-level security makes "someone else's" and "nonexistent" the same
+    // answer, which is the right one either way.
+    const theirs = await seedTemplate(inPrivate, 'private');
+    await expect(
+      inHousehold((r) => r.monthlyAmount.set(theirs, '2026-01', 100)),
+    ).rejects.toThrow();
+  });
+
   it('removes one template-month pair', async () => {
     const templateId = await seedTemplate(inHousehold);
     await inHousehold(async (r) => {
@@ -339,7 +589,7 @@ describe('monthly amount repository', () => {
 describe('monthly actual repository', () => {
   it('upserts and reads back a range in month order', async () => {
     const templateId = await inHousehold(async (r) => {
-      const t = await r.template.add({ name: 't', dayOfMonth: 1, type: 'expense' });
+      const t = await r.template.add({ name: 't', recurrence: monthlyOn(1), type: 'expense' });
       await r.monthlyActual.set(t.id, '2026-03', 30);
       await r.monthlyActual.set(t.id, '2026-01', 10);
       await r.monthlyActual.set(t.id, '2026-01', 15);
@@ -355,8 +605,8 @@ describe('monthly actual repository', () => {
   });
 
   it('stays inside its ledger', async () => {
-    const mine = await inHousehold((r) => r.template.add({ name: 'a', dayOfMonth: 1, type: 'expense' }));
-    const theirs = await inPrivate((r) => r.template.add({ name: 'b', dayOfMonth: 1, type: 'expense' }));
+    const mine = await inHousehold((r) => r.template.add({ name: 'a', recurrence: monthlyOn(1), type: 'expense' }));
+    const theirs = await inPrivate((r) => r.template.add({ name: 'b', recurrence: monthlyOn(1), type: 'expense' }));
     await inHousehold((r) => r.monthlyActual.set(mine.id, '2026-01', 10));
     await inPrivate((r) => r.monthlyActual.set(theirs.id, '2026-01', 99));
 

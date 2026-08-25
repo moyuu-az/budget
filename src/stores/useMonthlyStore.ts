@@ -6,18 +6,44 @@ import type {
 } from '../types';
 import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
+import { occursInMonth } from '../../shared/recurrence';
+import type { Recurrence } from '../types';
 
 interface MonthlyState {
   monthlyAmountsMap: MonthlyAmountsMap;
   monthlyActualsMap: MonthlyActualsMap;
   loading: boolean;
   reset: () => void;
+  /**
+   * Drops cached per-month amounts that `recurrence` no longer covers.
+   *
+   * Called after a recurrence change succeeds, because the SERVER deletes those
+   * rows in the same transaction (see occurrence-guard.ts). Without this the
+   * cache keeps them: change an entry to yearly and back without leaving the
+   * screen, and the totals go on using a figure the database no longer holds --
+   * a reload would change the numbers, which is the definition of the screen
+   * lying.
+   *
+   * Mirrors the server's rule rather than clearing everything for that entry:
+   * blunt clearing would blank the CURRENT month's override until the next
+   * fetch, showing a wrong number on the way to the right one.
+   */
+  forgetAmountsOutside: (templateId: number, recurrence: Recurrence) => void;
   fetchActualsRange: (startMonth: string, endMonth: string) => Promise<void>;
   fetchMonthlyAmounts: (yearMonth: string) => Promise<void>;
   fetchMonthlyAmountsRange: (startMonth: string, endMonth: string) => Promise<void>;
   setMonthlyAmount: (templateId: number, yearMonth: string, amount: number) => Promise<void>;
   deleteMonthlyAmount: (templateId: number, yearMonth: string) => Promise<void>;
-  copyMonthlyAmounts: (fromMonth: string, toMonth: string) => Promise<void>;
+  /**
+   * Returns whether the copy actually happened.
+   *
+   * `void` would be a lie the caller cannot detect: reportError has already
+   * raised the toast, so a try/catch at the call site never runs and
+   * 「先月の金額をコピーしました」 fires beside the error message -- telling a
+   * household its month is budgeted when nothing was written. Same reasoning as
+   * useAssetStore and useTemplateStore.
+   */
+  copyMonthlyAmounts: (fromMonth: string, toMonth: string) => Promise<boolean>;
   fetchMonthlyActuals: (yearMonth: string) => Promise<void>;
   setMonthlyActual: (templateId: number, yearMonth: string, amount: number) => Promise<void>;
   deleteMonthlyActual: (templateId: number, yearMonth: string) => Promise<void>;
@@ -40,6 +66,22 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   // reset would let a stale reference keep mutating live state.
   reset: () =>
     set({ monthlyAmountsMap: new Map(), monthlyActualsMap: new Map(), loading: false }),
+
+  forgetAmountsOutside: (templateId, recurrence) =>
+    set((state) => {
+      const next = new Map(state.monthlyAmountsMap);
+      let changed = false;
+      for (const [yearMonth, monthMap] of next) {
+        if (!monthMap.has(templateId) || occursInMonth(recurrence, yearMonth)) continue;
+        const copy = new Map(monthMap);
+        copy.delete(templateId);
+        next.set(yearMonth, copy);
+        changed = true;
+      }
+      // A new Map only when something actually moved: an unconditional one would
+      // re-render every subscriber on every template edit.
+      return changed ? { monthlyAmountsMap: next } : state;
+    }),
 
   fetchActualsRange: async (startMonth: string, endMonth: string) => {
     set({ loading: true });
@@ -152,6 +194,9 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   copyMonthlyAmounts: async (fromMonth: string, toMonth: string) => {
     set({ loading: true });
     try {
+      // WHICH entries get copied is the server's decision, made from the rows
+      // under a lock. A list computed here would be stale the moment another tab
+      // (or the other member of a shared ledger) changed a recurrence.
       await getApi().copyMonthlyAmounts(fromMonth, toMonth);
       // Re-fetch the target month to get the copied data
       const amounts = await getApi().getMonthlyAmounts(toMonth);
@@ -162,9 +207,16 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
       }
       newMap.set(toMonth, monthMap);
       set({ monthlyAmountsMap: newMap, loading: false });
+      return true;
     } catch (e) {
+      // Covers BOTH failures deliberately: the copy itself, and the re-fetch
+      // that proves what landed. A copy that succeeded but could not be read
+      // back leaves the screen showing the previous month's figures, so
+      // reporting success would be true about the database and false about
+      // what the user is looking at.
       set({ loading: false });
       reportError(e);
+      return false;
     }
   },
 

@@ -3,6 +3,7 @@ import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
 import { formatWithCommas } from '../../utils/currency';
 import { toYearMonth } from '../../utils/forecast';
+import { occursInMonth } from '../../../shared/recurrence';
 import { LoadGate } from '../ui/LoadGate';
 
 function MonthlySummary() {
@@ -13,11 +14,23 @@ function MonthlySummary() {
   const yearMonth = useMemo(() => toYearMonth(new Date()), []);
 
   const { totalIncome, totalExpense, net } = useMemo(() => {
-    const enabledTemplates = templates.filter((t) => t.enabled);
+    // Enabled AND occurring THIS month. `enabled` alone is not the same question
+    // since migration 005: an annual premium is enabled all year and belongs to
+    // one month, so summing every enabled entry would put 車検 in this panel
+    // twelve times a year -- and this panel sits beside the balance on every
+    // screen, so it would be the most-seen wrong number in the application.
+    //
+    // The same predicate the 収支管理 totals and the forecast run; see
+    // shared/recurrence.ts for why there is exactly one.
+    const monthTemplates = templates.filter(
+      (t) => t.enabled && occursInMonth(t.recurrence, yearMonth),
+    );
     let income = 0;
     let expense = 0;
 
-    for (const template of enabledTemplates) {
+    for (const template of monthTemplates) {
+      // `templates` -- the FULL list -- is what resolveAmount reads: it resolves
+      // by id and needs every id to be findable.
       const amount = resolveAmount(template.id, yearMonth, monthlyAmountsMap, templates);
       if (template.type === 'income') {
         income += amount;

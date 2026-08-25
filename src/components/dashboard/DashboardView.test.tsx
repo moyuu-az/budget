@@ -6,7 +6,7 @@ import { createMockApi } from '../../test/mock-api';
 import { useAssetStore } from '../../stores/useAssetStore';
 import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useMonthlyStore } from '../../stores/useMonthlyStore';
-import { makeCashAsset, makeCashCategory } from '../../test/factories';
+import { makeCashAsset, makeCashCategory, monthlyOn } from '../../test/factories';
 import type { EntryTemplate } from '../../types';
 
 // ---------------------------------------------------------------------------
@@ -27,7 +27,7 @@ import type { EntryTemplate } from '../../types';
 const rent: EntryTemplate = {
   id: 1,
   name: '家賃',
-  dayOfMonth: 27,
+  recurrence: monthlyOn(27),
   type: 'expense',
   enabled: true,
   sortOrder: 0,

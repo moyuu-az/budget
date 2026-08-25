@@ -76,6 +76,24 @@ export class ForbiddenError extends AppError {
   }
 }
 
+/**
+ * The caller's bundle was built against a different wire contract.
+ *
+ * Refusing is the point. Answering would hand a tab data its own code cannot
+ * read -- and the failure that follows is silent: an old build reading a new
+ * EntryTemplate finds no `dayOfMonth`, drops every planned entry from its
+ * forecast, and draws a flat, reassuring balance line. See
+ * shared/contract-version.ts.
+ *
+ * `safeMessage` because this text is written FOR the user: it is the only thing
+ * that tells them a reload is what fixes it.
+ */
+export class StaleClientError extends AppError {
+  constructor(message = 'アプリが更新されました。ページを再読み込みしてください') {
+    super('STALE_CLIENT', message, { safeMessage: true });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // PostgreSQL SQLSTATE classification.
 //
@@ -184,6 +202,7 @@ const REDACTED: Record<ErrorCode, string> = {
   PERSISTENCE: 'データの保存に失敗しました',
   UNAUTHORIZED: 'サインインが必要です',
   FORBIDDEN: 'この操作を行う権限がありません',
+  STALE_CLIENT: 'アプリが更新されました。ページを再読み込みしてください',
   UNKNOWN: '予期しないエラーが発生しました',
 };
 
@@ -217,6 +236,12 @@ export function statusFor(code: ErrorCode): number {
       return 404;
     case 'CONFLICT':
       return 409;
+    // 426 Upgrade Required, which is exactly what this is: the request is
+    // well-formed and authorised, and the caller must switch to a newer build
+    // before it can be answered. A 409 would be indistinguishable in a log from
+    // an ordinary constraint breach.
+    case 'STALE_CLIENT':
+      return 426;
     default:
       return 500;
   }

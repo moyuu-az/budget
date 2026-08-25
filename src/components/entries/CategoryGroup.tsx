@@ -4,6 +4,7 @@ import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
 import EntryRow from './EntryRow';
 import { costTypeLabel, costTypeTone } from '../../utils/cost-type';
+import { occurrenceDayInMonth, sortDay } from '../../../shared/recurrence';
 import { Badge } from '../ui/Badge';
 import type { Category, EntryTemplate } from '../../types';
 
@@ -24,9 +25,22 @@ function CategoryGroup({ category, templates, yearMonth }: Props) {
     .filter((t) => t.enabled)
     .reduce((sum, t) => sum + resolveAmount(t.id, yearMonth, monthlyAmountsMap, allTemplates), 0);
 
+  // Ordered by the day the money actually moves IN THIS MONTH -- the clamped
+  // day, so an entry stored on the 31st sorts to the 28th in February and sits
+  // beside the other end-of-month entries rather than after them.
+  //
+  // The fallback matters even though this list is pre-filtered to entries that
+  // occur: it keeps the comparator total, so a row that somehow reaches here
+  // without occurring is ordered rather than compared against NaN, which in
+  // JavaScript makes the whole sort's result depend on input order.
   const sortedTemplates = useMemo(
-    () => [...templates].sort((a, b) => a.dayOfMonth - b.dayOfMonth || a.sortOrder - b.sortOrder),
-    [templates]
+    () =>
+      [...templates].sort((a, b) => {
+        const dayA = occurrenceDayInMonth(a.recurrence, yearMonth) ?? sortDay(a.recurrence);
+        const dayB = occurrenceDayInMonth(b.recurrence, yearMonth) ?? sortDay(b.recurrence);
+        return dayA - dayB || a.sortOrder - b.sortOrder;
+      }),
+    [templates, yearMonth]
   );
 
   if (templates.length === 0) return null;

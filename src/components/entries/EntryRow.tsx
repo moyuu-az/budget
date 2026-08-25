@@ -3,6 +3,7 @@ import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
 import { useToastStore } from '../../stores/useToastStore';
 import { formatWithCommas, handleCurrencyInput, parseCommaNumber } from '../../utils/currency';
+import { describeRecurrenceShort } from '../../../shared/recurrence';
 import TemplateEditor from './TemplateEditor';
 import type { EntryTemplate } from '../../types';
 
@@ -56,13 +57,14 @@ function EntryRow({ template, yearMonth }: Props) {
     }
   }, [editingActual]);
 
-  const handleToggle = useCallback(async () => {
-    try {
-      await toggleTemplate(template.id, !template.enabled);
-    } catch {
-      addToast('切り替えに失敗しました', 'error');
-    }
-  }, [template.id, template.enabled, toggleTemplate, addToast]);
+  // No toast on success: the switch itself moving IS the feedback, and a toast
+  // for every toggle in a list of twenty is noise. On failure the store has
+  // already rolled the switch back and reportError has raised the message, so
+  // there is nothing left for this to say -- the second toast this used to add
+  // could never fire anyway, since the store swallows the throw.
+  const handleToggle = useCallback(() => {
+    void toggleTemplate(template.id, !template.enabled);
+  }, [template.id, template.enabled, toggleTemplate]);
 
   const startEditPlanned = () => {
     const initial = formatWithCommas(resolvedPlanned);
@@ -168,7 +170,13 @@ function EntryRow({ template, yearMonth }: Props) {
           <span className={`text-sm truncate ${template.enabled ? 'text-slate-200' : 'text-slate-500'}`}>
             {template.name}
           </span>
-          <span className="text-xs text-slate-500 ml-1.5">{template.dayOfMonth}日</span>
+          {/* When it happens, from the ONE formatter (shared/recurrence.ts).
+              The short form keeps saying 「年1回」/「2ヶ月ごと」 on purpose: a
+              month carrying an annual premium otherwise reads as an unusually
+              bad month rather than an ordinary one with a yearly bill in it. */}
+          <span className="text-xs text-slate-500 ml-1.5">
+            {describeRecurrenceShort(template.recurrence, yearMonth)}
+          </span>
         </div>
 
         {/* Planned amount */}

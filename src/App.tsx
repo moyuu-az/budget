@@ -12,6 +12,7 @@ import AssetsView from './components/assets/AssetsView';
 import SettingsView from './components/settings/SettingsView';
 import ParticleBackground from './components/ParticleBackground';
 import ShortcutHelpDialog from './components/layout/ShortcutHelpDialog';
+import StaleClientOverlay from './components/layout/StaleClientOverlay';
 import { Toast } from './components/ui/Toast';
 import { useThemeEffect } from './hooks/useTheme';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -78,6 +79,10 @@ function App() {
         </AnimatePresence>
       </Layout>
       <ShortcutHelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+      {/* Renders nothing until the server refuses this bundle as out of date.
+          Outside Layout so it covers the sidebar too -- the balance in it is one
+          of the figures an old build can misread. */}
+      <StaleClientOverlay />
       <Toast />
     </>
   );

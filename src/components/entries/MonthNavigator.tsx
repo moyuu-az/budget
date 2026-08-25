@@ -33,10 +33,12 @@ function MonthNavigator({ yearMonth, onChange }: MonthNavigatorProps) {
   return (
     <div className="flex items-center gap-3">
       <button
+        type="button"
         onClick={goPrev}
+        aria-label="前月"
         className="p-2 rounded-lg text-slate-400 hover:text-white transition-all hover:bg-white/5"
       >
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg className="w-5 h-5" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
         </svg>
       </button>
@@ -44,10 +46,12 @@ function MonthNavigator({ yearMonth, onChange }: MonthNavigatorProps) {
         {year}年{MONTH_NAMES[month]}
       </span>
       <button
+        type="button"
         onClick={goNext}
+        aria-label="翌月"
         className="p-2 rounded-lg text-slate-400 hover:text-white transition-all hover:bg-white/5"
       >
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg className="w-5 h-5" aria-hidden="true" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
         </svg>
       </button>

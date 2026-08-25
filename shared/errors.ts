@@ -13,6 +13,11 @@ export type ErrorCode =
   // The caller is signed in but may not touch what they asked for -- in practice,
   // naming a ledger they are not a member of.
   | 'FORBIDDEN'
+  // The tab is running a bundle built against an older wire contract. Its own
+  // code cannot read this server's responses correctly, so the request is
+  // refused rather than answered with data the caller will misinterpret.
+  // Recoverable by reloading, and by nothing else -- see shared/contract-version.ts.
+  | 'STALE_CLIENT'
   | 'UNKNOWN';
 
 export interface ErrorEnvelope {

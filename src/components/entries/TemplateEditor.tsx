@@ -5,7 +5,16 @@ import { useCategoryStore } from '../../stores/useCategoryStore';
 import { useToastStore } from '../../stores/useToastStore';
 import { formatWithCommas, handleCurrencyInput, parseCommaNumber } from '../../utils/currency';
 import ConfirmDialog from '../shared/ConfirmDialog';
-import type { EntryTemplate } from '../../types';
+import RecurrenceEditor from './RecurrenceEditor';
+import type { EntryTemplate, Recurrence } from '../../types';
+
+/**
+ * What a brand-new entry repeats as.
+ *
+ * Monthly on the 1st -- the shape almost every entry has, so the common case
+ * needs no interaction. The other three are one select away.
+ */
+const DEFAULT_RECURRENCE: Recurrence = { kind: 'monthly', dayOfMonth: 1 };
 
 interface Props {
   template?: EntryTemplate;
@@ -15,7 +24,10 @@ interface Props {
 
 function TemplateEditor({ template, onSave, onCancel }: Props) {
   const [name, setName] = useState(template?.name ?? '');
-  const [dayOfMonth, setDayOfMonth] = useState(template?.dayOfMonth ?? 1);
+  // The recurrence is held as ONE value, never as loose parts. RecurrenceEditor
+  // only ever emits a complete, valid one, so there is no half-filled state here
+  // for the save handler to have to defend against.
+  const [recurrence, setRecurrence] = useState<Recurrence>(template?.recurrence ?? DEFAULT_RECURRENCE);
   const [type, setType] = useState<'income' | 'expense'>(template?.type ?? 'expense');
   const [categoryId, setCategoryId] = useState<number | null>(template?.categoryId ?? null);
   const [defaultAmountStr, setDefaultAmountStr] = useState(
@@ -37,50 +49,33 @@ function TemplateEditor({ template, onSave, onCancel }: Props) {
       addToast('名前を入力してください', 'error');
       return;
     }
-    if (dayOfMonth < 1 || dayOfMonth > 31) {
-      addToast('日付は1-31の間で入力してください', 'error');
-      return;
-    }
+    // No recurrence validation here on purpose: RecurrenceEditor cannot produce
+    // an invalid one, and the server re-checks with the SAME predicate
+    // (shared/recurrence.ts) rather than a second implementation of the rules.
 
+    // Branching on the store's boolean rather than wrapping the call in
+    // try/catch. The store swallows the throw (reportError has already raised
+    // the toast), so a catch here would never run: the form would close and say
+    // 「更新しました」 beside the error message, for a save that did not happen.
     setSaving(true);
-    try {
-      const defaultAmount = parseCommaNumber(defaultAmountStr);
-      if (template) {
-        await updateTemplate(template.id, {
-          name: name.trim(),
-          dayOfMonth,
-          type,
-          categoryId,
-          defaultAmount,
-        });
-        addToast('テンプレートを更新しました', 'success');
-      } else {
-        await addTemplate({
-          name: name.trim(),
-          dayOfMonth,
-          type,
-          categoryId,
-          defaultAmount,
-        });
-        addToast('テンプレートを追加しました', 'success');
-      }
-      onSave();
-    } catch {
-      addToast('保存に失敗しました', 'error');
-    } finally {
-      setSaving(false);
-    }
+    const defaultAmount = parseCommaNumber(defaultAmountStr);
+    const fields = { name: name.trim(), recurrence, type, categoryId, defaultAmount };
+
+    const saved = template
+      ? await updateTemplate(template.id, fields)
+      : await addTemplate(fields);
+    setSaving(false);
+
+    if (!saved) return;
+    addToast(template ? 'テンプレートを更新しました' : 'テンプレートを追加しました', 'success');
+    onSave();
   };
 
   const handleDelete = async () => {
     if (!template) return;
-    try {
-      await deleteTemplate(template.id);
-      addToast('テンプレートを削除しました', 'success');
-      onSave();
-    } catch {
-      addToast('削除に失敗しました', 'error');
-    }
+    if (!(await deleteTemplate(template.id))) return;
+    addToast('テンプレートを削除しました', 'success');
+    onSave();
   };
 
   return (
@@ -102,19 +97,6 @@ function TemplateEditor({ template, onSave, onCancel }: Props) {
               onChange={(e) => setName(e.target.value)}
               className="w-full rounded-lg bg-slate-700/50 border border-slate-600/50 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none transition-colors"
               placeholder="家賃、給料など"
-            />
-          </div>
-
-          {/* Day of month */}
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">日</label>
-            <input
-              type="number"
-              min={1}
-              max={31}
-              value={dayOfMonth}
-              onChange={(e) => setDayOfMonth(Math.max(1, Math.min(31, parseInt(e.target.value) || 1)))}
-              className="w-full rounded-lg bg-slate-700/50 border border-slate-600/50 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none transition-colors"
             />
           </div>
 
@@ -149,6 +131,10 @@ function TemplateEditor({ template, onSave, onCancel }: Props) {
             </select>
           </div>
         </div>
+
+        {/* When it happens. Full width: the interval shape needs three controls
+            and an anchor month, which do not fit in half a row. */}
+        <RecurrenceEditor value={recurrence} onChange={setRecurrence} disabled={saving} />
 
         {/* Default amount */}
         <div>

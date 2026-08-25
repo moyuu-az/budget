@@ -12,12 +12,13 @@ import type {
   MonthlyActualsMap,
   CategoryTrendPoint,
 } from '../types';
+import { monthlyOn, yearlyOn } from '../test/factories';
 
 function makeTemplate(overrides: Partial<EntryTemplate> = {}): EntryTemplate {
   return {
     id: 1,
     name: 'Template',
-    dayOfMonth: 1,
+    recurrence: monthlyOn(1),
     type: 'expense',
     enabled: true,
     sortOrder: 0,
@@ -180,6 +181,47 @@ describe('buildCategoryTrend', () => {
       [tpl], [makeCategory({ id: 1 })], NO_MAP, actuals(['2026-01', [[1, 999]]]), ['2026-01'], 'expense',
     );
     expect(result[0].categories).toEqual([]);
+  });
+});
+
+describe('the planned fallback vs. irregular timing', () => {
+  // -----------------------------------------------------------------------
+  // The trend charts synthesise a planned amount for any month with no
+  // recorded actual. Since migration 005 that synthesis has to ask WHETHER the
+  // entry falls in the month -- otherwise an annual premium is invented into
+  // all twelve, and a trend line reads flat at a value no month's own total
+  // agrees with.
+  //
+  // The actuals path deliberately keeps no such filter, which is the second
+  // test below: a recorded actual is a FACT about a month, and editing the
+  // recurrence afterwards must not erase history.
+  // -----------------------------------------------------------------------
+  it('does not synthesise a yearly plan into the months it skips', () => {
+    const tpl = makeTemplate({
+      id: 1, type: 'expense', categoryId: 1, defaultAmount: 120_000, recurrence: yearlyOn(3, 20),
+    });
+    const cats = [makeCategory({ id: 1, name: '車', color: '#abcdef' })];
+
+    const result = buildCategoryTrend([tpl], cats, NO_MAP, new Map(), ['2026-02', '2026-03', '2026-04'], 'expense');
+
+    expect(result[0].categories).toEqual([]);
+    expect(result[1].categories[0]).toMatchObject({ categoryId: 1, amount: 120_000 });
+    expect(result[2].categories).toEqual([]);
+  });
+
+  it('still counts a recorded actual in a month the entry no longer falls in', () => {
+    // The household paid it; the recurrence was corrected afterwards. The month
+    // it was actually paid in must keep showing it.
+    const tpl = makeTemplate({
+      id: 1, type: 'expense', categoryId: 1, defaultAmount: 120_000, recurrence: yearlyOn(3, 20),
+    });
+    const cats = [makeCategory({ id: 1, name: '車', color: '#abcdef' })];
+
+    const result = buildCategoryTrend(
+      [tpl], cats, NO_MAP, actuals(['2026-08', [[1, 99_000]]]), ['2026-08'], 'expense',
+    );
+
+    expect(result[0].categories[0]).toMatchObject({ categoryId: 1, amount: 99_000 });
   });
 });
 
