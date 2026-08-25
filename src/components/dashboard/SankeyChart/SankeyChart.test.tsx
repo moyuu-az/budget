@@ -31,6 +31,30 @@ const HOUSING: Category = {
 
 let api: AppApi;
 
+/**
+ * Gives every element a measured width, which happy-dom otherwise reports as 0.
+ *
+ * SankeyCanvas sizes itself from the container, so without this the diagram is
+ * never drawn in a test and every assertion about it passes vacuously -- which
+ * is exactly what happened: the only test naming the diagram asserted on the
+ * card's HEADING, so the graph could disappear entirely with nothing failing.
+ * It disappeared twice before this helper existed.
+ */
+function givenContainerWidth(px: number): void {
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get: () => px,
+  });
+}
+
+afterEach(() => {
+  // Back to happy-dom's own answer, so this cannot leak into other files.
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get: () => 0,
+  });
+});
+
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   vi.setSystemTime(FIXED_TODAY);
@@ -113,6 +137,57 @@ describe('once everything has arrived', () => {
 
     expect(await screen.findByText('今月のキャッシュフロー')).toBeInTheDocument();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('actually draws the DIAGRAM, not just the card around it', async () => {
+    // The heading and the 収入/支出/差引 footer render whatever the diagram
+    // does, so asserting on them says nothing about whether a graph is on
+    // screen. This is the assertion whose absence let the diagram vanish.
+    givenContainerWidth(1000);
+    api.getMonthlyAmounts = vi.fn().mockResolvedValue([]);
+    const { container } = render(<SankeyChart />);
+
+    await screen.findByText('今月のキャッシュフロー');
+    const svg = container.querySelector('svg:not([aria-hidden="true"])');
+    expect(svg, 'the flow diagram').not.toBeNull();
+    // Bands, not just an empty canvas.
+    expect(svg!.querySelectorAll('path').length).toBeGreaterThan(0);
+  });
+
+  it('still draws it in a dashboard column, not only across a whole row', async () => {
+    // ~314px is what a third of the dashboard's row leaves inside the card.
+    // With fixed 130px side margins that left 54px of diagram and rendered
+    // nothing -- which is how adding a card beside this one deleted the graph.
+    givenContainerWidth(314);
+    api.getMonthlyAmounts = vi.fn().mockResolvedValue([]);
+    const { container } = render(<SankeyChart />);
+
+    await screen.findByText('今月のキャッシュフロー');
+    expect(container.querySelector('svg:not([aria-hidden="true"])')).not.toBeNull();
+  });
+
+  it('still draws it on a phone', async () => {
+    // ~295px is the card's content width at 375px. The mobile release shipped
+    // with this panel blank on every phone, and no test noticed.
+    givenContainerWidth(295);
+    api.getMonthlyAmounts = vi.fn().mockResolvedValue([]);
+    const { container } = render(<SankeyChart />);
+
+    await screen.findByText('今月のキャッシュフロー');
+    expect(container.querySelector('svg:not([aria-hidden="true"])')).not.toBeNull();
+  });
+
+  it('says why it cannot draw, rather than leaving a hole', async () => {
+    // A panel that renders its heading, its totals, and nothing in between is
+    // the same class of mistake as an empty state that makes a false claim: the
+    // screen stops telling the truth about what it knows.
+    givenContainerWidth(140);
+    api.getMonthlyAmounts = vi.fn().mockResolvedValue([]);
+    const { container } = render(<SankeyChart />);
+
+    await screen.findByText('今月のキャッシュフロー');
+    expect(container.querySelector('svg:not([aria-hidden="true"])')).toBeNull();
+    expect(screen.getByText(/この幅ではフロー図を表示できません/)).toBeInTheDocument();
   });
 
   it('says so honestly when the month really is empty', async () => {
