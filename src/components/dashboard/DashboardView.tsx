@@ -79,20 +79,33 @@ function DashboardView({ onNavigate }: DashboardViewProps) {
         />
       </LoadGate>
 
-      {/* MinBalanceCard + 先月の予実 (1/3 each) + SankeyChart (1/3)
-          
+      {/* 最低残高予測 + 先月の予実, side by side.
+
           先月の予実 sits here rather than in the KPI row because it is about the
           PAST: the row above answers "what do I do now", and mixing a
           retrospective figure into it would blunt that. It is still above the
           fold, which is the point -- it lived only in 分析, and anyone who
           reaches 分析 is already thinking about their spending. */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <LoadGate status={status} height={148} label="最低残高予測" onRetry={retry}>
           <MinBalanceCard point={minimumPoint} daysUntil={daysUntilMinimum} />
         </LoadGate>
         <VarianceCard />
-        <SankeyChart />
       </div>
+
+      {/* THE FLOW DIAGRAM GETS THE WHOLE ROW, and that is a requirement rather
+          than a preference.
+
+          It draws labelled bands between two columns of nodes, so its side
+          margins carry Japanese category names and are not optional. Squeezed
+          into a third of a three-column row it had about 54px left for the
+          diagram itself and rendered nothing at all -- silently, because the
+          card's heading and totals still drew. That is how it was added beside
+          先月の予実 without anyone noticing the graph had gone.
+
+          SankeyCanvas now says so instead of vanishing, but the fix for THIS
+          screen is to give it the width it needs. */}
+      <SankeyChart />
 
       {/* Upcoming Events - full width */}
       <motion.div
