@@ -113,7 +113,8 @@ function AnalyticsView() {
       animate={{ opacity: 1 }}
       transition={{ duration: 0.4 }}
     >
-      <div className="flex items-center justify-between">
+      {/* Wraps: the period selector is four buttons wide. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-bold text-white">分析</h1>
         <PeriodSelector
           options={periodOptions}

@@ -18,7 +18,7 @@ function HistoryView() {
       animate={{ opacity: 1, y: 0 }}
       className="space-y-6"
     >
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-bold text-white">残高履歴</h1>
         <Button onClick={() => setFormOpen(true)}>残高を記録</Button>
       </div>

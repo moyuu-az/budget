@@ -1,15 +1,32 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { ViewType } from './types';
 import { loadLedgerData } from './app/ledger';
 import { reportError } from './app/reportError';
 import Layout from './components/Layout';
 import DashboardView from './components/dashboard/DashboardView';
-import EntriesView from './components/entries/EntriesView';
-import HistoryView from './components/history/HistoryView';
-import AnalyticsView from './components/analytics/AnalyticsView';
-import AssetsView from './components/assets/AssetsView';
-import SettingsView from './components/settings/SettingsView';
+import { Skeleton } from './components/ui/Skeleton';
+
+// ---------------------------------------------------------------------------
+// EVERY SCREEN EXCEPT THE FIRST ONE IS LOADED WHEN IT IS OPENED.
+//
+// This is a mobile change, not a tidiness one. The bundle was 395 kB gzipped in
+// ONE file, and the device most likely to open this app is a phone on mobile
+// data standing in a shop. Charting code for 分析 and 履歴 has no business being
+// downloaded before the balance can be shown.
+//
+// The DASHBOARD stays eager: it is what loads on open, so deferring it would
+// only add a round trip to the one screen everybody sees.
+//
+// Suspense fallback is a skeleton rather than a spinner, for the same reason
+// LoadGate uses one -- it holds the height, so the page does not jump when the
+// screen arrives.
+// ---------------------------------------------------------------------------
+const EntriesView = lazy(() => import('./components/entries/EntriesView'));
+const HistoryView = lazy(() => import('./components/history/HistoryView'));
+const AnalyticsView = lazy(() => import('./components/analytics/AnalyticsView'));
+const AssetsView = lazy(() => import('./components/assets/AssetsView'));
+const SettingsView = lazy(() => import('./components/settings/SettingsView'));
 import ParticleBackground from './components/ParticleBackground';
 import ShortcutHelpDialog from './components/layout/ShortcutHelpDialog';
 import StaleClientOverlay from './components/layout/StaleClientOverlay';
@@ -45,6 +62,14 @@ function App() {
     <>
       <ParticleBackground />
       <Layout currentView={currentView} onNavigate={setCurrentView}>
+        <Suspense
+          fallback={
+            <div role="status" aria-label="画面を読み込み中">
+              <span className="sr-only">画面を読み込み中</span>
+              <Skeleton height={320} className="w-full" />
+            </div>
+          }
+        >
         <AnimatePresence mode="wait">
           {currentView === 'dashboard' && (
             <motion.div key="dashboard" {...pageTransition}>
@@ -77,6 +102,7 @@ function App() {
             </motion.div>
           )}
         </AnimatePresence>
+        </Suspense>
       </Layout>
       <ShortcutHelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
       {/* Renders nothing until the server refuses this bundle as out of date.

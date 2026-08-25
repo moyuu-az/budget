@@ -42,7 +42,7 @@ function MonthNavigator({ yearMonth, onChange }: MonthNavigatorProps) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
         </svg>
       </button>
-      <span className="text-white font-semibold text-lg min-w-[180px] text-center">
+      <span className="flex-1 text-center text-white font-semibold text-lg sm:flex-none sm:min-w-[180px]">
         {year}年{MONTH_NAMES[month]}
       </span>
       <button

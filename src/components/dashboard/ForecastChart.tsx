@@ -106,7 +106,10 @@ function ForecastChart({ data, minimumPoint, period, onPeriodChange, onOpenAnaly
       transition={{ duration: 0.5, delay: 0.2 }}
       className="glass rounded-2xl p-6"
     >
-      <div className="flex items-center justify-between mb-4">
+      {/* Wraps: 残高予測 beside four period tabs and a 詳細分析 link is wider
+          than a phone, and a header that overflows takes the whole page's
+          horizontal scroll with it. */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-semibold text-white">残高予測</h2>
         <div className="flex items-center gap-2">
           <Tabs

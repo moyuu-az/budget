@@ -92,7 +92,22 @@ export function Dialog({
             className={cn(
               'relative w-full rounded-[var(--radius-xl)] border border-[var(--color-border-subtle)]',
               'bg-[var(--color-surface-overlay)] backdrop-blur-xl shadow-[var(--shadow-lg)]',
-              'p-6 focus:outline-none',
+              // THE PANEL SCROLLS INSIDE THE VIEWPORT RATHER THAN GROWING PAST IT.
+              //
+              // Without this, a dialog taller than the screen is simply clipped:
+              // the overlay centres it and nothing scrolls, so the footer --
+              // which holds 保存 -- cannot be reached. The form becomes
+              // impossible to submit.
+              //
+              // On a desktop there is always enough height and the bug is
+              // invisible, which is exactly why it survived: 資産 dialogs grow
+              // by one input per parameter definition (up to twelve), and a
+              // phone runs out of room long before a laptop does.
+              //
+              // dvh, not vh: the VISIBLE viewport, so the panel does not extend
+              // under a mobile browser's chrome. 2rem is the overlay's own p-4,
+              // top and bottom.
+              'max-h-[calc(100dvh-2rem)] overflow-y-auto p-6 focus:outline-none',
               sizeClasses[size],
             )}
           >
