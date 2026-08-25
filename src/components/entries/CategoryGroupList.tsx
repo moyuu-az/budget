@@ -41,8 +41,13 @@ function CategoryGroupList({ templates, categories, yearMonth }: CategoryGroupLi
 
   return (
     <>
-      {/* Column headers */}
-      <div className="flex items-center gap-3 px-3 text-xs text-slate-500">
+      {/* Column headers -- WIDE SCREENS ONLY.
+          
+          On a phone each row wraps to two lines, so the amounts sit under the
+          name rather than in columns beside it. A header row above that lines
+          up with nothing, and a header naming a column that is not there is
+          worse than no header. Each cell carries its own label instead. */}
+      <div className="hidden sm:flex items-center gap-3 px-3 text-xs text-slate-500">
         <div className="w-8 shrink-0" /> {/* Toggle spacer */}
         <div className="flex-1">項目</div>
         <div className="w-28 text-right">予定額</div>

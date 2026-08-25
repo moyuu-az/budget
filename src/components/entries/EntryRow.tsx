@@ -176,7 +176,19 @@ function EntryRow({ template, yearMonth }: Props) {
   return (
     <>
       <div
-        className={`flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-700/30 transition-colors ${
+        // TWO LINES ON A PHONE, ONE ON A DESKTOP.
+        //
+        // The fixed columns of this row add up to 342px -- toggle, two 112px
+        // amount cells, the edit button, and four gaps. Inside a card with p-4
+        // on a 375px screen that left about ONE PIXEL for the entry's name.
+        // It did not overflow (the name is truncated) so nothing looked broken:
+        // every row simply read as two figures with no label.
+        //
+        // `flex-wrap` plus `w-full sm:w-auto` on the amounts puts them on their
+        // own line below the name, which is the whole width. 収支管理 is the
+        // second-most-opened screen in the app; a version of it where the entry
+        // names are invisible is not a mobile version of anything.
+        className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 rounded-lg hover:bg-slate-700/30 transition-colors ${
           !template.enabled ? 'opacity-50' : ''
         }`}
       >
@@ -208,6 +220,25 @@ function EntryRow({ template, yearMonth }: Props) {
           </span>
         </div>
 
+        {/* Edit, on the NAME's line. On a phone the amounts move to their own
+            line below, and an edit button stranded down there would sit beside
+            figures it has nothing to do with. */}
+        <button
+          onClick={() => setShowEditor(!showEditor)}
+          className="order-2 p-1 text-slate-500 hover:text-slate-300 transition-colors shrink-0 sm:order-none"
+          title="テンプレート編集"
+          aria-label={`${template.name}のテンプレートを編集`}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+          </svg>
+        </button>
+
+        {/* The amounts, together.
+            
+            Right-aligned in both layouts: a column of figures is only scannable
+            if the digits line up. */}
+        <div className="order-3 flex w-full items-center justify-end gap-3 sm:order-none sm:w-auto">
         {/* Planned amount */}
         <div className="w-28 text-right">
           {editingPlanned ? (
@@ -236,6 +267,11 @@ function EntryRow({ template, yearMonth }: Props) {
               className="text-right w-full group"
               title={hasMonthlyOverride ? '月別設定' : 'デフォルト金額'}
             >
+              {/* The column headers are hidden on a phone -- the two-line layout
+                  puts the amounts under the name, where a header row above the
+                  list would no longer line up with anything. So the cell says
+                  what it is. */}
+              <span className="mr-1 text-[10px] text-slate-500 sm:hidden">予定</span>
               <span
                 className={`text-sm tabular-nums ${
                   hasMonthlyOverride
@@ -277,6 +313,7 @@ function EntryRow({ template, yearMonth }: Props) {
               className="text-right w-full group"
               title="実績金額"
             >
+              <span className="mr-1 text-[10px] text-slate-500 sm:hidden">実績</span>
               {actualAmount !== null ? (
                 <span className="text-sm tabular-nums text-emerald-400 group-hover:text-emerald-300 transition-colors">
                   ¥{formatWithCommas(actualAmount)}
@@ -289,17 +326,7 @@ function EntryRow({ template, yearMonth }: Props) {
             </button>
           )}
         </div>
-
-        {/* Edit button */}
-        <button
-          onClick={() => setShowEditor(!showEditor)}
-          className="p-1 text-slate-500 hover:text-slate-300 transition-colors shrink-0"
-          title="テンプレート編集"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-          </svg>
-        </button>
+        </div>
       </div>
 
       {/* Inline template editor */}

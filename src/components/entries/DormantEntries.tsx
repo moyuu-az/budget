@@ -117,7 +117,9 @@ function DormantEntries({ templates, yearMonth }: Props) {
                 const expired = isExpiredOnce(template.recurrence, yearMonth);
                 return (
                 <li key={template.id}>
-                  <div className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-slate-700/20 transition-colors">
+                  {/* Wraps for the same reason EntryRow does: the fixed columns
+                      leave a phone almost nothing for the name. */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 py-2 rounded-lg hover:bg-slate-700/20 transition-colors">
                     <span
                       className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                         template.type === 'income' ? 'bg-green-500/70' : 'bg-red-500/70'
@@ -131,7 +133,7 @@ function DormantEntries({ templates, yearMonth }: Props) {
                     >
                       {template.name}
                     </span>
-                    <span className="flex items-center gap-1.5 text-xs text-slate-500 shrink-0">
+                    <span className="order-3 flex items-center gap-1.5 text-xs text-slate-500 shrink-0 sm:order-none">
                       {/* Expired one-offs say so. Without it 「2025年11月3日」 in a
                           list of things that are not this month reads as one that
                           has not happened yet -- and the household plans for a
