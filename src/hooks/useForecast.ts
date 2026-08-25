@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { ForecastPoint } from '../types';
 import { useCashBalance } from './useCashBalance';
+import { useAssetStore } from '../stores/useAssetStore';
 import { useTemplateStore } from '../stores/useTemplateStore';
 import { useMonthlyStore } from '../stores/useMonthlyStore';
 import { generateForecast } from '../utils/forecast';
@@ -36,15 +37,49 @@ import { generateForecast } from '../utils/forecast';
 //   If you are adding a fourth screen that needs a projection: call this. If you
 //   are about to add an argument that changes what goes INTO the projection,
 //   read the paragraph above first.
+//
+// WHY THE RETURN TYPE CARRIES `ready`
+//   A projection built from inputs that have not arrived is not a cautious
+//   projection -- it is a WRONG one, and it is wrong in the alarming direction.
+//   The templates and the balance land in separate responses, and the balance is
+//   the later of the two often enough to matter (the browser caps concurrent
+//   connections, and the balance now needs two requests where it used to need
+//   one). In that window the dashboard has real expenses and a ¥0 balance, and
+//   projects 残高不足 -- in red, with no indication that anything is still
+//   loading. An app whose whole purpose is to warn about running out of money
+//   cannot afford to cry wolf on every cold load.
+//
+//   So readiness is part of the answer rather than a flag beside it, and
+//   `points` is EMPTY until it is true. A caller that ignores `ready` renders
+//   "no data", which is honest; there is no arrangement of this API that renders
+//   a fabricated warning.
 // ---------------------------------------------------------------------------
 
-export function useForecast(days: number): ForecastPoint[] {
+export interface Forecast {
+  /** True once every input has arrived. While false, `points` is empty. */
+  ready: boolean;
+  /** The projection, day by day. */
+  points: ForecastPoint[];
+}
+
+export function useForecast(days: number): Forecast {
   const balance = useCashBalance();
+  // Not `!loading`: a store that has never fetched is not loading either.
+  const balanceLoaded = useAssetStore((s) => s.loaded);
   const templates = useTemplateStore((s) => s.templates);
+  const templatesLoaded = useTemplateStore((s) => s.loaded);
   const monthlyAmountsMap = useMonthlyStore((s) => s.monthlyAmountsMap);
 
+  // Monthly amounts are deliberately NOT required. They are fetched per month as
+  // the user navigates and refine amounts the templates already supply, so their
+  // absence makes the projection approximate rather than false.
+  const ready = balanceLoaded && templatesLoaded;
+
   return useMemo(
-    () => generateForecast(balance, templates, monthlyAmountsMap, days),
-    [balance, templates, monthlyAmountsMap, days],
+    () => ({
+      ready,
+      points: ready ? generateForecast(balance, templates, monthlyAmountsMap, days) : [],
+    }),
+    [ready, balance, templates, monthlyAmountsMap, days],
   );
 }

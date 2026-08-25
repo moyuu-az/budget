@@ -1,9 +1,15 @@
 import { motion } from 'framer-motion';
+import type { ViewType } from '../../types';
 import { Card } from '../ui/Card';
 import CashBalance from '../sidebar/CashBalance';
 import CategoryManager from './CategoryManager';
 
-function SettingsView() {
+interface Props {
+  /** Lets the balance card send the user to 資産, where the figure is edited. */
+  onNavigate?: (view: ViewType) => void;
+}
+
+function SettingsView({ onNavigate }: Props) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -13,10 +19,10 @@ function SettingsView() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         <Card padding="lg">
           <h2 className="text-lg font-semibold text-white mb-4">残高</h2>
-          {/* No onEdit: this view has no navigation callback, and a button that
-              cannot go anywhere is worse than none. The sidebar card, which is
-              on screen beside this one, has it. */}
-          <CashBalance />
+          {/* The sidebar has the same card, but it is hidden while the sidebar
+              is collapsed -- which left this screen with no way at all to reach
+              the holdings the figure is made of. */}
+          <CashBalance onEdit={onNavigate ? () => onNavigate('assets') : undefined} />
         </Card>
         <CategoryManager />
       </div>

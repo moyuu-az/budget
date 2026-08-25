@@ -31,6 +31,7 @@ const cashOnly = (): void => {
     categories: [makeCashCategory()],
     assets: [makeCashAsset({ value: 300_000 })],
     loading: false,
+    loaded: true,
   });
 };
 
@@ -40,11 +41,12 @@ const withNonCashAssets = (): void => {
     categories: [makeCashCategory(), makeAssetCategory({ id: 1 })],
     assets: [makeCashAsset({ value: 300_000 }), nisa],
     loading: false,
+    loaded: true,
   });
 };
 
 beforeEach(() => {
-  useTemplateStore.setState({ templates: [rent] });
+  useTemplateStore.setState({ templates: [rent], loaded: true });
   cashOnly();
   useUIStore.setState({ holdingsView: 'cash' });
 });
@@ -93,7 +95,7 @@ describe('the forecast is cash, and only cash', () => {
 
     // 300,000 -- not 50,300,000. This is the assertion that would have caught
     // someone reaching for totalAssetValue(assets) instead of useCashBalance().
-    expect(result.current[0].balance).toBe(300_000);
+    expect(result.current.points[0].balance).toBe(300_000);
   });
 
   it('follows an edit to a cash holding', () => {
@@ -106,7 +108,76 @@ describe('the forecast is cash, and only cash', () => {
     });
     rerender();
 
-    expect(result.current[0].balance).toBe(450_000);
+    expect(result.current.points[0].balance).toBe(450_000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The forecast must not exist before its inputs do.
+//
+// The balance and the expense templates arrive in separate responses, and the
+// balance is the later of the two often enough to matter -- it now takes two
+// requests where it used to take one, and browsers cap concurrent connections.
+// In that window the dashboard held real expenses and a not-yet-loaded ¥0
+// balance, and projected 残高不足 in red on every cold load.
+//
+// A false warning is worse than a late one: it is the alarm this application
+// exists to raise, spent on nothing.
+// ---------------------------------------------------------------------------
+
+describe('a projection is not offered until its inputs have arrived', () => {
+  it('is not ready, and holds no points, before the balance lands', () => {
+    useAssetStore.setState({ categories: [], assets: [], loaded: false });
+    const { result } = renderHook(() => useForecast(90));
+
+    expect(result.current.ready).toBe(false);
+    // Empty rather than "computed from zero": a caller that ignores `ready`
+    // renders "no data", which is honest. There is no arrangement of this API
+    // that renders a fabricated warning.
+    expect(result.current.points).toEqual([]);
+  });
+
+  it('is not ready before the templates land either', () => {
+    useTemplateStore.setState({ templates: [], loaded: false });
+    const { result } = renderHook(() => useForecast(90));
+
+    expect(result.current.ready).toBe(false);
+  });
+
+  it('never reports a shortfall from a balance that has not loaded', () => {
+    // The regression itself: real expenses, balance still in flight.
+    useAssetStore.setState({ categories: [], assets: [], loaded: false });
+    const { result } = renderHook(() => useDashboardKpis());
+
+    expect(result.current.ready).toBe(false);
+    expect(result.current.minBalance90d).toBe(0);
+    expect(result.current.minBalance90dDate).toBeNull();
+  });
+
+  it('becomes ready when the fetch lands, with the real figures', () => {
+    useAssetStore.setState({ categories: [], assets: [], loaded: false });
+    const { result, rerender } = renderHook(() => useForecast(90));
+
+    act(cashOnly);
+    rerender();
+
+    expect(result.current.ready).toBe(true);
+    expect(result.current.points[0].balance).toBe(300_000);
+  });
+
+  it('stops being ready when the ledger changes', () => {
+    // reset() clears `loaded` with the data. Treating the previous ledger's
+    // answer as still valid is what would brief one household's figures onto
+    // another's screen.
+    const { result, rerender } = renderHook(() => useForecast(90));
+    expect(result.current.ready).toBe(true);
+
+    act(() => {
+      useAssetStore.getState().reset();
+    });
+    rerender();
+
+    expect(result.current.ready).toBe(false);
   });
 });
 

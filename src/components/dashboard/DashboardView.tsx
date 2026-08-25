@@ -4,6 +4,7 @@ import type { ForecastPeriod, ViewType } from '../../types';
 import { useMonthlyStore } from '../../stores/useMonthlyStore';
 import { useForecast } from '../../hooks/useForecast';
 import { toYearMonth, periodToDays, periodToMonths } from '../../utils/forecast';
+import { Skeleton } from '../ui/Skeleton';
 import ForecastChart from './ForecastChart';
 import KpiHero from './KpiHero';
 import HoldingsCard from './HoldingsCard';
@@ -29,7 +30,10 @@ function DashboardView({ onNavigate }: DashboardViewProps) {
     fetchMonthlyAmountsRange(startMonth, endMonth);
   }, [fetchMonthlyAmountsRange, forecastPeriod]);
 
-  const forecast = useForecast(periodToDays(forecastPeriod));
+  // `ready` is false until the balance and the templates have both arrived. It
+  // is not cosmetic: with real expenses and a not-yet-loaded ¥0 balance, every
+  // figure below reads 残高不足 in red. See useForecast.
+  const { ready, points: forecast } = useForecast(periodToDays(forecastPeriod));
 
   const minimumPoint = useMemo(
     () => forecast.find((p) => p.isMinimum) ?? null,
@@ -60,17 +64,25 @@ function DashboardView({ onNavigate }: DashboardViewProps) {
       <HoldingsCard />
 
       {/* Forecast Chart - full width */}
-      <ForecastChart
-        data={forecast}
-        minimumPoint={minimumPoint}
-        period={forecastPeriod}
-        onPeriodChange={setForecastPeriod}
-        onOpenAnalytics={onNavigate ? () => onNavigate('analytics') : undefined}
-      />
+      {ready ? (
+        <ForecastChart
+          data={forecast}
+          minimumPoint={minimumPoint}
+          period={forecastPeriod}
+          onPeriodChange={setForecastPeriod}
+          onOpenAnalytics={onNavigate ? () => onNavigate('analytics') : undefined}
+        />
+      ) : (
+        <Skeleton height={360} className="w-full" />
+      )}
 
       {/* MinBalanceCard (1/3) + SankeyChart (2/3) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <MinBalanceCard point={minimumPoint} daysUntil={daysUntilMinimum} />
+        {ready ? (
+          <MinBalanceCard point={minimumPoint} daysUntil={daysUntilMinimum} />
+        ) : (
+          <Skeleton height={148} />
+        )}
         <div className="lg:col-span-2">
           <SankeyChart />
         </div>

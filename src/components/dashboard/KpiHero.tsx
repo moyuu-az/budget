@@ -2,6 +2,7 @@ import { memo, type ReactElement } from 'react';
 import { motion } from 'framer-motion';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
+import { Skeleton } from '../ui/Skeleton';
 import { useDashboardKpis } from '../../hooks/useDashboardKpis';
 import { formatYen, formatSignedYen } from '../../utils/currency';
 
@@ -37,8 +38,29 @@ function KpiCard({ label, value, caption, badge, delay }: KpiCardProps): ReactEl
 }
 
 function KpiHero(): ReactElement {
-  const { thisMonthNet, minBalance90d, minBalance90dDate, nextLargeExpense, forecastSlopePerDay } =
-    useDashboardKpis();
+  const {
+    thisMonthNet,
+    minBalance90d,
+    minBalance90dDate,
+    nextLargeExpense,
+    forecastSlopePerDay,
+    ready,
+  } = useDashboardKpis();
+
+  // Placeholders, not figures. Every KPI here is zero until the balance arrives,
+  // and 「最小残高 ¥0 / 残高不足」 in red is the false alarm this whole readiness
+  // flag exists to stop -- it appeared on every cold load, because the balance
+  // takes one more round trip than the expenses it is compared against.
+  if (!ready) {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" role="status">
+        <span className="sr-only">残高を読み込み中</span>
+        {[0, 1, 2, 3].map((i) => (
+          <Skeleton key={i} height={116} />
+        ))}
+      </div>
+    );
+  }
 
   const minDateLabel = minBalance90dDate
     ? new Date(minBalance90dDate).toLocaleDateString('ja-JP')

@@ -31,6 +31,8 @@ import { applyGrants } from '../db/grants';
 const IMAGE = 'postgres:16-alpine';
 const APP_ROLE = 'app_user';
 const APP_PASSWORD = 'app_password';
+const OWNER_ROLE = 'schema_owner';
+const OWNER_PASSWORD = 'owner_password';
 
 /** Tables holding ledger-scoped data, in an order safe to truncate together. */
 export const LEDGER_SCOPED_TABLES = [
@@ -52,6 +54,15 @@ export interface TestDb {
   pool: Pool;
   /** Connects as the superuser: bypasses RLS, for fixtures and cross-ledger assertions. */
   adminPool: Pool;
+  /**
+   * Connects as the role that OWNS the schema -- the stand-in for the role that
+   * runs migrations in production.
+   *
+   * Only distinct from `adminPool` when `nonSuperuserOwner` was set; otherwise
+   * it is the same superuser pool, which bypasses RLS. A test that applies a
+   * migration and means to exercise the policies must ask for the option.
+   */
+  ownerPool: Pool;
   stop(): Promise<void>;
 }
 
@@ -65,6 +76,27 @@ export interface StartTestDbOptions {
    * DATA rather than only changing shapes.
    */
   migrationsDir?: string;
+
+  /**
+   * Own the schema with a role that is NOT a superuser, and expose a pool
+   * connected as it (`ownerPool`).
+   *
+   * WHY THIS OPTION HAS TO EXIST
+   *   The container's default user is a real superuser, and PostgreSQL exempts
+   *   superusers from row-level security UNCONDITIONALLY -- FORCE ROW LEVEL
+   *   SECURITY does not change that. Migrations applied through it therefore run
+   *   with the policies switched off.
+   *
+   *   Cloud SQL's `postgres` is NOT a real superuser (it is a member of
+   *   cloudsqlsuperuser, with rolsuper = false), so in production the policies
+   *   DO apply to the role running migrations. A migration that writes rows must
+   *   set `app.current_ledger_id` per ledger or its INSERTs are rejected -- and
+   *   a test running as a true superuser would pass whether or not it did.
+   *
+   *   That asymmetry is the worst kind: green here, broken only in production.
+   *   Any test covering a migration that moves DATA should set this.
+   */
+  nonSuperuserOwner?: boolean;
 }
 
 export function migrationsDir(): string {
@@ -74,26 +106,46 @@ export function migrationsDir(): string {
 export async function startTestDb(options: StartTestDbOptions = {}): Promise<TestDb> {
   const container: StartedPostgreSqlContainer = await new PostgreSqlContainer(IMAGE).start();
 
+  const connect = (user: string, password: string): Pool =>
+    createPool({
+      connectionString: `postgres://${user}:${password}@${container.getHost()}:${container.getPort()}/${container.getDatabase()}`,
+      max: 4,
+    });
+
   const adminPool = createPool({ connectionString: container.getConnectionUri(), max: 4 });
-  await migrate(adminPool, options.migrationsDir ?? migrationsDir());
+
+  // The role that owns the schema. NOSUPERUSER/NOBYPASSRLS mirror Cloud SQL's
+  // `postgres`, which is not a real superuser -- see the option's note.
+  let ownerPool = adminPool;
+  if (options.nonSuperuserOwner) {
+    await adminPool.query(
+      `CREATE ROLE ${OWNER_ROLE} LOGIN PASSWORD '${OWNER_PASSWORD}' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`,
+    );
+    // CREATE on the schema so it can create the tables it will then own; the
+    // objects it creates belong to it, which is what makes FORCE RLS meaningful.
+    await adminPool.query(`GRANT CREATE, USAGE ON SCHEMA public TO ${OWNER_ROLE}`);
+    ownerPool = connect(OWNER_ROLE, OWNER_PASSWORD);
+  }
+
+  await migrate(ownerPool, options.migrationsDir ?? migrationsDir());
 
   // The role the "application" uses. NOSUPERUSER/NOBYPASSRLS are the defaults
   // for CREATE ROLE and are spelled out here because they are the entire point.
   await adminPool.query(
     `CREATE ROLE ${APP_ROLE} LOGIN PASSWORD '${APP_PASSWORD}' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`,
   );
-  await applyGrants(adminPool, { role: APP_ROLE, database: container.getDatabase() });
+  // Granted by the owner: only the owner can hand out privileges on its tables.
+  await applyGrants(ownerPool, { role: APP_ROLE, database: container.getDatabase() });
 
-  const pool = createPool({
-    connectionString: `postgres://${APP_ROLE}:${APP_PASSWORD}@${container.getHost()}:${container.getPort()}/${container.getDatabase()}`,
-    max: 4,
-  });
+  const pool = connect(APP_ROLE, APP_PASSWORD);
 
   return {
     pool,
     adminPool,
+    ownerPool,
     async stop() {
       await pool.end();
+      if (ownerPool !== adminPool) await ownerPool.end();
       await adminPool.end();
       await container.stop();
     },

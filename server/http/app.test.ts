@@ -308,6 +308,32 @@ describe('argument validation', () => {
     expect(response.status).toBe(400);
   });
 
+  it('refuses a holding value the column could not store', async () => {
+    // assets.value is NUMERIC(14,2). Without a bound here the database answers
+    // with a numeric overflow, which reaches the user as a redacted generic
+    // failure about a field they can see is a number. Every balance edit comes
+    // through this path now, so a mistyped extra digit is an ordinary mistake.
+    const alice = await sessionFor(ALICE);
+    const ledgerId = sharedLedgerOf(alice);
+    const [cash] = (await (
+      await call('getAssetCategories', { as: ALICE, ledgerId })
+    ).json()) as { id: number }[];
+
+    const response = await call('addAsset', {
+      as: ALICE,
+      ledgerId,
+      args: [{ categoryId: cash.id, name: '桁違い', value: 1_000_000_000_000 }],
+    });
+
+    expect(response.status).toBe(400);
+    const envelope = await envelopeOf(response);
+    expect(envelope.code).toBe('VALIDATION');
+    // Caught by the argument schema, so the reason travels in `details` -- the
+    // caller's own input echoed back. Left to the database it would arrive as
+    // PostgreSQL's numeric overflow, redacted to the bare generic message.
+    expect(JSON.stringify(envelope.details)).toContain('評価額が大きすぎます');
+  });
+
   it('404s an unknown method', async () => {
     const alice = await sessionFor(ALICE);
     const response = await call('dropEverything', { as: ALICE, ledgerId: sharedLedgerOf(alice) });

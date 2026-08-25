@@ -25,6 +25,20 @@ interface AssetState {
   categories: AssetCategory[];
   assets: Asset[];
   loading: boolean;
+  /**
+   * True once a fetch has SUCCEEDED for the active ledger.
+   *
+   * Distinct from `!loading`, and the distinction is load-bearing. The cash
+   * category's holdings are 現在の残高, so before the first fetch lands this
+   * store reports a balance of ¥0 -- and a ¥0 balance combined with the (already
+   * loaded) expense templates projects straight into 残高不足, which the
+   * dashboard was showing in red on every cold load.
+   *
+   * An empty `categories` array cannot stand in for this: every ledger has a
+   * cash category, so "empty" and "not loaded yet" look identical, and reading
+   * one as the other is how a real ¥0 balance would be hidden instead.
+   */
+  loaded: boolean;
   reset: () => void;
   fetchAssets: () => Promise<void>;
   addCategory: (input: AssetCategoryInput) => Promise<boolean>;
@@ -39,9 +53,17 @@ export const useAssetStore = create<AssetState>((set, get) => ({
   categories: [],
   assets: [],
   loading: false,
+  loaded: false,
 
-  /** Cleared on a ledger switch, like every other ledger-scoped store. */
-  reset: () => set({ categories: [], assets: [], loading: false }),
+  /**
+   * Cleared on a ledger switch, like every other ledger-scoped store.
+   *
+   * `loaded` goes back to false with the data: the next ledger's balance is
+   * unknown until its own fetch lands, and treating the previous answer as
+   * still valid is what would let one household's figures brief the other's
+   * screen.
+   */
+  reset: () => set({ categories: [], assets: [], loading: false, loaded: false }),
 
   fetchAssets: async () => {
     set({ loading: true });
@@ -52,8 +74,10 @@ export const useAssetStore = create<AssetState>((set, get) => ({
         getApi().getAssetCategories(),
         getApi().getAssets(),
       ]);
-      set({ categories, assets, loading: false });
+      set({ categories, assets, loading: false, loaded: true });
     } catch (e) {
+      // `loaded` stays false: a failed fetch leaves the balance unknown, and
+      // the dashboard must keep saying so rather than forecast from ¥0.
       set({ loading: false });
       reportError(e);
     }

@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { useSnapshotStore } from '../../stores/useSnapshotStore';
 import { useCashBalance } from '../../hooks/useCashBalance';
 import { useToastStore } from '../../stores/useToastStore';
-import { parseCommaNumber, handleCurrencyInput } from '../../utils/currency';
+import { parseCommaNumber, handleCurrencyInput, formatYen } from '../../utils/currency';
 
 const inputStyle = {
   background: 'rgba(100, 116, 170, 0.08)',
@@ -26,15 +26,17 @@ function SnapshotForm({ onSuccess }: Props) {
   const [balanceInput, setBalanceInput] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // Both handlers branch on the store's boolean rather than wrapping the call in
+  // try/catch: the store swallows the throw (reportError has already raised the
+  // toast), so a catch here would never run and the success message would fire
+  // on failure -- beside the error message, with the form closing as if the
+  // record had been saved.
   const handleRecordCurrent = async () => {
     const today = new Date().toISOString().split('T')[0];
     setSaving(true);
-    try {
-      await addSnapshot(today, currentBalance);
+    if (await addSnapshot(today, currentBalance)) {
       addToast('現在の残高を記録しました', 'success');
       onSuccess?.();
-    } catch {
-      addToast('記録に失敗しました', 'error');
     }
     setSaving(false);
   };
@@ -55,13 +57,10 @@ function SnapshotForm({ onSuccess }: Props) {
     if (!date || isNaN(parsed)) return;
 
     setSaving(true);
-    try {
-      await addSnapshot(date, parsed);
+    if (await addSnapshot(date, parsed)) {
       setBalanceInput('');
       addToast('残高を記録しました', 'success');
       onSuccess?.();
-    } catch {
-      addToast('記録に失敗しました', 'error');
     }
     setSaving(false);
   };
@@ -85,7 +84,7 @@ function SnapshotForm({ onSuccess }: Props) {
             border: '1px solid rgba(139, 92, 246, 0.3)',
           }}
         >
-          現在の残高を記録 (¥{currentBalance.toLocaleString()})
+          現在の残高を記録 ({formatYen(currentBalance)})
         </button>
       </motion.div>
 

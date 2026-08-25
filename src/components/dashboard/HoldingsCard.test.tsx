@@ -51,6 +51,20 @@ describe('when the ledger holds cash only', () => {
     expect(screen.queryByRole('tab', { name: '純資産' })).not.toBeInTheDocument();
   });
 
+  it('offers no toggle for a category that holds nothing either', () => {
+    // Creating a NISA category and not filling it in is an ordinary half-done
+    // state. The two views would still be the same number, and the 純資産 view
+    // would read 「＋ その他 ¥0」 with no chip beside it, because
+    // summarizeHoldings drops categories holding nothing.
+    useAssetStore.setState({
+      categories: [CASH, NISA],
+      assets: [makeCashAsset({ value: 500_000 })],
+    });
+    render(<HoldingsCard />);
+
+    expect(screen.queryByRole('tab', { name: '純資産' })).not.toBeInTheDocument();
+  });
+
   it('shows cash even when a persisted preference says 純資産', () => {
     // The preference survives in localStorage from a ledger that DID hold
     // assets. Without the guard the card would render its 純資産 breakdown with

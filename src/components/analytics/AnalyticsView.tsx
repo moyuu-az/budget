@@ -66,7 +66,10 @@ function AnalyticsView() {
     return months * 31;
   }, [period]);
 
-  const forecast = useForecast(forecastDays);
+  // Readiness is not gated on here: this view plots the projection beside past
+  // months rather than raising a warning from it, so an empty series while the
+  // data lands reads as "nothing yet" instead of as an alarm.
+  const { points: forecast } = useForecast(forecastDays);
 
   const filteredSnapshots = useMemo(
     () => snapshots.filter((s) => s.date >= pastStartDate),

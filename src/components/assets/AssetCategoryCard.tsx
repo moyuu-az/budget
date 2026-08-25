@@ -4,6 +4,7 @@ import type { Asset, AssetCategory } from '../../types';
 import { formatFieldValue } from '../../../shared/asset-fields';
 import { Card } from '../ui/Card';
 import { formatYen as yen } from '../../utils/currency';
+import { totalAssetValue } from '../../utils/net-worth';
 import { Button } from '../ui/Button';
 import { IconButton } from '../ui/IconButton';
 
@@ -34,7 +35,10 @@ function AssetCategoryCard({
   onEditCategory,
   onDeleteCategory,
 }: Props): ReactElement {
-  const subtotal = assets.reduce((sum, asset) => sum + asset.value, 0);
+  // Through the shared function, not a local reduce: two reduces over the same
+  // field is how this subtotal and the dashboard's chip end up disagreeing after
+  // only one of them is fixed.
+  const subtotal = totalAssetValue(assets);
   // The cash category IS 現在の残高. Deleting it would zero the balance and the
   // forecast with it, so the button is not offered -- and the server refuses the
   // call as well, because hiding a button is not an invariant.

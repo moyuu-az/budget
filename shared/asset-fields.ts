@@ -60,6 +60,20 @@ export type AssetFieldValues = Record<string, AssetFieldValue>;
  * push into it.
  */
 export const MAX_ASSET_FIELDS = 12;
+
+/**
+ * The largest holding value, in whole yen.
+ *
+ * `assets.value` is NUMERIC(14,2): 14 digits with 2 after the point leaves 12
+ * before it, so the column accepts up to 999,999,999,999.99. Holdings are whole
+ * yen, which makes this the ceiling.
+ *
+ * Lives here, with the other limits both sides enforce, so the dialog refuses a
+ * mistyped extra digit with a sentence about the field rather than letting the
+ * database answer with a numeric overflow the user cannot act on. Since
+ * 現在の残高 became a holding, every balance edit goes through this check.
+ */
+export const MAX_ASSET_VALUE = 999_999_999_999;
 export const MAX_FIELD_LABEL_LENGTH = 24;
 export const MAX_FIELD_UNIT_LENGTH = 8;
 export const MAX_FIELD_TEXT_LENGTH = 200;

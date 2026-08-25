@@ -41,10 +41,14 @@ function HoldingsCard(): ReactElement | null {
 
   const holdings = summarizeHoldings(categories, assets);
 
-  // Offered only when there is something OTHER than cash to see. With cash
-  // alone the two views are the same number, and a toggle between a figure and
-  // itself invites the user to look for a difference that is not there.
-  const hasOtherAssets = categories.some((category) => category.kind !== 'cash');
+  // Offered only when something other than cash actually HOLDS SOMETHING --
+  // not merely when another category exists. An empty NISA category makes the
+  // two views the same number, and a toggle between a figure and itself invites
+  // the user to look for a difference that is not there. (It also renders a
+  // 「＋ その他 ¥0」 line with no chip beside it, since summarizeHoldings drops
+  // categories holding nothing.)
+  const hasOtherAssets =
+    holdings.byCategory.some((line) => !line.isCash) || holdings.unlisted !== 0;
   const showingNetWorth = hasOtherAssets && view === 'netWorth';
 
   return (
