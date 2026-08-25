@@ -2,7 +2,7 @@ import { memo, type ReactElement } from 'react';
 import { motion } from 'framer-motion';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
-import { LoadGate } from './LoadGate';
+import { LoadGate } from '../ui/LoadGate';
 import { useDashboardKpis } from '../../hooks/useDashboardKpis';
 import { formatYen, formatSignedYen } from '../../utils/currency';
 
@@ -53,7 +53,7 @@ function KpiHero(): ReactElement {
   // the balance takes one more round trip than the expenses it is compared
   // against.
   if (status !== 'ready') {
-    return <LoadGate status={status} height={116} label="残高" children={null} />;
+    return <LoadGate status={status} height={116} label="残高" />;
   }
 
   const minDateLabel = minBalance90dDate

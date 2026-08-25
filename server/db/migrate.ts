@@ -63,7 +63,14 @@ export async function migrate(
   // is never told that a figure was rewritten, which turns "reported rather than
   // thrown" into "swallowed".
   const onNotice = (notice: { severity?: string; message?: string }): void => {
-    console.warn(`[migration] ${notice.severity ?? 'NOTICE'}: ${notice.message ?? ''}`);
+    // NOTICE is filtered out. `DROP POLICY IF EXISTS` and friends emit one each
+    // ("... does not exist, skipping"), several per migration, every run -- and a
+    // log buried in those is read exactly as often as no log at all. Anything a
+    // migration needs an operator to see must be RAISE WARNING or above; 004 is
+    // written that way, and so is PostgreSQL's own
+    // "no privileges were granted", which is worth seeing.
+    if (notice.severity === 'NOTICE' || notice.severity === 'DEBUG') return;
+    console.warn(`[migration] ${notice.severity ?? 'WARNING'}: ${notice.message ?? ''}`);
   };
   client.on('notice', onNotice);
 

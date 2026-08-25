@@ -3,7 +3,7 @@ import { useAssetStore } from '../../stores/useAssetStore';
 import { useCashBalance } from '../../hooks/useCashBalance';
 import { findCashCategory } from '../../utils/net-worth';
 import { formatYen } from '../../utils/currency';
-import { Skeleton } from '../ui/Skeleton';
+import { LoadGate } from '../ui/LoadGate';
 
 interface Props {
   /**
@@ -42,11 +42,19 @@ function CashBalance({ onEdit }: Props): ReactElement {
     ? assets.filter((asset) => asset.categoryId === cashCategory.id).length
     : 0;
 
-  // Until the fetch lands the figure is ¥0 and the count is 0, which the caption
-  // below would state as 「登録すると反映されます」 -- a confident claim that the
-  // household has recorded no cash, made while its cash is still in flight.
-  // Blank is the only honest thing to say here.
-  const loaded = status === 'ready';
+  // NOT `status === 'ready'` on its own. Until the fetch lands the figure is ¥0
+  // and the count is 0, which the caption below would state as
+  // 「登録すると反映されます」 -- a confident claim that the household has
+  // recorded no cash, made while its cash is still in flight.
+  //
+  // And a FAILURE is not a longer wait. This card is the whole content of the
+  // 残高 panel in 設定, where there is no other gate on screen: folding 'error'
+  // into "not ready" left that screen a pulsing bar with no explanation and no
+  // way to retry -- exactly the dead end the status enum was introduced to end,
+  // surviving in the one place nothing else covered.
+  if (status !== 'ready') {
+    return <LoadGate status={status} height={64} label="残高" />;
+  }
 
   return (
     <div>
@@ -57,10 +65,10 @@ function CashBalance({ onEdit }: Props): ReactElement {
         <dl className="min-w-0">
           <dt className="mb-1.5 text-xs text-[var(--color-content-muted)]">現在の残高</dt>
           <dd className="truncate text-2xl font-bold tabular-nums text-[var(--color-content-primary)]">
-            {loaded ? formatYen(balance) : <Skeleton height={28} width={120} />}
+            {formatYen(balance)}
           </dd>
         </dl>
-        {loaded && onEdit && (
+        {onEdit && (
           <button
             type="button"
             onClick={onEdit}
@@ -71,11 +79,9 @@ function CashBalance({ onEdit }: Props): ReactElement {
         )}
       </div>
       <p className="mt-1 text-xs text-[var(--color-content-muted)]">
-        {!loaded
-          ? '\u00a0'
-          : holdingCount === 0
-            ? '資産の「現金」に登録すると反映されます'
-            : `資産の「${cashCategory?.name}」${holdingCount} 件の合計`}
+        {holdingCount === 0
+          ? '資産の「現金」に登録すると反映されます'
+          : `資産の「${cashCategory?.name}」${holdingCount} 件の合計`}
       </p>
     </div>
   );

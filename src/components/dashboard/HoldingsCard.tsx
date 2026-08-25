@@ -4,7 +4,7 @@ import { Card } from '../ui/Card';
 import { Tabs } from '../ui/Tabs';
 import { useAssetStore } from '../../stores/useAssetStore';
 import { useUIStore } from '../../stores/useUIStore';
-import { LoadGate } from './LoadGate';
+import { LoadGate } from '../ui/LoadGate';
 import { summarizeHoldings } from '../../utils/net-worth';
 import { formatYen } from '../../utils/currency';
 import type { HoldingsView } from '../../types/ui';
@@ -42,7 +42,7 @@ function HoldingsCard(): ReactElement {
   // notions of "has it arrived" is one more than can be kept in step, and this
   // one also distinguishes a failure from a wait.
   if (status !== 'ready') {
-    return <LoadGate status={status} height={104} label="資産" children={null} />;
+    return <LoadGate status={status} height={104} label="資産" />;
   }
 
   const holdings = summarizeHoldings(categories, assets);

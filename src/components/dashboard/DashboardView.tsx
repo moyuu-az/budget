@@ -4,7 +4,7 @@ import type { ForecastPeriod, ViewType } from '../../types';
 import { useMonthlyStore } from '../../stores/useMonthlyStore';
 import { useForecast } from '../../hooks/useForecast';
 import { toYearMonth, periodToDays, periodToMonths } from '../../utils/forecast';
-import { LoadGate } from './LoadGate';
+import { LoadGate } from '../ui/LoadGate';
 import ForecastChart from './ForecastChart';
 import KpiHero from './KpiHero';
 import HoldingsCard from './HoldingsCard';

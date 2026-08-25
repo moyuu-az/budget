@@ -8,7 +8,7 @@ import { useToastStore } from '../../stores/useToastStore';
 import { Card } from '../ui/Card';
 import { formatYen as yen } from '../../utils/currency';
 import { Button } from '../ui/Button';
-import { EmptyState } from '../ui/EmptyState';
+import { LoadGate } from '../ui/LoadGate';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import AssetCategoryCard from './AssetCategoryCard';
 import AssetCategoryDialog from './AssetCategoryDialog';
@@ -43,7 +43,7 @@ interface AssetDialogState {
 function AssetsView(): ReactElement {
   const categories = useAssetStore((s) => s.categories);
   const assets = useAssetStore((s) => s.assets);
-  const loading = useAssetStore((s) => s.status === 'loading');
+  const status = useAssetStore((s) => s.status);
   const addCategory = useAssetStore((s) => s.addCategory);
   const updateCategory = useAssetStore((s) => s.updateCategory);
   const deleteCategory = useAssetStore((s) => s.deleteCategory);
@@ -148,14 +148,14 @@ function AssetsView(): ReactElement {
           provisions the 現金 category on read, so after the fetch there is always
           at least one card. The old empty state offering the 雛形 would be
           unreachable, and showing it during the fetch would tell the user their
-          data is gone. */}
+          data is gone.
+ 
+          Through LoadGate rather than a hand-written 「読み込んでいます」 card,
+          because that card said it after a FAILURE too -- stated as fact, with
+          no retry, forever. This is where the balance is edited, so it is where
+          someone whose data failed to load ends up. */}
       {sortedCategories.length === 0 ? (
-        <Card padding="lg">
-          <EmptyState
-            title="読み込み中"
-            description="資産の分類を読み込んでいます。"
-          />
-        </Card>
+        <LoadGate status={status} height={160} label="資産の分類" />
       ) : (
         <div className="space-y-4">
           {sortedCategories.map((category) => (
@@ -183,12 +183,6 @@ function AssetsView(): ReactElement {
             </div>
           </details>
         </div>
-      )}
-
-      {loading && sortedCategories.length === 0 && (
-        <p className="sr-only" role="status">
-          読み込み中
-        </p>
       )}
 
       <AssetCategoryDialog

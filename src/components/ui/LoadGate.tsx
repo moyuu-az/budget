@@ -1,8 +1,9 @@
 import type { ReactElement, ReactNode } from 'react';
-import { Skeleton } from '../ui/Skeleton';
-import { Button } from '../ui/Button';
-import { Card } from '../ui/Card';
+import { Skeleton } from './Skeleton';
+import { Button } from './Button';
+import { Card } from './Card';
 import { loadLedgerData } from '../../app/ledger';
+import { reportError } from '../../app/reportError';
 import type { LoadStatus } from '../../stores/load-status';
 
 interface Props {
@@ -11,7 +12,8 @@ interface Props {
   height: number;
   /** What is being waited for, announced to screen readers and shown on failure. */
   label: string;
-  children: ReactNode;
+  /** Optional so a panel that only needs the placeholder can omit it. */
+  children?: ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -53,7 +55,16 @@ export function LoadGate({ status, height, label, children }: Props): ReactEleme
             通信に失敗した可能性があります。
           </p>
         </div>
-        <Button size="sm" variant="secondary" onClick={() => void loadLedgerData()}>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => {
+            // Reported, not swallowed. Every store catches its own failure
+            // today, so this cannot reject -- but "cannot reject today" is how
+            // an unhandled rejection gets introduced later.
+            loadLedgerData().catch(reportError);
+          }}
+        >
           再読み込み
         </Button>
       </Card>
@@ -62,6 +73,13 @@ export function LoadGate({ status, height, label, children }: Props): ReactEleme
 
   return (
     <div role="status" aria-label={`${label}を読み込み中`}>
+      {/* The announcement has to be TEXT. role="status" is a live region, and a
+          live region announces its CONTENT changing -- an aria-label alone names
+          the region without giving a screen reader anything to read out. The
+          skeleton beside it is aria-hidden, so without this line the region is
+          silent while looking correct to every automated check, including
+          getByRole('status', { name }) which reads the label. */}
+      <span className="sr-only">{label}を読み込み中</span>
       <Skeleton height={height} className="w-full" />
     </div>
   );

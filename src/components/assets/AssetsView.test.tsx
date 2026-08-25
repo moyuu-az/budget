@@ -43,6 +43,28 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('before the categories arrive', () => {
+  it('says it is loading, and says it only while that is true', () => {
+    useAssetStore.setState({ categories: [], assets: [], status: 'loading' });
+    render(<AssetsView />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('資産の分類を読み込み中');
+  });
+
+  it('offers a retry when the fetch failed, instead of claiming to be loading', () => {
+    // This screen is where the balance is edited, so it is where someone whose
+    // data failed to load ends up -- following the 編集 link from a card that
+    // could not show them a figure. It used to state 「資産の分類を読み込んで
+    // います」 as fact, forever, with no way to try again.
+    useAssetStore.setState({ categories: [], assets: [], status: 'error' });
+    render(<AssetsView />);
+
+    expect(screen.getByText('資産の分類を読み込めませんでした')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '再読み込み' })).toBeInTheDocument();
+    expect(screen.queryByText(/読み込み中/)).not.toBeInTheDocument();
+  });
+});
+
 describe('when the ledger holds only its cash category', () => {
   // Every ledger has one -- the server provisions it -- so this, not an empty
   // list, is what a household that ignores 資産 actually sees.
