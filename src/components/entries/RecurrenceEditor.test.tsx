@@ -222,6 +222,44 @@ describe('bounds', () => {
     expect(screen.getByLabelText('日')).toHaveValue(5);
   });
 
+  it('never emits a malformed anchor month', () => {
+    // **Safari on the desktop and Firefox do not implement `input type="month"`.**
+    // They render a plain text box, so a truthiness check would let 「2026-3」 --
+    // or anything at all -- into `anchorMonth`, and this component's promise that
+    // every interaction emits a COMPLETE, VALID Recurrence would stop being true
+    // on two of the three major engines.
+    //
+    // The one-off's date field already went through isIsoDate; this was the half
+    // that did not.
+    const onEmit = vi.fn();
+    render(
+      <Harness
+        initial={{ kind: 'interval', everyMonths: 2, anchorMonth: '2026-03', dayOfMonth: 10 }}
+        onEmit={onEmit}
+      />,
+    );
+
+    for (const bad of ['2026-3', '2026-13', '来年3月', '2026', '']) {
+      fireEvent.change(screen.getByLabelText('起点の月'), { target: { value: bad } });
+    }
+
+    expect(onEmit).not.toHaveBeenCalled();
+  });
+
+  it('emits a well-formed anchor month', () => {
+    const onEmit = vi.fn();
+    render(
+      <Harness
+        initial={{ kind: 'interval', everyMonths: 2, anchorMonth: '2026-03', dayOfMonth: 10 }}
+        onEmit={onEmit}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('起点の月'), { target: { value: '2026-09' } });
+
+    expect(onEmit).toHaveBeenCalledWith(expect.objectContaining({ anchorMonth: '2026-09' }));
+  });
+
   it('never emits a one-off on a date it cannot verify exists', async () => {
     // 2026-02-31 is well-formed and impossible; an entry carrying it would sit
     // in the list, enabled, and never occur. The empty string a date input emits
@@ -258,5 +296,19 @@ describe('the summary line', () => {
 
     await user.selectOptions(screen.getByLabelText('繰り返し'), 'yearly');
     expect(screen.getByTestId('recurrence-summary')).toHaveTextContent('毎年6月25日');
+  });
+
+  it('names the ANCHOR for an interval, which is what it claims to catch', () => {
+    // The comment on this line says it is where 「an anchor a month off」 gets
+    // caught before saving. That was not true while the anchor was missing from
+    // the summary -- the line printed the same text for two different schedules.
+    render(
+      <Harness
+        initial={{ kind: 'interval', everyMonths: 2, anchorMonth: '2026-03', dayOfMonth: 10 }}
+        onEmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('recurrence-summary')).toHaveTextContent('2026年3月から2ヶ月ごと');
   });
 });

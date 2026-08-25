@@ -69,7 +69,7 @@ describe('both shells', () => {
     }
   });
 
-  it('both reach the ledger switcher and the balance', () => {
+  it('both reach the ledger switcher and the balance', async () => {
     // On a desktop these live in the sidebar. A phone has no sidebar, so
     // without a second copy the ledger's NAME -- the thing that says whose
     // figures these are -- would be invisible on the device most likely to be
@@ -81,7 +81,12 @@ describe('both shells', () => {
     );
 
     expect(screen.getAllByText('現在の残高').length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText('今月のサマリー').length).toBeGreaterThanOrEqual(2);
+    // `find`, not `get`: 今月のサマリー fetches its own month and shows a
+    // loading gate until the figures land, so on the first frame the only
+    // matching text is 「今月のサマリーを読み込み中」. Waiting for the real
+    // heading also proves the fetch resolves in BOTH copies rather than one of
+    // them being stuck.
+    expect((await screen.findAllByText('今月のサマリー')).length).toBeGreaterThanOrEqual(2);
   });
 
   it('names the phone navigation for a screen reader', () => {

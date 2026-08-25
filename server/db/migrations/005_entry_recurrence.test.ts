@@ -120,9 +120,19 @@ afterAll(async () => {
 });
 
 describe('the backfill', () => {
-  it('applies cleanly and warns about nothing', () => {
-    // A warning here means a row escaped the backfill -- an entry that would
-    // never occur again. There is no acceptable non-zero count.
+  it('applies cleanly, with nothing on the operator’s log', () => {
+    // NOT a verification of the backfill, and an earlier version of this test
+    // claimed to be one.
+    //
+    // The migration used to end with a DO block counting rows that had escaped
+    // the backfill -- a count that could never be non-zero, because
+    // entry_templates is FORCE ROW LEVEL SECURITY and a migration opens no
+    // ledger scope, so the SELECT saw nothing at all. This assertion passed for
+    // the same reason the check "succeeded": both were blind.
+    //
+    // What it is worth now is narrow and real: the migration raises no WARNING
+    // of any kind while applying, which would otherwise be the first sign of a
+    // constraint or a cast the file did not expect.
     expect(warnings).toEqual([]);
   });
 
@@ -194,6 +204,33 @@ describe('the shape constraint', () => {
 
   it('rejects an unknown recurrence kind', async () => {
     await expect(insert("recurrence_kind, day_of_month", "'weekly', 1")).rejects.toThrow();
+  });
+
+  it('rejects an unknown kind on its OWN, without the kind constraint helping', async () => {
+    // The `ELSE FALSE` arm is unreachable while entry_templates_recurrence_kind_chk
+    // stands, so nothing else here proves it exists -- mutation testing confirmed
+    // that deleting it leaves every other test green.
+    //
+    // It has to stay. The day migration 006 adds a fifth kind to the kind
+    // constraint and forgets a WHEN arm here, the CASE returns NULL for that
+    // kind -- and a CHECK that evaluates to NULL PASSES in PostgreSQL. The shape
+    // constraint would switch itself off for exactly the rows it should reject,
+    // silently, in production.
+    //
+    // Dropping the kind constraint is how that future is simulated today.
+    await db.adminPool.query(
+      'ALTER TABLE entry_templates DROP CONSTRAINT entry_templates_recurrence_kind_chk',
+    );
+    try {
+      await expect(insert("recurrence_kind, day_of_month", "'weekly', 1")).rejects.toThrow();
+    } finally {
+      // Restored even if the assertion fails: every later test in this file
+      // relies on the constraint being there.
+      await db.adminPool.query(
+        `ALTER TABLE entry_templates ADD CONSTRAINT entry_templates_recurrence_kind_chk
+           CHECK (recurrence_kind IN ('monthly', 'yearly', 'interval', 'once'))`,
+      );
+    }
   });
 
   it('rejects monthly without a day', async () => {

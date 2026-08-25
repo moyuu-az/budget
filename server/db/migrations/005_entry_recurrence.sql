@@ -182,25 +182,26 @@ ALTER TABLE entry_templates
 -- ---------------------------------------------------------------------------
 
 -- ---------------------------------------------------------------------------
--- Verification.
+-- THERE IS NOTHING LEFT TO VERIFY HERE, AND AN EARLIER VERSION OF THIS FILE
+-- TRIED ANYWAY -- WITH A CHECK THAT COULD NOT WORK.
 --
--- Reported rather than thrown: a row that somehow escaped the backfill is worth
--- an operator's attention, but failing the migration would leave the schema half
--- applied for a condition the CHECK above already makes impossible to create.
+-- The backfill cannot miss a row. `ADD COLUMN ... NOT NULL DEFAULT 'monthly'`
+-- gives EVERY existing row the value, and day_of_month is never touched. There
+-- is no partial outcome for a check to find.
 --
--- server/db/migrate.ts attaches a 'notice' listener so this actually reaches a
--- log. node-postgres discards notices by default -- without that listener this
--- block would be a comment with extra steps.
+-- The version that looked for one counted rows with a plain SELECT. That could
+-- never return anything: entry_templates is FORCE ROW LEVEL SECURITY with a
+-- policy of `ledger_id = app_current_ledger_id()`, and that function returns
+-- NULL when no scope has been opened (002, "FAIL-CLOSED BY DEFAULT").
+-- Migrations open no scope, so the count was structurally always zero -- the
+-- check reported success by being BLIND, and the test asserting "warns about
+-- nothing" passed for exactly the same reason. Two things agreeing because
+-- neither can see is the worst shape a verification can take.
+--
+-- THE RULE THIS LEAVES BEHIND
+--   A migration that READS data across ledgers has to loop and
+--   `set_config('app.current_ledger_id', ..., true)` per ledger, as 004 does.
+--   DDL does not: ALTER TABLE, and a CHECK constraint's validation of existing
+--   rows, both bypass row-level security -- which is why the constraints above
+--   genuinely do examine every row in every ledger.
 -- ---------------------------------------------------------------------------
-DO $$
-DECLARE
-  stray INTEGER;
-BEGIN
-  SELECT count(*) INTO stray
-    FROM entry_templates
-   WHERE recurrence_kind = 'monthly' AND day_of_month IS NULL;
-
-  IF stray > 0 THEN
-    RAISE WARNING '005: % monthly template(s) have no day_of_month; they will not occur', stray;
-  END IF;
-END $$;

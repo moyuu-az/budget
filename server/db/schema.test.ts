@@ -16,6 +16,41 @@ let db: TestDb;
 let ledgerA: number;
 let ledgerB: number;
 
+/**
+ * The ledger-scoped domain tables, written out by hand.
+ *
+ * Kept explicit because it is the readable statement of what this deployment
+ * considers private to a household. The drift guard below checks it against
+ * what the schema actually contains, so it cannot quietly fall behind.
+ */
+const LEDGER_SCOPED_TABLES = [
+  'settings', 'categories', 'entry_templates',
+  'monthly_amounts', 'monthly_actuals', 'balance_snapshots',
+  // Added by 003. They were absent here until the drift guard below found
+  // them -- migration 003 did call apply_ledger_isolation() on both, so nothing
+  // leaked, but for two releases this file claimed to check "every
+  // ledger-scoped table" while checking six of eight. That gap is the reason
+  // the guard exists.
+  'asset_categories', 'assets',
+] as const;
+
+/**
+ * Tables that carry `ledger_id` and are deliberately NOT under RLS.
+ *
+ * `ledger_members` answers "may this user open this ledger?", which is decided
+ * BEFORE a ledger is chosen -- a ledger predicate on it would make the
+ * authentication layer unable to read the very rows that pick the ledger
+ * (migration 002, "TABLES DELIBERATELY *NOT* COVERED").
+ *
+ * Its protection is a different one and lives outside the database: only
+ * `server/auth/` reads it, and always filtered by the authenticated user id.
+ * That is why 002 says "do not add domain data to these tables" -- domain data
+ * here would have no isolation at all. Adding a name to this array removes a
+ * table from the guard below, so do it only with the same reasoning written
+ * down.
+ */
+const LEDGER_ID_WITHOUT_RLS = ['ledger_members'] as const;
+
 /** PostgreSQL SQLSTATE of a rejected statement, or undefined if it succeeded. */
 async function sqlstateOf(fn: () => Promise<unknown>): Promise<string | undefined> {
   try {
@@ -50,17 +85,84 @@ describe('row-level security', () => {
       `SELECT relname, relrowsecurity, relforcerowsecurity
          FROM pg_class
         WHERE relname = ANY($1::text[])`,
-      [[
-        'settings', 'categories', 'entry_templates',
-        'monthly_amounts', 'monthly_actuals', 'balance_snapshots',
-      ]],
+      [[...LEDGER_SCOPED_TABLES]],
     );
 
-    expect(rows).toHaveLength(6);
+    expect(rows).toHaveLength(LEDGER_SCOPED_TABLES.length);
     for (const row of rows) {
       expect(row.relrowsecurity, `${row.relname} ENABLE`).toBe(true);
       expect(row.relforcerowsecurity, `${row.relname} FORCE`).toBe(true);
     }
+  });
+
+  it('covers every table that carries a ledger_id, not just a hand-kept list', async () => {
+    // The list above is a fine ASSERTION and a useless GUARD on its own: a
+    // ledger-scoped table added in a later migration would simply not be in it,
+    // and this file would go on passing while that table's rows were readable
+    // from every household. Nothing would fail; the leak would be silent.
+    //
+    // So ask the schema instead of a human. `ledger_id NOT NULL` is what makes
+    // a table ledger-scoped (001, "Ledger-scoped domain tables"), which means
+    // the set of tables that need policies is derivable -- and a new one shows
+    // up here the moment its migration lands, whether or not anyone remembered
+    // this file.
+    const rows = await raw<{ tablename: string; enabled: boolean; forced: boolean }>(
+      db.adminPool,
+      `SELECT c.relname   AS tablename,
+              c.relrowsecurity      AS enabled,
+              c.relforcerowsecurity AS forced
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relkind = 'r'
+          AND EXISTS (
+                SELECT 1
+                  FROM information_schema.columns col
+                 WHERE col.table_schema = 'public'
+                   AND col.table_name   = c.relname
+                   AND col.column_name  = 'ledger_id'
+              )
+        ORDER BY c.relname`,
+    );
+
+    const discovered = rows
+      .map((r) => r.tablename)
+      .filter((name) => !(LEDGER_ID_WITHOUT_RLS as readonly string[]).includes(name));
+
+    // Both directions matter. A table in the schema but not in the list means a
+    // new one arrived unguarded; a name in the list but not in the schema means
+    // the list is describing a table that no longer exists, which makes the
+    // assertion above pass against nothing.
+    expect(discovered).toEqual([...LEDGER_SCOPED_TABLES].sort());
+
+    for (const row of rows) {
+      if ((LEDGER_ID_WITHOUT_RLS as readonly string[]).includes(row.tablename)) continue;
+      expect(row.enabled, `${row.tablename} ENABLE ROW LEVEL SECURITY`).toBe(true);
+      expect(row.forced, `${row.tablename} FORCE ROW LEVEL SECURITY`).toBe(true);
+    }
+  });
+
+  it('leaves the exempted auth tables exempt on purpose, not by omission', async () => {
+    // The exemption list is the one place this file can be told a lie: adding a
+    // name to it silences the guard above for that table. Pin what the
+    // exemption is FOR, so the array cannot quietly become a place to put a
+    // table that failed the check.
+    //
+    // `ledger_members` maps users to ledgers and nothing else. The moment it
+    // carries a figure, a date, or anything a household would consider its own,
+    // it needs isolation the auth layer does not provide -- and this test says
+    // so before that happens.
+    const columns = await raw<{ column_name: string }>(
+      db.adminPool,
+      `SELECT column_name
+         FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'ledger_members'
+        ORDER BY column_name`,
+    );
+
+    expect(columns.map((c) => c.column_name)).toEqual([
+      'created_at', 'ledger_id', 'role', 'user_id',
+    ]);
   });
 
   it('hides another ledger\'s rows from a scoped read', async () => {

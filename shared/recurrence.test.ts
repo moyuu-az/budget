@@ -3,7 +3,6 @@ import {
   describeRecurrence,
   describeRecurrenceShort,
   isExpiredOnce,
-  isIrregular,
   isIsoDate,
   isYearMonth,
   lastDayOfMonth,
@@ -179,7 +178,7 @@ describe('describeRecurrence', () => {
     expect(describeRecurrence({ kind: 'yearly', month: 3, dayOfMonth: 20 })).toBe('毎年3月20日');
     expect(
       describeRecurrence({ kind: 'interval', everyMonths: 3, anchorMonth: '2026-01', dayOfMonth: 5 }),
-    ).toBe('3ヶ月ごと 5日');
+    ).toBe('2026年1月から3ヶ月ごと 5日');
     expect(describeRecurrence({ kind: 'once', date: '2026-11-03' })).toBe('2026年11月3日 (1回のみ)');
   });
 
@@ -192,6 +191,24 @@ describe('describeRecurrence', () => {
 
   it('strips the leading zero a one-off date carries', () => {
     expect(describeRecurrence({ kind: 'once', date: '2026-03-05' })).toBe('2026年3月5日 (1回のみ)');
+  });
+
+  it('NAMES THE ANCHOR on an interval, because that is the value that matters', () => {
+    // Without a phase, "every two months" does not say WHICH two -- the type's
+    // own note calls this out as the easiest thing to get wrong. The editor's
+    // summary line claims to catch 「an anchor a month off」 before saving, and
+    // could not while the anchor was missing from the string.
+    //
+    // Two intervals that differ ONLY in their anchor must not read identically.
+    const january = describeRecurrence({
+      kind: 'interval', everyMonths: 2, anchorMonth: '2026-01', dayOfMonth: 10,
+    });
+    const february = describeRecurrence({
+      kind: 'interval', everyMonths: 2, anchorMonth: '2026-02', dayOfMonth: 10,
+    });
+    expect(january).not.toBe(february);
+    expect(january).toContain('2026年1月');
+    expect(february).toContain('2026年2月');
   });
 
   it('carries no year on the variants that genuinely have none', () => {
@@ -247,19 +264,24 @@ describe('isExpiredOnce', () => {
   });
 });
 
-describe('isIrregular', () => {
-  it('is true for everything that skips a month', () => {
-    expect(isIrregular({ kind: 'monthly', dayOfMonth: 1 })).toBe(false);
-    expect(isIrregular({ kind: 'yearly', month: 1, dayOfMonth: 1 })).toBe(true);
-    expect(isIrregular({ kind: 'interval', everyMonths: 2, anchorMonth: '2026-01', dayOfMonth: 1 })).toBe(true);
-    expect(isIrregular({ kind: 'once', date: '2026-01-01' })).toBe(true);
-  });
-});
-
 describe('isIsoDate', () => {
   it('accepts real dates', () => {
     expect(isIsoDate('2026-11-20')).toBe(true);
     expect(isIsoDate('2028-02-29')).toBe(true);
+  });
+
+  it('accepts a date whose local midnight does not exist', () => {
+    // A handful of timezones move their clocks AT midnight (Santiago, Havana,
+    // Tehran, São Paulo historically). On those dates `new Date(y, m-1, d)`
+    // lands on the FOLLOWING day, and a round-trip check built on it would
+    // reject a date that genuinely exists. Constructing at noon puts twelve
+    // hours between the value and either edge.
+    //
+    // Asserted for an ordinary date because the suite does not control the
+    // host timezone: what this pins is that the check does not depend on
+    // midnight being representable.
+    expect(isIsoDate('2026-09-06')).toBe(true);
+    expect(isIsoDate('2026-10-18')).toBe(true);
   });
 
   it('rejects dates that look right but do not exist', () => {

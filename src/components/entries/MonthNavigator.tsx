@@ -1,3 +1,5 @@
+import { toYearMonth } from '../../../shared/recurrence';
+
 interface MonthNavigatorProps {
   yearMonth: string;
   onChange: (yearMonth: string) => void;
@@ -13,22 +15,18 @@ function parseYearMonth(ym: string): [number, number] {
   return [y, m - 1];
 }
 
-function formatYearMonth(year: number, month: number): string {
-  return `${year}-${String(month + 1).padStart(2, '0')}`;
-}
-
 function MonthNavigator({ yearMonth, onChange }: MonthNavigatorProps) {
   const [year, month] = parseYearMonth(yearMonth);
 
-  const goPrev = () => {
-    const d = new Date(year, month - 1, 1);
-    onChange(formatYearMonth(d.getFullYear(), d.getMonth()));
-  };
-
-  const goNext = () => {
-    const d = new Date(year, month + 1, 1);
-    onChange(formatYearMonth(d.getFullYear(), d.getMonth()));
-  };
+  // toYearMonth from shared/recurrence.ts, not a local copy.
+  //
+  // This module used to format the string itself. The result was identical, and
+  // that is the problem: this application's whole date story rests on "local
+  // time throughout, deliberately", and two implementations of the same
+  // conversion are two places for that to stop being true -- silently, since
+  // both would keep agreeing in JST.
+  const goPrev = () => onChange(toYearMonth(new Date(year, month - 1, 1)));
+  const goNext = () => onChange(toYearMonth(new Date(year, month + 1, 1)));
 
   return (
     <div className="flex items-center gap-3">

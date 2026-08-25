@@ -180,7 +180,9 @@ describe('entries that do not fall in this month', () => {
 
     expect(screen.getByText('車検')).toBeInTheDocument();
     expect(screen.getByText('毎年9月12日')).toBeInTheDocument();
-    expect(screen.getByText('2ヶ月ごと 20日')).toBeInTheDocument();
+    // The anchor is named too: without it, two schedules that differ only in
+    // their starting month read identically here.
+    expect(screen.getByText('2026年5月から2ヶ月ごと 20日')).toBeInTheDocument();
     expect(screen.getByText(/上の合計には含まれていません/)).toBeInTheDocument();
   });
 

@@ -4,6 +4,7 @@ import {
   MIN_INTERVAL_MONTHS,
   describeRecurrence,
   isIsoDate,
+  isYearMonth,
   sortDay,
   toIsoDate,
   toYearMonth,
@@ -149,8 +150,15 @@ function BoundedNumberField({
         disabled={disabled}
         onChange={(e) => {
           setText(e.target.value);
+          // DIGITS ONLY, checked before parsing.
+          //
+          // `Number.parseInt` stops at the first non-digit and reports success:
+          // '1e5' becomes 1 and '12abc' becomes 12, both inside the bounds, both
+          // committed. The field then snaps back on blur, so the user sees the
+          // number they typed replaced by a different one with no explanation.
+          if (!/^\d+$/.test(e.target.value)) return;
           const parsed = Number.parseInt(e.target.value, 10);
-          if (!Number.isNaN(parsed) && parsed >= min && parsed <= max) onCommit(parsed);
+          if (parsed >= min && parsed <= max) onCommit(parsed);
         }}
         onBlur={() => setText(String(value))}
         className={inputClass}
@@ -247,10 +255,21 @@ function RecurrenceEditor({ value, onChange, disabled = false }: Props) {
                 type="month"
                 value={value.anchorMonth}
                 disabled={disabled}
-                // Ignored when the field is cleared: <input type="month"> emits
-                // '' while the user is retyping, and storing that would produce
-                // a recurrence that occurs in no month at all.
-                onChange={(e) => e.target.value && onChange({ ...value, anchorMonth: e.target.value })}
+                placeholder="YYYY-MM"
+                // VALIDATED, not merely non-empty.
+                //
+                // Safari on the desktop and Firefox do not implement
+                // `input type="month"` -- they fall back to a plain text box.
+                // A truthiness check there lets 「2026-3」 or anything at all
+                // into `anchorMonth`, and this component's promise that every
+                // interaction emits a COMPLETE, VALID Recurrence stops being
+                // true. The one-off's date field below already goes through
+                // isIsoDate; this was the half that did not.
+                //
+                // It also covers the empty string a date-like input emits while
+                // the user is retyping, which would otherwise produce a
+                // recurrence that occurs in no month at all.
+                onChange={(e) => isYearMonth(e.target.value) && onChange({ ...value, anchorMonth: e.target.value })}
                 className={inputClass}
               />
               <p className="mt-1 text-xs text-slate-500">

@@ -1,17 +1,40 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useTemplateStore } from '../../stores/useTemplateStore';
-import { useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
+import { monthStatusOf, useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
 import { formatWithCommas } from '../../utils/currency';
 import { toYearMonth } from '../../utils/forecast';
 import { occursInMonth } from '../../../shared/recurrence';
 import { LoadGate } from '../ui/LoadGate';
+import { combineStatus } from '../../stores/load-status';
 
 function MonthlySummary() {
   const { templates } = useTemplateStore();
-  const status = useTemplateStore((s) => s.status);
+  const templatesStatus = useTemplateStore((s) => s.status);
   const { monthlyAmountsMap } = useMonthlyStore();
+  const monthStatus = useMonthlyStore((s) => s.monthStatus);
+  const fetchMonthlyAmounts = useMonthlyStore((s) => s.fetchMonthlyAmounts);
+  const fetchMonthlyActuals = useMonthlyStore((s) => s.fetchMonthlyActuals);
 
   const yearMonth = useMemo(() => toYearMonth(new Date()), []);
+
+  // THIS PANEL FETCHES ITS OWN MONTH.
+  //
+  // It used to read `monthlyAmountsMap` and nothing else, which meant the map
+  // was EMPTY until 収支管理 was opened -- so the sidebar, which is on screen on
+  // every view, showed figures built from template defaults and then silently
+  // changed the moment the user visited another screen. Two different answers
+  // to 「今月の支出」 for the same month, with nothing to explain the jump.
+  //
+  // The fetches are deduplicated by the store, so this costs nothing on a screen
+  // that has already asked for the month.
+  useEffect(() => {
+    void fetchMonthlyAmounts(yearMonth);
+    void fetchMonthlyActuals(yearMonth);
+  }, [yearMonth, fetchMonthlyAmounts, fetchMonthlyActuals]);
+
+  // Ready only once the month's own figures have landed. Showing the defaults
+  // in the meantime is the behaviour this fetch exists to end.
+  const status = combineStatus(templatesStatus, monthStatusOf(monthStatus, yearMonth));
 
   const { totalIncome, totalExpense, net } = useMemo(() => {
     // Enabled AND occurring THIS month. `enabled` alone is not the same question
