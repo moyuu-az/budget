@@ -170,6 +170,45 @@ END
 > また `現金` という名前の分類が 2 つあった帳簿では、**保有を持つ方**が昇格され、
 > もう一方は普通の分類として残る。
 
+### 005 は全項目の「いつ発生するか」を書き換える
+
+`005_entry_recurrence.sql` は金額を動かさないが、**既存の全ての収支項目の
+タイミングの意味を書き換える**。1 日でもズレれば予測が静かに嘘になるので、
+004 と同じ扱いで確認すること。
+
+- `entry_templates.day_of_month`（毎月 D 日固定）を 4 つの形に置き換える:
+  `monthly` / `yearly` / `interval` / `once`
+- **既存の全行は `monthly` にバックフィルされる**。日付は既に持っていたものが
+  そのまま残る = 意味は変わらない
+- `day_of_month` の NOT NULL は外れる（`once` は `on_date` が日付を持つため）。
+  代わりに `entry_templates_recurrence_shape_chk` が形ごとに必要な列と
+  禁止する列を両方強制する
+
+適用後の確認（**帳簿ごとに `app.current_ledger_id` を設定すること**。理由は
+004 と同じ、FORCE RLS は所有者にも効く）:
+
+```sh
+psql "$DATABASE_URL" -P pager=off -c "
+DO \$\$
+DECLARE led RECORD; total INTEGER; stray INTEGER;
+BEGIN
+  FOR led IN SELECT id, name FROM ledgers ORDER BY id LOOP
+    PERFORM set_config('app.current_ledger_id', led.id::TEXT, true);
+    SELECT count(*) INTO total FROM entry_templates;
+    SELECT count(*) INTO stray FROM entry_templates
+     WHERE recurrence_kind <> 'monthly' OR day_of_month IS NULL;
+    RAISE NOTICE '% (id %) -> % 件、うち monthly でない/日付なし: %',
+      led.name, led.id, total, stray;
+  END LOOP;
+END
+\$\$"
+```
+
+**移行直後は `stray` が全帳簿で 0 でなければならない。** 0 でなければ
+バックフィルが届いていない行があり、その項目は発生しなくなっている。
+（次回以降の確認では、ユーザーが年次や単発を登録していれば 0 でなくなる。
+これは正常。）
+
 ## 5. デプロイ
 
 ```sh
