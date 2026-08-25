@@ -17,7 +17,16 @@ interface MonthlyState {
   fetchMonthlyAmountsRange: (startMonth: string, endMonth: string) => Promise<void>;
   setMonthlyAmount: (templateId: number, yearMonth: string, amount: number) => Promise<void>;
   deleteMonthlyAmount: (templateId: number, yearMonth: string) => Promise<void>;
-  copyMonthlyAmounts: (fromMonth: string, toMonth: string, templateIds: number[]) => Promise<void>;
+  /**
+   * Returns whether the copy actually happened.
+   *
+   * `void` would be a lie the caller cannot detect: reportError has already
+   * raised the toast, so a try/catch at the call site never runs and
+   * 「先月の金額をコピーしました」 fires beside the error message -- telling a
+   * household its month is budgeted when nothing was written. Same reasoning as
+   * useAssetStore and useTemplateStore.
+   */
+  copyMonthlyAmounts: (fromMonth: string, toMonth: string, templateIds: number[]) => Promise<boolean>;
   fetchMonthlyActuals: (yearMonth: string) => Promise<void>;
   setMonthlyActual: (templateId: number, yearMonth: string, amount: number) => Promise<void>;
   deleteMonthlyActual: (templateId: number, yearMonth: string) => Promise<void>;
@@ -166,9 +175,16 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
       }
       newMap.set(toMonth, monthMap);
       set({ monthlyAmountsMap: newMap, loading: false });
+      return true;
     } catch (e) {
+      // Covers BOTH failures deliberately: the copy itself, and the re-fetch
+      // that proves what landed. A copy that succeeded but could not be read
+      // back leaves the screen showing the previous month's figures, so
+      // reporting success would be true about the database and false about
+      // what the user is looking at.
       set({ loading: false });
       reportError(e);
+      return false;
     }
   },
 

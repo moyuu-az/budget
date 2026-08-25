@@ -158,11 +158,52 @@ describe('checking the ANSWER', () => {
     });
   });
 
-  it('reports a version skew even when the status is an error', async () => {
+  it('reports a version skew on an unstamped error that is unmistakably ours', async () => {
     // An old server's 401 and a current one's must not read the same, or the
-    // user is told to sign in again for something signing in cannot fix.
+    // user is told to sign in again for something signing in cannot fix. A
+    // well-formed error envelope is what identifies the sender as this
+    // application -- nothing else produces one.
     const api = apiWith(stubFetch('{"__appError":true,"code":"UNAUTHORIZED","message":"x"}', 401, null));
 
+    await expect(api.getCategories()).rejects.toMatchObject({
+      envelope: { code: 'STALE_CLIENT' },
+    });
+  });
+
+  it('does NOT latch on a transient gateway failure', async () => {
+    // Nothing between the browser and this application stamps anything: a Cloud
+    // Run 502, an IAP sign-in page, a gateway timeout all arrive unstamped.
+    // Reading those as a version skew would latch the reload overlay -- which is
+    // irreversible -- over a blip that fixed itself, leaving the app blocked
+    // after the service came back.
+    const gatewayError = vi.fn().mockResolvedValue(
+      new Response('<html>502 Bad Gateway</html>', {
+        status: 502,
+        headers: { 'content-type': 'text/html' },
+      }),
+    );
+    const api = apiWith(gatewayError as ReturnType<typeof stubFetch>);
+
+    await expect(api.getCategories()).rejects.toMatchObject({
+      envelope: { code: 'UNKNOWN' },
+    });
+  });
+
+  it('does NOT latch on an IAP sign-in redirect', async () => {
+    const signInPage = vi.fn().mockResolvedValue(
+      new Response('<html>sign in</html>', { status: 401, headers: { 'content-type': 'text/html' } }),
+    );
+    const api = apiWith(signInPage as ReturnType<typeof stubFetch>);
+
+    await expect(api.getCategories()).rejects.toMatchObject({
+      envelope: { code: 'UNAUTHORIZED' },
+    });
+  });
+
+  it('refuses a MISMATCHED stamp whatever the status', async () => {
+    // Unambiguous in both directions: only this application sets the header, so
+    // a wrong value is a wrong build and never an intermediary.
+    const api = apiWith(stubFetch('{"__appError":true,"code":"VALIDATION","message":"x"}', 400, '1'));
     await expect(api.getCategories()).rejects.toMatchObject({
       envelope: { code: 'STALE_CLIENT' },
     });
@@ -179,5 +220,16 @@ describe('checking the ANSWER', () => {
     await api.getCategories().catch((e: unknown) => reportError(e));
 
     expect(useStaleClientStore.getState().isStale).toBe(true);
+  });
+
+  it('leaves the overlay alone after a transient failure', async () => {
+    // The latch is irreversible, so it must never be set by something that
+    // resolves on its own.
+    const gatewayError = vi.fn().mockResolvedValue(new Response('', { status: 503 }));
+    const api = apiWith(gatewayError as ReturnType<typeof stubFetch>);
+
+    await api.getCategories().catch((e: unknown) => reportError(e));
+
+    expect(useStaleClientStore.getState().isStale).toBe(false);
   });
 });

@@ -2,6 +2,7 @@ import type { PoolClient } from '../db/pool';
 import type { EntryTemplate, EntryTemplateInput } from '../../shared/types';
 import type { TemplateRow } from './row-types';
 import { recurrenceToColumns, rowToTemplate } from '../mappers';
+import { occursInMonth } from '../../shared/recurrence';
 import { buildSetClause } from './sql';
 
 export interface TemplateRepository {
@@ -22,6 +23,56 @@ const COLUMNS: Partial<Record<keyof EntryTemplateInput, string>> = {
   categoryId: 'category_id',
   defaultAmount: 'default_amount',
 };
+
+/**
+ * Deletes per-month amounts for months the entry no longer occurs in.
+ *
+ * WHY THIS HAS TO HAPPEN
+ *   A `monthly_amounts` row belongs to an (entry, month) pair. Once an entry can
+ *   skip months, changing its recurrence can leave rows behind for months it no
+ *   longer falls in -- and those rows are INVISIBLE: no screen renders them, no
+ *   total reads them, because every aggregation now filters by occurrence.
+ *
+ *   They are not harmless while hidden. They come back the day someone changes
+ *   the recurrence again to include that month, at which point a figure the
+ *   household set months ago silently overrides the default they expected. That
+ *   is exactly the trap `copyMonth` was narrowed to stop; leaving the ordinary
+ *   edit path open would have re-created it through the front door.
+ *
+ * WHY IT RUNS HERE AND NOT IN SQL
+ *   The occurrence rule lives in ONE place (shared/recurrence.ts) and it is
+ *   TypeScript. The server can import it; a WHERE clause could not, and a second
+ *   implementation in SQL is the one no test would notice drifting. So the
+ *   candidate months are read out, filtered in TypeScript, and deleted by name.
+ *
+ * WHY RECORDED ACTUALS ARE LEFT ALONE
+ *   An actual is a FACT: the household paid that, in that month. A schedule
+ *   correction made afterwards does not unmake it, and deleting one would erase
+ *   history to tidy a projection. Only the PLANNED side is derived from the
+ *   schedule, so only the planned side follows it.
+ */
+async function pruneOrphanedAmounts(
+  client: PoolClient,
+  templateId: number,
+  recurrence: EntryTemplateInput['recurrence'],
+): Promise<void> {
+  // No ledger predicate: row-level security supplies it, as everywhere else.
+  const { rows } = await client.query<{ year_month: string }>(
+    'SELECT year_month FROM monthly_amounts WHERE template_id = $1',
+    [templateId],
+  );
+
+  const orphaned = rows
+    .map((row) => row.year_month)
+    .filter((yearMonth) => !occursInMonth(recurrence, yearMonth));
+
+  if (orphaned.length === 0) return;
+
+  await client.query(
+    'DELETE FROM monthly_amounts WHERE template_id = $1 AND year_month = ANY($2::TEXT[])',
+    [templateId, orphaned],
+  );
+}
 
 export function createTemplateRepository(
   client: PoolClient,
@@ -102,6 +153,8 @@ export function createTemplateRepository(
         `UPDATE entry_templates SET ${sets.join(', ')} WHERE id = $${params.length + 1}`,
         [...params, id],
       );
+
+      if (recurrence !== undefined) await pruneOrphanedAmounts(client, id, recurrence);
     },
 
     async toggle(id, enabled) {

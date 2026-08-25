@@ -263,6 +263,56 @@ describe('copying last month’s amounts', () => {
   });
 });
 
+describe('when the copy fails', () => {
+  // Asserted against the TOAST STORE, not the DOM. EntriesView does not render
+  // toasts -- the shell does -- so `queryByText` would find nothing here whether
+  // the message was raised or not, and every one of these tests would pass while
+  // proving nothing. The positive case below is what caught that.
+  const messages = (): string[] => useToastStore.getState().toasts.map((t) => t.message);
+
+  it('does not claim the month was budgeted', async () => {
+    // The store swallows the throw (reportError has already raised the toast),
+    // so a try/catch at the call site could never run: 「コピーしました」 would
+    // fire beside the error, telling a household its month is set when nothing
+    // was written.
+    const user = userEvent.setup();
+    api.copyMonthlyAmounts = vi.fn().mockRejectedValue(new Error('nope'));
+    useTemplateStore.setState({ templates: [RENT] });
+    render(<EntriesView />);
+
+    await user.click(screen.getByRole('button', { name: '先月からコピー' }));
+
+    expect(messages()).not.toContain('先月の金額をコピーしました');
+  });
+
+  it('does not claim success when the copy landed but could not be read back', async () => {
+    // The database is right and the screen is wrong -- still not a success from
+    // where the user is sitting, because the figures in front of them are the
+    // previous month's.
+    const user = userEvent.setup();
+    api.copyMonthlyAmounts = vi.fn().mockResolvedValue(undefined);
+    api.getMonthlyAmounts = vi.fn().mockRejectedValue(new Error('nope'));
+    useTemplateStore.setState({ templates: [RENT] });
+    render(<EntriesView />);
+
+    await user.click(screen.getByRole('button', { name: '先月からコピー' }));
+
+    expect(messages()).not.toContain('先月の金額をコピーしました');
+  });
+
+  it('says so when it worked', async () => {
+    const user = userEvent.setup();
+    api.copyMonthlyAmounts = vi.fn().mockResolvedValue(undefined);
+    api.getMonthlyAmounts = vi.fn().mockResolvedValue([]);
+    useTemplateStore.setState({ templates: [RENT] });
+    render(<EntriesView />);
+
+    await user.click(screen.getByRole('button', { name: '先月からコピー' }));
+
+    await vi.waitFor(() => expect(messages()).toContain('先月の金額をコピーしました'));
+  });
+});
+
 describe('navigating to another month', () => {
   it('moves an entry between the two sections', async () => {
     const user = userEvent.setup();

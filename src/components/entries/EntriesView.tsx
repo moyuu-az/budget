@@ -92,18 +92,21 @@ function EntriesView() {
     const prevDate = new Date(year, month - 2, 1);
     const prevMonth = toYearMonth(prevDate);
     setCopying(true);
-    try {
-      // Only the entries that actually fall in THIS month. Copying the rest
-      // would store overrides for months their entries skip -- invisible on
-      // every screen, and silently in force the day someone makes the entry
-      // monthly. `occurring` is the same narrowing the totals above use.
-      await copyMonthlyAmounts(prevMonth, currentYearMonth, occurring.map((t) => t.id));
-      addToast('先月の金額をコピーしました', 'success');
-    } catch {
-      addToast('コピーに失敗しました', 'error');
-    } finally {
-      setCopying(false);
-    }
+    // Only the entries that actually fall in THIS month. Copying the rest would
+    // store overrides for months their entries skip -- invisible on every
+    // screen, and silently in force the day someone makes the entry monthly.
+    // `occurring` is the same narrowing the totals above use.
+    //
+    // Branching on the store's boolean rather than try/catch: the store
+    // swallows the throw (reportError has already raised the toast), so a catch
+    // here could never run and 「コピーしました」 would fire on failure.
+    const copied = await copyMonthlyAmounts(
+      prevMonth,
+      currentYearMonth,
+      occurring.map((t) => t.id),
+    );
+    setCopying(false);
+    if (copied) addToast('先月の金額をコピーしました', 'success');
   }, [currentYearMonth, occurring, copyMonthlyAmounts, addToast]);
 
   // Reset to defaults

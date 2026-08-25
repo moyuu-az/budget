@@ -265,6 +265,78 @@ describe('template repository', () => {
     expect(updated.recurrence).toEqual({ kind: 'yearly', month: 7, dayOfMonth: 15 });
   });
 
+  it('drops per-month amounts for months the new recurrence no longer covers', async () => {
+    // The trap this closes: a `monthly_amounts` row for a month the entry no
+    // longer falls in is invisible -- nothing renders it, no total reads it --
+    // and it comes back the day someone changes the recurrence again, silently
+    // overriding the default the household expected.
+    const templateId = await inHousehold(async (r) => {
+      const t = await r.template.add({ name: 'rent', recurrence: monthlyOn(1), type: 'expense' });
+      await r.monthlyAmount.set(t.id, '2026-07', 50_000);
+      await r.monthlyAmount.set(t.id, '2026-09', 60_000);
+      return t.id;
+    });
+
+    // Every September, and nothing else.
+    await inHousehold((r) =>
+      r.template.update(templateId, { recurrence: { kind: 'yearly', month: 9, dayOfMonth: 1 } }),
+    );
+
+    expect(await inHousehold((r) => r.monthlyAmount.getForMonth('2026-07'))).toHaveLength(0);
+    // September still occurs, so its amount is the household's and stays.
+    expect(await inHousehold((r) => r.monthlyAmount.getForMonth('2026-09'))).toMatchObject([
+      { amount: 60_000 },
+    ]);
+  });
+
+  it('does not resurrect a dropped amount when the recurrence changes back', async () => {
+    // The whole point, stated as the sequence a user actually performs.
+    const templateId = await inHousehold(async (r) => {
+      const t = await r.template.add({ name: 'rent', recurrence: monthlyOn(1), type: 'expense' });
+      await r.monthlyAmount.set(t.id, '2026-07', 50_000);
+      return t.id;
+    });
+
+    await inHousehold((r) =>
+      r.template.update(templateId, { recurrence: { kind: 'yearly', month: 9, dayOfMonth: 1 } }),
+    );
+    await inHousehold((r) => r.template.update(templateId, { recurrence: monthlyOn(1) }));
+
+    expect(await inHousehold((r) => r.monthlyAmount.getForMonth('2026-07'))).toHaveLength(0);
+  });
+
+  it('leaves RECORDED ACTUALS alone, because they are facts', async () => {
+    // The household paid that, in that month. A schedule correction made
+    // afterwards does not unmake it, and deleting one would erase history to
+    // tidy a projection.
+    const templateId = await inHousehold(async (r) => {
+      const t = await r.template.add({ name: 'rent', recurrence: monthlyOn(1), type: 'expense' });
+      await r.monthlyActual.set(t.id, '2026-07', 48_000);
+      return t.id;
+    });
+
+    await inHousehold((r) =>
+      r.template.update(templateId, { recurrence: { kind: 'yearly', month: 9, dayOfMonth: 1 } }),
+    );
+
+    expect(await inHousehold((r) => r.monthlyActual.getForMonth('2026-07'))).toMatchObject([
+      { actualAmount: 48_000 },
+    ]);
+  });
+
+  it('touches no amounts when the patch leaves the recurrence alone', async () => {
+    // A rename must not cost the household its overrides.
+    const templateId = await inHousehold(async (r) => {
+      const t = await r.template.add({ name: 'rent', recurrence: monthlyOn(1), type: 'expense' });
+      await r.monthlyAmount.set(t.id, '2026-07', 50_000);
+      return t.id;
+    });
+
+    await inHousehold((r) => r.template.update(templateId, { name: 'renamed' }));
+
+    expect(await inHousehold((r) => r.monthlyAmount.getForMonth('2026-07'))).toHaveLength(1);
+  });
+
   it('orders a one-off by its date rather than pushing it to the end', async () => {
     // getAll orders by COALESCE(day_of_month, day of on_date). Without the
     // COALESCE, day_of_month is NULL for every one-off, PostgreSQL sorts NULLs
