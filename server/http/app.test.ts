@@ -332,6 +332,73 @@ describe('argument validation', () => {
     }
   });
 
+  it('leaves the recurrence alone when a patch omits it', async () => {
+    // `.partial()` on a schema whose field is a ZodEffects makes the whole effect
+    // optional. That is what a patch needs -- absent means "leave the timing
+    // alone" -- but it is Zod-internal behaviour, so it is pinned here rather
+    // than assumed.
+    const alice = await sessionFor(ALICE);
+    const shared = sharedLedgerOf(alice);
+    const created = await call('addTemplate', {
+      as: ALICE, ledgerId: shared,
+      args: [{ name: 'rent', recurrence: { kind: 'yearly', month: 3, dayOfMonth: 20 }, type: 'expense' }],
+    });
+    const template = (await created.json()) as { id: number };
+
+    const response = await call('updateTemplate', {
+      as: ALICE, ledgerId: shared, args: [template.id, { name: 'renamed' }],
+    });
+    // 204: updateTemplate's contract returns void.
+    expect(response.status).toBe(204);
+
+    const listed = await call('getTemplates', { as: ALICE, ledgerId: shared });
+    const rows = (await listed.json()) as Array<{ id: number; name: string; recurrence: unknown }>;
+    expect(rows.find((row) => row.id === template.id)).toMatchObject({
+      name: 'renamed',
+      recurrence: { kind: 'yearly', month: 3, dayOfMonth: 20 },
+    });
+  });
+
+  it('rejects an explicit null recurrence rather than reading it as "leave alone"', async () => {
+    // null and undefined are different arguments and only one of them means
+    // "unchanged". Accepting null would reach the repository, which would write
+    // five NULL columns and be rejected by the shape CHECK -- a CONFLICT for
+    // what is a validation error.
+    const alice = await sessionFor(ALICE);
+    const shared = sharedLedgerOf(alice);
+    const created = await call('addTemplate', {
+      as: ALICE, ledgerId: shared, args: [{ name: 't', recurrence: monthlyOn(1), type: 'expense' }],
+    });
+    const template = (await created.json()) as { id: number };
+
+    const response = await call('updateTemplate', {
+      as: ALICE, ledgerId: shared, args: [template.id, { recurrence: null }],
+    });
+    expect(response.status).toBe(400);
+    expect((await envelopeOf(response)).code).toBe('VALIDATION');
+  });
+
+  it('changes the recurrence through the API, clearing the previous shape', async () => {
+    const alice = await sessionFor(ALICE);
+    const shared = sharedLedgerOf(alice);
+    const created = await call('addTemplate', {
+      as: ALICE, ledgerId: shared,
+      args: [{ name: 't', recurrence: { kind: 'yearly', month: 3, dayOfMonth: 20 }, type: 'expense' }],
+    });
+    const template = (await created.json()) as { id: number };
+
+    const response = await call('updateTemplate', {
+      as: ALICE, ledgerId: shared, args: [template.id, { recurrence: { kind: 'once', date: '2026-11-20' } }],
+    });
+    expect(response.status).toBe(204);
+
+    const listed = await call('getTemplates', { as: ALICE, ledgerId: shared });
+    const rows = (await listed.json()) as Array<{ id: number; recurrence: unknown }>;
+    expect(rows.find((row) => row.id === template.id)).toMatchObject({
+      recurrence: { kind: 'once', date: '2026-11-20' },
+    });
+  });
+
   it('rejects a malformed year-month', async () => {
     const alice = await sessionFor(ALICE);
     const response = await call('getMonthlyAmounts', {
