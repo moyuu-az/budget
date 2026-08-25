@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   FIELD_KEY_PATTERN,
   MAX_ASSET_FIELDS,
+  MAX_ASSET_VALUE,
   MAX_FIELD_LABEL_LENGTH,
   MAX_FIELD_TEXT_LENGTH,
   MAX_FIELD_UNIT_LENGTH,
@@ -162,8 +163,19 @@ export const assetInputSchema = z.object({
    * stop adding up: two holdings of 100.5 render as ¥101 + ¥101 beside a total
    * of ¥201. Refusing the input is the only fix that does not require every
    * reader to round the same way forever.
+   *
+   * Bounded by MAX_ASSET_VALUE, which is what NUMERIC(14,2) can hold. Without
+   * it a mistyped extra digit reaches the database, which answers with a numeric
+   * overflow -- redacted on the way out, so the user gets a generic failure
+   * about a field they can plainly see is a number.
+   *
+   * The limit lives in shared/asset-fields.ts because the dialog checks it too;
+   * and since 現在の残高 became a holding, EVERY balance edit comes through here.
    */
-  value: finiteNumberSchema.int('評価額は円単位（整数）で入力してください'),
+  value: finiteNumberSchema
+    .int('評価額は円単位（整数）で入力してください')
+    .min(-MAX_ASSET_VALUE, '評価額が小さすぎます')
+    .max(MAX_ASSET_VALUE, '評価額が大きすぎます'),
   fields: assetFieldValuesSchema.optional(),
 });
 export const assetPatchSchema = assetInputSchema.partial();

@@ -1,6 +1,5 @@
 import type { Pool, PoolClient } from '../db/pool';
 import { withLedgerScope } from '../db/ledger-scope';
-import { createSettingsRepository, type SettingsRepository } from './settings.repository';
 import { createCategoryRepository, type CategoryRepository } from './category.repository';
 import { createTemplateRepository, type TemplateRepository } from './template.repository';
 import {
@@ -19,7 +18,6 @@ import {
 import { createAssetRepository, type AssetRepository } from './asset.repository';
 
 export interface Repositories {
-  settings: SettingsRepository;
   category: CategoryRepository;
   template: TemplateRepository;
   monthlyAmount: MonthlyAmountRepository;
@@ -60,7 +58,6 @@ export interface Repositories {
  */
 export function createRepositories(client: PoolClient, ledgerId: number): Repositories {
   return {
-    settings: createSettingsRepository(client, ledgerId),
     category: createCategoryRepository(client, ledgerId),
     template: createTemplateRepository(client, ledgerId),
     monthlyAmount: createMonthlyAmountRepository(client, ledgerId),

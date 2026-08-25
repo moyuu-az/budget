@@ -5,28 +5,21 @@ import HoldingsCard from './HoldingsCard';
 import { setApi } from '../../lib/api';
 import { createMockApi } from '../../test/mock-api';
 import { useAssetStore } from '../../stores/useAssetStore';
-import { useBalanceStore } from '../../stores/useBalanceStore';
 import { useUIStore } from '../../stores/useUIStore';
-import type { Asset, AssetCategory } from '../../types';
+import { makeAsset, makeAssetCategory, makeCashAsset, makeCashCategory } from '../../test/factories';
 
-const NISA: AssetCategory = { id: 1, name: 'NISA', color: '#22c55e', sortOrder: 0, fields: [] };
-
-const holding = (overrides: Partial<Asset> = {}): Asset => ({
-  id: 1,
-  categoryId: 1,
-  name: 'つみたて',
-  value: 1_000_000,
-  fields: {},
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-  ...overrides,
-});
+const CASH = makeCashCategory();
+const NISA = makeAssetCategory({ id: 1, name: 'NISA' });
 
 beforeEach(() => {
   localStorage.clear();
   setApi(createMockApi());
-  useAssetStore.setState({ categories: [], assets: [], loading: false });
-  useBalanceStore.setState({ balance: 500_000 });
+  // Every ledger has a cash category; the only way to see none is mid-fetch.
+  useAssetStore.setState({
+    categories: [CASH],
+    assets: [makeCashAsset({ value: 500_000 })],
+    status: 'ready',
+  });
   useUIStore.setState({ holdingsView: 'cash' });
 });
 
@@ -35,69 +28,121 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('when the ledger does not track assets', () => {
-  it('renders nothing at all', () => {
-    // Asset tracking is optional. A card offering a choice between one number
-    // and the same number -- with 純資産 reading ¥0 -- looks like a fault.
-    const { container } = render(<HoldingsCard />);
-    expect(container).toBeEmptyDOMElement();
+describe('before the categories have loaded', () => {
+  it('shows a placeholder, never a figure', () => {
+    // Not ¥0: that reads as a reading. Every ledger has a cash category once the
+    // fetch lands, so this state is always "not loaded", never "nothing here".
+    useAssetStore.setState({ categories: [], assets: [], status: 'loading' });
+    render(<HoldingsCard />);
+
+    expect(screen.getByRole('status', { name: '資産を読み込み中' })).toBeInTheDocument();
+    expect(screen.queryByText('¥0')).not.toBeInTheDocument();
+  });
+
+  it('offers a retry when the fetch failed', () => {
+    useAssetStore.setState({ categories: [], assets: [], status: 'error' });
+    render(<HoldingsCard />);
+
+    expect(screen.getByText('資産を読み込めませんでした')).toBeInTheDocument();
   });
 });
 
-describe('when the ledger tracks assets', () => {
-  beforeEach(() => {
-    useAssetStore.setState({ categories: [NISA], assets: [holding()] });
+describe('when the ledger holds cash only', () => {
+  it('shows the cash total', () => {
+    render(<HoldingsCard />);
+    expect(screen.getByText('¥500,000')).toBeInTheDocument();
   });
 
-  it('shows the account balance under the cash lens', () => {
+  it('offers no lens toggle', () => {
+    // 現金 and 純資産 would be the same number. A toggle between a figure and
+    // itself invites the user to look for a difference that is not there.
+    render(<HoldingsCard />);
+    expect(screen.queryByRole('tab', { name: '純資産' })).not.toBeInTheDocument();
+  });
+
+  it('offers no toggle for a category that holds nothing either', () => {
+    // Creating a NISA category and not filling it in is an ordinary half-done
+    // state. The two views would still be the same number, and the 純資産 view
+    // would read 「＋ その他 ¥0」 with no chip beside it, because
+    // summarizeHoldings drops categories holding nothing.
+    useAssetStore.setState({
+      categories: [CASH, NISA],
+      assets: [makeCashAsset({ value: 500_000 })],
+    });
+    render(<HoldingsCard />);
+
+    expect(screen.queryByRole('tab', { name: '純資産' })).not.toBeInTheDocument();
+  });
+
+  it('shows cash even when a persisted preference says 純資産', () => {
+    // The preference survives in localStorage from a ledger that DID hold
+    // assets. Without the guard the card would render its 純資産 breakdown with
+    // no toggle to get back.
+    useUIStore.setState({ holdingsView: 'netWorth' });
+    render(<HoldingsCard />);
+
+    expect(screen.getByText('現金')).toBeInTheDocument();
+    expect(screen.queryByText('純資産')).not.toBeInTheDocument();
+  });
+});
+
+describe('when the ledger holds more than cash', () => {
+  beforeEach(() => {
+    useAssetStore.setState({
+      categories: [CASH, NISA],
+      assets: [makeCashAsset({ value: 500_000 }), makeAsset({ value: 1_000_000 })],
+    });
+  });
+
+  it('shows the cash total under the cash lens', () => {
     render(<HoldingsCard />);
     expect(screen.getByText('¥500,000')).toBeInTheDocument();
     expect(screen.queryByText('¥1,500,000')).not.toBeInTheDocument();
   });
 
-  it('adds the assets under the net-worth lens', async () => {
+  it('shows net worth -- cash INCLUDED, not added twice -- under the other lens', async () => {
     const user = userEvent.setup();
     render(<HoldingsCard />);
 
     await user.click(screen.getByRole('tab', { name: '純資産' }));
 
+    // 500,000 cash + 1,000,000 NISA. The old shape produced 2,000,000 here for
+    // anyone who recorded their bank balance as a 現金 asset as well.
     expect(screen.getByText('¥1,500,000')).toBeInTheDocument();
   });
 
   it('never shows the total without its parts', async () => {
-    // Someone who records their bank account as a 現金 asset has it counted
-    // twice. The app cannot know whether that happened -- this line is what
-    // makes it visible instead of hiding it inside one number.
     const user = userEvent.setup();
     render(<HoldingsCard />);
 
     await user.click(screen.getByRole('tab', { name: '純資産' }));
 
-    expect(screen.getByText(/残高 ¥500,000 ＋ 資産 ¥1,000,000/)).toBeInTheDocument();
+    expect(screen.getByText(/現金 ¥500,000 ＋ その他 ¥1,000,000/)).toBeInTheDocument();
   });
 
-  it('breaks the assets down by category', async () => {
+  it('breaks the holdings down by category, cash first', async () => {
     const user = userEvent.setup();
-    useAssetStore.setState({
-      categories: [NISA, { id: 2, name: '現金', color: '#38bdf8', sortOrder: 1, fields: [] }],
-      assets: [holding(), holding({ id: 2, categoryId: 2, value: 250_000 })],
-    });
     render(<HoldingsCard />);
 
     await user.click(screen.getByRole('tab', { name: '純資産' }));
 
-    expect(screen.getByText('NISA')).toBeInTheDocument();
-    expect(screen.getByText('¥250,000')).toBeInTheDocument();
+    const names = screen.getAllByRole('listitem').map((item) => item.textContent);
+    expect(names[0]).toContain('現金');
+    expect(names[1]).toContain('NISA');
   });
 
   it('shows holdings whose category is not loaded as その他', async () => {
     // Reachable in a shared ledger: the other member adds a category, this
     // client refetches holdings only. Dropping them would make the chips
-    // quietly fail to add up to the 資産 figure above them.
+    // quietly fail to add up to the total above them.
     const user = userEvent.setup();
     useAssetStore.setState({
-      categories: [NISA],
-      assets: [holding(), holding({ id: 2, categoryId: 99, value: 40_000 })],
+      categories: [CASH, NISA],
+      assets: [
+        makeCashAsset({ value: 500_000 }),
+        makeAsset({ value: 1_000_000 }),
+        makeAsset({ id: 2, categoryId: 99, value: 40_000 }),
+      ],
     });
     render(<HoldingsCard />);
 
@@ -105,7 +150,7 @@ describe('when the ledger tracks assets', () => {
 
     expect(screen.getByText('その他')).toBeInTheDocument();
     expect(screen.getByText('¥40,000')).toBeInTheDocument();
-    expect(screen.getByText(/資産 ¥1,040,000/)).toBeInTheDocument();
+    expect(screen.getByText(/その他 ¥1,040,000/)).toBeInTheDocument();
   });
 
   it('does not invent an その他 row when every holding has its category', async () => {
@@ -120,8 +165,11 @@ describe('when the ledger tracks assets', () => {
   it('shows a loan tracked as a negative asset', async () => {
     const user = userEvent.setup();
     useAssetStore.setState({
-      categories: [{ id: 3, name: '住宅ローン', color: null, sortOrder: 0, fields: [] }],
-      assets: [holding({ id: 5, categoryId: 3, value: -28_000_000 })],
+      categories: [CASH, makeAssetCategory({ id: 3, name: '住宅ローン', color: null })],
+      assets: [
+        makeCashAsset({ value: 500_000 }),
+        makeAsset({ id: 5, categoryId: 3, value: -28_000_000 }),
+      ],
     });
     render(<HoldingsCard />);
 

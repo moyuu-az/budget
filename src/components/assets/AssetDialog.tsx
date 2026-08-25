@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactElement } from 'react';
 import type { Asset, AssetCategory, AssetInput } from '../../types';
-import { hasNoErrors, validateFieldValues } from '../../../shared/asset-fields';
+import { MAX_ASSET_VALUE, hasNoErrors, validateFieldValues } from '../../../shared/asset-fields';
 import { Dialog } from '../ui/Dialog';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -68,6 +68,11 @@ function AssetDialog({ open, category, asset, onSubmit, onClose }: Props): React
       // Whole yen only -- see assetInputSchema for why a fraction of a yen
       // makes the figures on two screens disagree.
       nextErrors.value = '評価額は円単位（整数）で入力してください';
+    } else if (Math.abs(parsedValue) > MAX_ASSET_VALUE) {
+      // The same bound the server enforces, from the same module. Left to the
+      // server it would come back as a redacted generic failure; said here it
+      // names the field and the reason.
+      nextErrors.value = '評価額が大きすぎます';
     }
 
     // The category's own rules, from the module the server also runs.

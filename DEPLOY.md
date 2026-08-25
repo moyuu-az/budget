@@ -117,6 +117,59 @@ npm run db:migrate
 > `DATABASE_APP_ROLE` を省いても新テーブルの権限は付く。ただし前回 grant を実行した
 > ロールと今回 migration を流すロールが同じ場合に限るので、迷ったら毎回付けてよい。
 
+### 004 はデータを動かす
+
+`004_cash_is_an_asset.sql` は列を足すだけでなく、**各帳簿の残高を資産に移す**。
+
+- 帳簿ごとに `kind = 'cash'` の資産分類を 1 つ用意する（`現金` という名前の分類が
+  既にあればそれを昇格させる。新たに作らない）
+- その分類に**保有が 1 件も無い**帳簿では、`settings.current_balance` を
+  `口座残高` という保有として作る
+- **保有が既にある**帳簿では取り込まない。その保有こそが現金であり、
+  古い残高を足すと二重計上をそのまま新しい形で残すことになる
+- 古い値は消さずに `legacy_current_balance` へ改名して残す。移行後に残高が
+  合わないときの比較対象になる
+
+適用後は `settings` を読むコードが存在しない。残高は
+`kind = 'cash'` の分類の保有合計であり、それが唯一の場所。
+
+移行結果を確認するときは、**帳簿ごとに `app.current_ledger_id` を設定する**こと。
+`asset_categories` も `assets` も FORCE ROW LEVEL SECURITY なので、**所有者ロールで
+繋いでも RLS は効く**。設定せずに全帳簿を横断するクエリを書くと、ポリシーが
+`ledger_id = NULL` を評価して**必ず 0 件**が返り、「データが無い」と誤読する。
+
+```sh
+psql "$DATABASE_URL" -P pager=off -c "
+DO \$\$
+DECLARE led RECORD; cash_name TEXT; total NUMERIC;
+BEGIN
+  FOR led IN SELECT id, name FROM ledgers ORDER BY id LOOP
+    PERFORM set_config('app.current_ledger_id', led.id::TEXT, true);
+    SELECT c.name, coalesce(sum(a.value), 0)
+      INTO cash_name, total
+      FROM asset_categories c
+      LEFT JOIN assets a ON a.category_id = c.id
+     WHERE c.kind = 'cash'
+     GROUP BY c.name;
+    RAISE NOTICE '% (id %) -> % = %', led.name, led.id, cash_name, total;
+  END LOOP;
+END
+\$\$"
+```
+
+各帳簿に現金分類が 1 つずつあり、その合計が移行前の残高（または移行前から
+記録されていた現金の合計）になっていれば成功。
+
+> **`<NULL>` が出る帳簿があっても失敗ではない。** migration の後に作られた帳簿は、
+> 誰かが最初にアクセスするまで現金分類を持たない（サーバーが読み取り時に用意する。
+> `server/repositories/asset-category.repository.ts`）。migration 実行時点で
+> 存在していた帳簿だけが対象。
+>
+> **金額が想定と違う帳簿があるときは `legacy_current_balance` と突き合わせる。**
+> 現金分類に保有が既にあった帳簿では旧残高を取り込んでいない（二重計上だったため）。
+> また `現金` という名前の分類が 2 つあった帳簿では、**保有を持つ方**が昇格され、
+> もう一方は普通の分類として残る。
+
 ## 5. デプロイ
 
 ```sh

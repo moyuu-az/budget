@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useForecast } from './useForecast';
+import type { LoadStatus } from '../stores/load-status';
 import { toYearMonth } from '../utils/forecast';
 import type { ForecastPoint } from '../types';
 
@@ -21,6 +22,14 @@ export interface DashboardKpis {
   nextLargeExpense: NextLargeExpense | null;
   /** Average projected balance change per day over the 90-day window. */
   forecastSlopePerDay: number;
+  /**
+   * Where the forecast's inputs have got to.
+   *
+   * Every figure above is zero unless this is 'ready', and zero is not a reading
+   * -- `minBalance90d: 0` next to a 「注意」 badge is exactly the fabricated
+   * warning useForecast exists to prevent. Render the state, not the numbers.
+   */
+  status: LoadStatus;
 }
 
 const KPI_HORIZON_DAYS = 90;
@@ -81,12 +90,14 @@ function computeKpis(points: ForecastPoint[]): DashboardKpis {
     minBalance90dDate,
     nextLargeExpense,
     forecastSlopePerDay,
+    // Overwritten by the caller; computeKpis has no opinion about loading.
+    status: 'ready',
   };
 }
 
 export function useDashboardKpis(): DashboardKpis {
   // Same projection as the chart, just a fixed horizon -- see useForecast for
-  // why there is only one place that builds it.
-  const points = useForecast(KPI_HORIZON_DAYS);
-  return useMemo(() => computeKpis(points), [points]);
+  // why there is only one place that builds it, and why it reports readiness.
+  const { status, points } = useForecast(KPI_HORIZON_DAYS);
+  return useMemo(() => ({ ...computeKpis(points), status }), [points, status]);
 }

@@ -6,35 +6,35 @@ import { setApi } from '../../lib/api';
 import { createMockApi } from '../../test/mock-api';
 import { useAssetStore } from '../../stores/useAssetStore';
 import { useToastStore } from '../../stores/useToastStore';
-import type { AppApi, Asset, AssetCategory } from '../../types';
+import { makeAsset, makeAssetCategory, makeCashCategory } from '../../test/factories';
+import type { AppApi } from '../../types';
 
-const NISA: AssetCategory = {
+const NISA = makeAssetCategory({
   id: 1,
   name: 'NISA',
-  color: '#22c55e',
-  sortOrder: 0,
   fields: [
     { key: 'f1', label: '銘柄', type: 'text', required: true, unit: null },
     { key: 'f3', label: '保有数量', type: 'number', required: false, unit: '口' },
   ],
-};
+});
 
-const HOLDING: Asset = {
+/** The category every ledger has; its holdings are 現在の残高. */
+const CASH = makeCashCategory();
+
+const HOLDING = makeAsset({
   id: 11,
   categoryId: 1,
   name: 'つみたて投資枠',
   value: 1_200_000,
   fields: { f1: 'eMAXIS Slim', f3: 34_000 },
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-};
+});
 
 let api: AppApi;
 
 beforeEach(() => {
   api = createMockApi();
   setApi(api);
-  useAssetStore.setState({ categories: [], assets: [], loading: false });
+  useAssetStore.setState({ categories: [], assets: [], status: 'ready' });
   useToastStore.setState({ toasts: [], queue: [] });
 });
 
@@ -43,15 +43,59 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('when the ledger has never used asset tracking', () => {
-  it('offers the templates instead of an empty screen', () => {
-    // Asset tracking is optional, so nothing exists until the user asks -- but
-    // "nothing" must not look like a broken page.
+describe('before the categories arrive', () => {
+  it('says it is loading, and says it only while that is true', () => {
+    useAssetStore.setState({ categories: [], assets: [], status: 'loading' });
     render(<AssetsView />);
 
-    expect(screen.getByText('資産管理はまだ使われていません')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('資産の分類を読み込み中');
+  });
+
+  it('offers a retry when the fetch failed, instead of claiming to be loading', () => {
+    // This screen is where the balance is edited, so it is where someone whose
+    // data failed to load ends up -- following the 編集 link from a card that
+    // could not show them a figure. It used to state 「資産の分類を読み込んで
+    // います」 as fact, forever, with no way to try again.
+    useAssetStore.setState({ categories: [], assets: [], status: 'error' });
+    render(<AssetsView />);
+
+    expect(screen.getByText('資産の分類を読み込めませんでした')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '再読み込み' })).toBeInTheDocument();
+    expect(screen.queryByText(/読み込み中/)).not.toBeInTheDocument();
+  });
+});
+
+describe('when the ledger holds only its cash category', () => {
+  // Every ledger has one -- the server provisions it -- so this, not an empty
+  // list, is what a household that ignores 資産 actually sees.
+  beforeEach(() => {
+    useAssetStore.setState({ categories: [CASH], assets: [] });
+  });
+
+  it('shows the cash category and says what it is for', () => {
+    render(<AssetsView />);
+
+    expect(screen.getByRole('heading', { name: '現金' })).toBeInTheDocument();
+    expect(screen.getByText('現在の残高')).toBeInTheDocument();
+  });
+
+  it('refuses to offer a delete button for it', () => {
+    // Deleting it would take every cash holding with it and zero the forecast.
+    // The server refuses the call too -- this is only the half the user sees.
+    render(<AssetsView />);
+
+    expect(screen.queryByRole('button', { name: '現金の分類を削除' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '現金の分類を編集' })).toBeInTheDocument();
+  });
+
+  it('still offers the templates for everything else', () => {
+    render(<AssetsView />);
+
+    expect(screen.getByText('雛形から分類を追加')).toBeInTheDocument();
     expect(screen.getByText('NISA')).toBeInTheDocument();
-    expect(screen.getByText('現金')).toBeInTheDocument();
+    // 現金 is not among them: a second cash category is the double count this
+    // whole design removes.
+    expect(screen.queryByText('財布や銀行口座などの残高をそのまま記録します。')).not.toBeInTheDocument();
   });
 
   it('creates nothing until a template is actually saved', async () => {

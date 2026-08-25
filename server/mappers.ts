@@ -96,6 +96,12 @@ export function rowToAssetCategory(row: AssetCategoryRow): AssetCategory {
     // JSONB guarantees only that this is an array; coerceFieldDefs is what makes
     // it an array of definitions the UI can render.
     fields: coerceFieldDefs(row.fields),
+    // Narrowed rather than cast: the column is TEXT with a CHECK, and the CHECK
+    // is the thing that could be relaxed by a future migration without anyone
+    // revisiting this line. Anything unexpected reads as "an ordinary category",
+    // which is the safe answer -- the alternative is a second category claiming
+    // to be the balance.
+    kind: row.kind === 'cash' ? 'cash' : null,
   };
 }
 

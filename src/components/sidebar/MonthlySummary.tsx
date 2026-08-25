@@ -3,9 +3,11 @@ import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
 import { formatWithCommas } from '../../utils/currency';
 import { toYearMonth } from '../../utils/forecast';
+import { LoadGate } from '../ui/LoadGate';
 
 function MonthlySummary() {
   const { templates } = useTemplateStore();
+  const status = useTemplateStore((s) => s.status);
   const { monthlyAmountsMap } = useMonthlyStore();
 
   const yearMonth = useMemo(() => toYearMonth(new Date()), []);
@@ -30,6 +32,13 @@ function MonthlySummary() {
       net: income - expense,
     };
   }, [templates, monthlyAmountsMap, yearMonth]);
+
+  // The last place on a cold-loading screen that showed ¥0 as a figure. With no
+  // templates yet the sums are 0, and 「収入 +¥0 / 支出 -¥0」 reads as a month
+  // with nothing in it rather than as a panel still waiting.
+  if (status !== 'ready') {
+    return <LoadGate status={status} height={92} label="今月のサマリー" />;
+  }
 
   return (
     <div>

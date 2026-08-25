@@ -3,12 +3,12 @@ import { setApi } from '../lib/api';
 import { createMockApi } from '../test/mock-api';
 import { resetLedgerData, switchLedger, loadLedgerData } from './ledger';
 import { useSessionStore } from '../stores/useSessionStore';
-import { useBalanceStore } from '../stores/useBalanceStore';
 import { useCategoryStore } from '../stores/useCategoryStore';
 import { useTemplateStore } from '../stores/useTemplateStore';
 import { useSnapshotStore } from '../stores/useSnapshotStore';
 import { useMonthlyStore } from '../stores/useMonthlyStore';
 import { useAssetStore } from '../stores/useAssetStore';
+import { makeAsset, makeAssetCategory, makeCashAsset, makeCashCategory } from '../test/factories';
 import type { AppApi, Session } from '../types';
 
 const SESSION: Session = {
@@ -31,7 +31,6 @@ beforeEach(() => {
 
 /** Fills every ledger-scoped store with something recognisable. */
 function seedStores(): void {
-  useBalanceStore.setState({ balance: 1_525_210 });
   useCategoryStore.setState({
     categories: [
       { id: 1, name: '住居費', type: 'expense', color: null, sortOrder: 0, costType: 'fixed' },
@@ -51,12 +50,10 @@ function seedStores(): void {
   });
   useMonthlyStore.setState({ monthlyAmountsMap: new Map([['2026-01', new Map([[1, 100]])]]) });
   useAssetStore.setState({
-    categories: [{ id: 1, name: 'NISA', color: null, sortOrder: 0, fields: [] }],
+    categories: [makeCashCategory(), makeAssetCategory({ id: 1 })],
     assets: [
-      {
-        id: 1, categoryId: 1, name: 'つみたて投資枠', value: 1_000_000, fields: {},
-        createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
-      },
+      makeCashAsset({ value: 1_525_210 }),
+      makeAsset({ id: 1, categoryId: 1, name: 'つみたて投資枠', value: 1_000_000 }),
     ],
   });
 }
@@ -66,14 +63,14 @@ describe('resetLedgerData', () => {
     seedStores();
     resetLedgerData();
 
-    expect(useBalanceStore.getState().balance).toBe(0);
     expect(useCategoryStore.getState().categories).toEqual([]);
     expect(useTemplateStore.getState().templates).toEqual([]);
     expect(useSnapshotStore.getState().snapshots).toEqual([]);
     expect(useMonthlyStore.getState().monthlyAmountsMap.size).toBe(0);
     expect(useMonthlyStore.getState().monthlyActualsMap.size).toBe(0);
     // Assets are ledger-scoped like everything else: one household's portfolio
-    // must not survive a switch to another's.
+    // must not survive a switch to another's. This now includes the balance
+    // itself, which is the cash category's holdings.
     expect(useAssetStore.getState().categories).toEqual([]);
     expect(useAssetStore.getState().assets).toEqual([]);
   });
@@ -92,16 +89,17 @@ describe('switchLedger', () => {
     // would already read '個人' while every panel still showed the household's
     // figures -- one household's money under another's name.
     seedStores();
-    let balanceWhenFetched: number | null = null;
-    (api.getBalance as ReturnType<typeof vi.fn>).mockImplementation(async () => {
-      balanceWhenFetched = useBalanceStore.getState().balance;
-      return 50_000;
+    let assetsWhenFetched: number | null = null;
+    (api.getAssets as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      assetsWhenFetched = useAssetStore.getState().assets.length;
+      return [makeCashAsset({ value: 50_000 })];
     });
+    (api.getAssetCategories as ReturnType<typeof vi.fn>).mockResolvedValue([makeCashCategory()]);
 
     await switchLedger(20);
 
-    expect(balanceWhenFetched).toBe(0);
-    expect(useBalanceStore.getState().balance).toBe(50_000);
+    expect(assetsWhenFetched).toBe(0);
+    expect(useAssetStore.getState().assets).toHaveLength(1);
   });
 
   it('activates the requested ledger', async () => {
@@ -113,9 +111,9 @@ describe('switchLedger', () => {
     seedStores();
     await switchLedger(10);
 
-    expect(api.getBalance).not.toHaveBeenCalled();
+    expect(api.getAssets).not.toHaveBeenCalled();
     // Not cleared either -- there was nothing to switch away from.
-    expect(useBalanceStore.getState().balance).toBe(1_525_210);
+    expect(useAssetStore.getState().assets).toHaveLength(2);
   });
 
   it('stays on the current ledger when asked for one outside the session', async () => {
@@ -124,7 +122,7 @@ describe('switchLedger', () => {
     expect(useSessionStore.getState().activeLedgerId).toBe(10);
     // Still reloads: the stores were cleared on the way in and must not be
     // left empty just because the switch was refused.
-    expect(api.getBalance).toHaveBeenCalled();
+    expect(api.getAssets).toHaveBeenCalled();
   });
 
   it('remembers the choice for the next visit', async () => {
@@ -137,10 +135,11 @@ describe('loadLedgerData', () => {
   it('fetches what every view needs, and nothing month-specific', async () => {
     await loadLedgerData();
 
-    expect(api.getBalance).toHaveBeenCalled();
     expect(api.getCategories).toHaveBeenCalled();
     expect(api.getTemplates).toHaveBeenCalled();
     expect(api.getSnapshots).toHaveBeenCalled();
+    // Not optional: the cash category's holdings are 現在の残高, so these two
+    // are what give the dashboard its headline figure.
     expect(api.getAssetCategories).toHaveBeenCalled();
     expect(api.getAssets).toHaveBeenCalled();
     // Monthly data is fetched per month as the user navigates.

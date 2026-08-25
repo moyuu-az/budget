@@ -90,7 +90,6 @@ async function seed(as: string, ledgerId: number, tag: string): Promise<Fixture>
   await post('setMonthlyAmount', as, ledgerId, [template.id, '2026-01', 111]);
   await post('setMonthlyAmount', as, ledgerId, [template.id, '2026-02', 222]);
   await post('setMonthlyActual', as, ledgerId, [template.id, '2026-01', 333]);
-  await post('setBalance', as, ledgerId, [444_444]);
 
   const snapshot = (await (
     await post('addSnapshot', as, ledgerId, ['2026-01-01', 555_555])
@@ -145,14 +144,12 @@ async function snapshotLedger(ledgerId: number): Promise<string> {
 const ADVERSARIAL_ARGS: { [M in DataMethod]: (victim: Fixture) => unknown[] } = {
   // No arguments to subvert -- these are covered by asserting the RESPONSE holds
   // nothing of the other ledger's.
-  getBalance: () => [],
   getCategories: () => [],
   getTemplates: () => [],
   getSnapshots: () => [],
 
   // Writes into the caller's own ledger. Included so the sweep proves they do
   // not somehow spill sideways.
-  setBalance: () => [999_999],
   addCategory: () => [{ name: 'intruder', type: 'expense' }],
   addSnapshot: () => ['2026-01-01', 999_999],
 
@@ -286,10 +283,15 @@ describe('shared data stays shared', () => {
     const categories = (await (await post('getCategories', BOB, shared, [])).json()) as {
       name: string;
     }[];
-    const balance = await (await post('getBalance', BOB, shared, [])).json();
+    const assetCategories = (await (await post('getAssetCategories', BOB, shared, [])).json()) as {
+      name: string;
+      kind: string | null;
+    }[];
 
     expect(categories.map((c) => c.name)).toEqual(['household-cat']);
-    expect(balance).toBe(444_444);
+    // Both members see the same cash category, because it belongs to the ledger
+    // rather than to whoever asked for it first.
+    expect(assetCategories.filter((c) => c.kind === 'cash')).toHaveLength(1);
   });
 });
 

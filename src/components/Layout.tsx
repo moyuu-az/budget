@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { ViewType } from '../types';
-import BalanceInput from './sidebar/BalanceInput';
+import CashBalance from './sidebar/CashBalance';
 import LedgerSwitcher from './layout/LedgerSwitcher';
 import Navigation from './sidebar/Navigation';
 import MonthlySummary from './sidebar/MonthlySummary';
@@ -58,7 +58,9 @@ function Layout({ currentView, onNavigate, children }: Props) {
         {!collapsed && (
           <div className="flex flex-col gap-3 px-4 py-3">
             <LedgerSwitcher />
-            <BalanceInput />
+            {/* The balance is edited on the 資産 screen, because that is where the
+                cash holdings it sums actually live. */}
+            <CashBalance onEdit={() => onNavigate('assets')} />
           </div>
         )}
 

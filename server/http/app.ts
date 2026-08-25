@@ -171,7 +171,11 @@ export function createApp(deps: AppDependencies): Hono<{ Variables: Variables }>
   app.post('/api/:method', async (c) => {
     const name = c.req.param('method');
     if (!isDataMethod(name)) {
-      return c.json({ __appError: true, code: 'NOT_FOUND', message: `未知のメソッド: ${name}` }, 404);
+      // The name is NOT echoed back. It is a caller-controlled string, and the
+      // only reader of this message is a user whose tab is running an older
+      // build -- 「未知のメソッド: getBalance」 tells them nothing they can act
+      // on while putting attacker-chosen text into the response body.
+      return c.json({ __appError: true, code: 'NOT_FOUND', message: '未知のメソッドです' }, 404);
     }
 
     const session = c.get('session');

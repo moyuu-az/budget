@@ -72,7 +72,7 @@ function App() {
           )}
           {currentView === 'settings' && (
             <motion.div key="settings" {...pageTransition}>
-              <SettingsView />
+              <SettingsView onNavigate={setCurrentView} />
             </motion.div>
           )}
         </AnimatePresence>

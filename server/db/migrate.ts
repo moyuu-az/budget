@@ -52,6 +52,28 @@ export async function migrate(
   const applied: string[] = [];
   const skipped: string[] = [];
 
+  // PostgreSQL notices -- RAISE WARNING and friends -- reach node-postgres as an
+  // event on the connection and are DISCARDED unless something listens. They do
+  // not appear in the result object.
+  //
+  // That silence is not acceptable here. A migration that moves data cannot
+  // abort on one bad row (it would block the whole deployment for one ledger),
+  // so it warns and carries on -- 004 does exactly that when a stored balance
+  // will not parse or overflows the column. Without this listener the operator
+  // is never told that a figure was rewritten, which turns "reported rather than
+  // thrown" into "swallowed".
+  const onNotice = (notice: { severity?: string; message?: string }): void => {
+    // NOTICE is filtered out. `DROP POLICY IF EXISTS` and friends emit one each
+    // ("... does not exist, skipping"), several per migration, every run -- and a
+    // log buried in those is read exactly as often as no log at all. Anything a
+    // migration needs an operator to see must be RAISE WARNING or above; 004 is
+    // written that way, and so is PostgreSQL's own
+    // "no privileges were granted", which is worth seeing.
+    if (notice.severity === 'NOTICE' || notice.severity === 'DEBUG') return;
+    console.warn(`[migration] ${notice.severity ?? 'WARNING'}: ${notice.message ?? ''}`);
+  };
+  client.on('notice', onNotice);
+
   try {
     // Blocks until any other migrating process finishes; released with the
     // session when the client is returned to the pool.
@@ -93,6 +115,9 @@ export async function migrate(
     await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK_KEY]).catch(() => {
       // Losing the connection releases the lock anyway.
     });
+    // Removed before the connection goes back to the pool: it is a shared
+    // connection, and a listener left behind would narrate every later query.
+    client.off('notice', onNotice);
     client.release();
   }
 
