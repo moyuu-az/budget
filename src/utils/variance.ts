@@ -99,19 +99,39 @@ export function summarizeVariance(
 
   for (const template of templates) {
     if (template.type !== type) continue;
-    // Occurrence, not `enabled`: an annual premium is enabled every month and
-    // belongs to one of them. Counting it in the other eleven would report a
-    // shortfall the household never had.
-    if (!occursInMonth(template.recurrence, yearMonth)) continue;
 
     const actual = monthActuals?.get(template.id);
+
     if (actual === undefined) {
-      // Disabled entries are not counted as missing: the household paused them
-      // on purpose, so there is nothing they forgot to enter.
-      if (template.enabled) missingCount += 1;
+      // NOT recorded. Whether that is a household's oversight depends on whether
+      // the entry belongs to this month at all: an annual premium is enabled
+      // every month and falls in one of them, and counting it as missing in the
+      // other eleven would report an omission nobody made.
+      //
+      // Disabled entries are not counted either -- the household paused them on
+      // purpose, so there is nothing they forgot to enter.
+      if (template.enabled && occursInMonth(template.recurrence, yearMonth)) missingCount += 1;
       continue;
     }
 
+    // RECORDED, so it is counted -- WITHOUT asking whether the current
+    // recurrence covers this month.
+    //
+    // A recorded actual is a FACT about a month: the household paid that, then.
+    // Correcting the schedule afterwards does not unmake it. Filtering by
+    // occurrence before this check made a stored actual VANISH -- pay an annual
+    // premium in August, correct its month to March in September, and August's
+    // card would state 「実績が記録されていません」 about money the database
+    // still holds.
+    //
+    // This is also the rule analytics.ts already follows for the same data; one
+    // of the two screens quietly losing history is worse than either rule.
+    //
+    // The planned figure is the CURRENT one. A schedule change deletes the
+    // per-month override it no longer covers (see occurrence-guard.ts), so what
+    // the household actually budgeted back then is not reconstructible -- this
+    // falls back to the entry's default. Approximate, and far better than
+    // dropping the row.
     const planned = resolveAmount(template.id, yearMonth, amountsMap, templates);
     lines.push({
       templateId: template.id,

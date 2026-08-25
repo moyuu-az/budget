@@ -91,6 +91,44 @@ describe('summarizeVariance', () => {
     expect(result.recordedCount).toBe(1);
   });
 
+  it('KEEPS a recorded actual whose entry no longer falls in the month', () => {
+    // A recorded actual is a FACT about a month: the household paid that, then.
+    // Correcting the schedule afterwards does not unmake it.
+    //
+    // Filtering by occurrence before checking for an actual made a stored figure
+    // VANISH -- pay an annual premium in August, correct its month to March in
+    // September, and August's card would state 「実績が記録されていません」 about
+    // money the database still holds. analytics.ts already follows this rule for
+    // the same data; one screen quietly losing history is worse than either
+    // rule on its own.
+    const premium = makeTemplate({
+      id: 3, name: '年払い保険', categoryId: 1, defaultAmount: 120_000, recurrence: yearlyOn(3, 1),
+    });
+
+    const result = summarizeVariance(
+      [premium], [category()], NO_AMOUNTS, actuals([[3, 118_000]]), YM, 'expense',
+    );
+
+    expect(result.recordedCount).toBe(1);
+    expect(result.actualTotal).toBe(118_000);
+    expect(result.lines[0].name).toBe('年払い保険');
+  });
+
+  it('does not then count that entry as MISSING in the months it skips', () => {
+    // The other half: present when recorded, silent when not. Counting it as an
+    // omission in the eleven months it does not fall in would report a lapse
+    // nobody made.
+    const premium = makeTemplate({
+      id: 3, name: '年払い保険', categoryId: 1, defaultAmount: 120_000, recurrence: yearlyOn(3, 1),
+    });
+
+    const result = summarizeVariance(
+      [rent, premium], [category()], NO_AMOUNTS, actuals([[1, 100_000]]), YM, 'expense',
+    );
+
+    expect(result.missingCount).toBe(0);
+  });
+
   it('uses the monthly override as the plan when there is one', () => {
     const amounts: MonthlyAmountsMap = new Map([[YM, new Map([[1, 90_000]])]]);
     const result = summarizeVariance(
