@@ -316,6 +316,61 @@ describe('when the copy fails', () => {
   });
 });
 
+describe('resetting to defaults', () => {
+  const messages = (): string[] => useToastStore.getState().toasts.map((t) => t.message);
+
+  it('does not claim success when only some rows were reset', async () => {
+    // These deletes run concurrently and one refusal does not stop the rest, so
+    // a partial failure is the LIKELY failure. The store swallows its own errors
+    // (reportError has already raised the toast), so a try/catch here could
+    // never run and 「リセットしました」 would fire regardless.
+    const user = userEvent.setup();
+    // Seeded through the API, not the store: EntriesView fetches the month on
+    // mount, and a store seeded beforehand is overwritten by that answer.
+    api.getMonthlyAmounts = vi.fn().mockResolvedValueOnce([
+      { id: 1, templateId: 1, yearMonth: '2026-06', amount: 90_000, createdAt: '' },
+      { id: 2, templateId: 7, yearMonth: '2026-06', amount: 5_000, createdAt: '' },
+    ]);
+    api.deleteMonthlyAmount = vi
+      .fn()
+      .mockImplementation((templateId: number) =>
+        templateId === 1 ? Promise.reject(new Error('nope')) : Promise.resolve(),
+      );
+    useTemplateStore.setState({ templates: [RENT] });
+    render(<EntriesView />);
+    // Wait for the month to land before resetting it. The override (¥90,000)
+    // replaces the ¥100,000 default, so its appearance is the signal.
+    await vi.waitFor(() => expect(expenseTotal()).toBe(90_000));
+
+    await user.click(screen.getByRole('button', { name: 'デフォルトにリセット' }));
+    await user.click(await screen.findByRole('button', { name: 'リセット' }));
+
+    await vi.waitFor(() =>
+      expect(messages()).toContain('一部の金額をリセットできませんでした'),
+    );
+    expect(messages()).not.toContain('デフォルト金額にリセットしました');
+    // And the month is re-read, because which rows survived is only knowable
+    // from the server.
+    expect(api.getMonthlyAmounts).toHaveBeenCalledWith('2026-06');
+  });
+
+  it('says so when every row was reset', async () => {
+    const user = userEvent.setup();
+    api.getMonthlyAmounts = vi.fn().mockResolvedValueOnce([
+      { id: 1, templateId: 1, yearMonth: '2026-06', amount: 90_000, createdAt: '' },
+    ]);
+    api.deleteMonthlyAmount = vi.fn().mockResolvedValue(undefined);
+    useTemplateStore.setState({ templates: [RENT] });
+    render(<EntriesView />);
+    await vi.waitFor(() => expect(expenseTotal()).toBe(90_000));
+
+    await user.click(screen.getByRole('button', { name: 'デフォルトにリセット' }));
+    await user.click(await screen.findByRole('button', { name: 'リセット' }));
+
+    await vi.waitFor(() => expect(messages()).toContain('デフォルト金額にリセットしました'));
+  });
+});
+
 describe('navigating to another month', () => {
   it('moves an entry between the two sections', async () => {
     const user = userEvent.setup();

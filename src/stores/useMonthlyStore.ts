@@ -6,7 +6,7 @@ import type {
 } from '../types';
 import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
-import { applyIfCurrent, currentGeneration } from '../app/ledger-generation';
+import { applyIfCurrent, currentGeneration, isCurrent } from '../app/ledger-generation';
 import { occursInMonth } from '../../shared/recurrence';
 import type { LoadStatus } from './load-status';
 import type { Recurrence } from '../types';
@@ -65,8 +65,9 @@ interface MonthlyState {
    * marked 'error', and a caller asking again means "try anyway".
    */
   fetchMonthlyAmountsRange: (startMonth: string, endMonth: string, force?: boolean) => Promise<void>;
-  setMonthlyAmount: (templateId: number, yearMonth: string, amount: number) => Promise<void>;
-  deleteMonthlyAmount: (templateId: number, yearMonth: string) => Promise<void>;
+  /** Returns whether the write was stored; see useAssetStore for why boolean. */
+  setMonthlyAmount: (templateId: number, yearMonth: string, amount: number) => Promise<boolean>;
+  deleteMonthlyAmount: (templateId: number, yearMonth: string) => Promise<boolean>;
   /**
    * Returns whether the copy actually happened.
    *
@@ -78,8 +79,8 @@ interface MonthlyState {
    */
   copyMonthlyAmounts: (fromMonth: string, toMonth: string) => Promise<boolean>;
   fetchMonthlyActuals: (yearMonth: string) => Promise<void>;
-  setMonthlyActual: (templateId: number, yearMonth: string, amount: number) => Promise<void>;
-  deleteMonthlyActual: (templateId: number, yearMonth: string) => Promise<void>;
+  setMonthlyActual: (templateId: number, yearMonth: string, amount: number) => Promise<boolean>;
+  deleteMonthlyActual: (templateId: number, yearMonth: string) => Promise<boolean>;
 }
 
 /**
@@ -179,6 +180,47 @@ export function rangeStatusOf(
 }
 
 export { monthsInRange };
+
+/**
+ * Undoes ONE optimistic write, and only if nothing has changed it since.
+ *
+ * WHY NOT RESTORE THE WHOLE MAP
+ *   Every mutation used to snapshot the entire month map and restore it on
+ *   failure. That is correct in isolation and wrong the moment two run at once
+ *   -- and they do: 「デフォルトにリセット」 fires one delete per entry through
+ *   Promise.all. If B's delete succeeds and A's then fails, A's rollback
+ *   restores a snapshot taken before either ran, and B reappears on screen
+ *   having been deleted in the database. The screen then disagrees with storage
+ *   until the next fetch, and the caller still says 「リセットしました」.
+ *
+ *   Scoping the undo to the one key it wrote makes concurrent mutations
+ *   independent, which is what they already are everywhere else.
+ *
+ * WHY IT CHECKS `optimistic` FIRST
+ *   Between the write and the failure, a newer edit may have set the same key to
+ *   something else -- the user retyping, or the other member of a shared ledger.
+ *   Overwriting that with an older value would undo an edit nobody asked to
+ *   undo. If the current value is not what this mutation put there, this
+ *   mutation is no longer the last word and says nothing.
+ */
+function revertEntry(
+  current: MonthlyAmountsMap,
+  yearMonth: string,
+  templateId: number,
+  optimistic: number | undefined,
+  previous: number | undefined,
+): MonthlyAmountsMap {
+  const monthMap = current.get(yearMonth);
+  const now = monthMap?.get(templateId);
+  if (now !== optimistic) return current;
+
+  const next = new Map(current);
+  const nextMonth = new Map(monthMap ?? []);
+  if (previous === undefined) nextMonth.delete(templateId);
+  else nextMonth.set(templateId, previous);
+  next.set(yearMonth, nextMonth);
+  return next;
+}
 
 export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   monthlyAmountsMap: new Map(),
@@ -347,13 +389,10 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   },
 
   setMonthlyAmount: async (templateId: number, yearMonth: string, amount: number) => {
-    const prevMap = get().monthlyAmountsMap;
+    const previous = get().monthlyAmountsMap.get(yearMonth)?.get(templateId);
     // optimistic update
-    const newMap = new Map(prevMap);
-    if (!newMap.has(yearMonth)) {
-      newMap.set(yearMonth, new Map<number, number>());
-    }
-    const monthMap = new Map(newMap.get(yearMonth)!);
+    const newMap = new Map(get().monthlyAmountsMap);
+    const monthMap = new Map(newMap.get(yearMonth) ?? []);
     monthMap.set(templateId, amount);
     newMap.set(yearMonth, monthMap);
     set({ monthlyAmountsMap: newMap });
@@ -364,18 +403,24 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     const tag = currentGeneration();
     try {
       await getApi().setMonthlyAmount(templateId, yearMonth, amount);
+      return isCurrent(tag);
     } catch (e) {
       applyIfCurrent(tag, () => {
-        set({ monthlyAmountsMap: prevMap });
+        set({
+          monthlyAmountsMap: revertEntry(
+            get().monthlyAmountsMap, yearMonth, templateId, amount, previous,
+          ),
+        });
         reportError(e);
       });
+      return false;
     }
   },
 
   deleteMonthlyAmount: async (templateId: number, yearMonth: string) => {
-    const prevMap = get().monthlyAmountsMap;
+    const previous = get().monthlyAmountsMap.get(yearMonth)?.get(templateId);
     // optimistic removal
-    const newMap = new Map(prevMap);
+    const newMap = new Map(get().monthlyAmountsMap);
     const monthMap = newMap.get(yearMonth);
     if (monthMap) {
       const newMonthMap = new Map(monthMap);
@@ -387,11 +432,17 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     const tag = currentGeneration();
     try {
       await getApi().deleteMonthlyAmount(templateId, yearMonth);
+      return isCurrent(tag);
     } catch (e) {
       applyIfCurrent(tag, () => {
-        set({ monthlyAmountsMap: prevMap });
+        set({
+          monthlyAmountsMap: revertEntry(
+            get().monthlyAmountsMap, yearMonth, templateId, undefined, previous,
+          ),
+        });
         reportError(e);
       });
+      return false;
     }
   },
 
@@ -457,13 +508,10 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   },
 
   setMonthlyActual: async (templateId: number, yearMonth: string, amount: number) => {
-    const prevMap = get().monthlyActualsMap;
+    const previous = get().monthlyActualsMap.get(yearMonth)?.get(templateId);
     // optimistic update
-    const newMap = new Map(prevMap);
-    if (!newMap.has(yearMonth)) {
-      newMap.set(yearMonth, new Map<number, number>());
-    }
-    const monthMap = new Map(newMap.get(yearMonth)!);
+    const newMap = new Map(get().monthlyActualsMap);
+    const monthMap = new Map(newMap.get(yearMonth) ?? []);
     monthMap.set(templateId, amount);
     newMap.set(yearMonth, monthMap);
     set({ monthlyActualsMap: newMap });
@@ -471,18 +519,27 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     const tag = currentGeneration();
     try {
       await getApi().setMonthlyActual(templateId, yearMonth, amount);
+      return isCurrent(tag);
     } catch (e) {
+      // Key-scoped, like the planned side: entering several actuals in quick
+      // succession is ordinary, and a whole-map restore would undo the ones that
+      // succeeded. See revertEntry.
       applyIfCurrent(tag, () => {
-        set({ monthlyActualsMap: prevMap });
+        set({
+          monthlyActualsMap: revertEntry(
+            get().monthlyActualsMap, yearMonth, templateId, amount, previous,
+          ),
+        });
         reportError(e);
       });
+      return false;
     }
   },
 
   deleteMonthlyActual: async (templateId: number, yearMonth: string) => {
-    const prevMap = get().monthlyActualsMap;
+    const previous = get().monthlyActualsMap.get(yearMonth)?.get(templateId);
     // optimistic removal
-    const newMap = new Map(prevMap);
+    const newMap = new Map(get().monthlyActualsMap);
     const monthMap = newMap.get(yearMonth);
     if (monthMap) {
       const newMonthMap = new Map(monthMap);
@@ -494,11 +551,17 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     const tag = currentGeneration();
     try {
       await getApi().deleteMonthlyActual(templateId, yearMonth);
+      return isCurrent(tag);
     } catch (e) {
       applyIfCurrent(tag, () => {
-        set({ monthlyActualsMap: prevMap });
+        set({
+          monthlyActualsMap: revertEntry(
+            get().monthlyActualsMap, yearMonth, templateId, undefined, previous,
+          ),
+        });
         reportError(e);
       });
+      return false;
     }
   },
 }));
