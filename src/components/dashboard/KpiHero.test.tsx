@@ -153,6 +153,25 @@ describe('once the balance lands', () => {
     expect(minCard).toHaveTextContent('注意');
   });
 
+  it('says the floor is ALREADY below, rather than 「あと0日」 or 「安全」', () => {
+    // The pair that used to contradict each other: 使っていい額 correctly
+    // reported a shortfall while 残高がもつ期間 said 「90日以上・安全」, in the
+    // same row. 「あと0日」 would be no better -- it reads as a forecast about
+    // tomorrow rather than a fact about today.
+    useAssetStore.setState({
+      categories: [makeCashCategory()],
+      assets: [makeCashAsset({ value: 10_000 })],
+      status: 'ready',
+    });
+
+    render(<KpiHero />);
+
+    expect(screen.getByText('すでに下回っています')).toBeInTheDocument();
+    expect(screen.getByText('不足額')).toBeInTheDocument();
+    expect(screen.queryByText('90日以上')).not.toBeInTheDocument();
+    expect(screen.queryByText('あと0日')).not.toBeInTheDocument();
+  });
+
   it('says 90日以上 rather than claiming the balance never runs out', () => {
     // Null from `runway` means "not within the window this KPI looks at". Saying
     // 「割りません」 would be a claim the projection cannot support.

@@ -100,18 +100,30 @@ function KpiHero(): ReactElement {
       />
       <KpiCard
         label="残高がもつ期間"
-        // Null is "not within the 90 days this KPI looks at", NOT "never" --
-        // saying 「割りません」 would be a claim the projection cannot support.
-        value={runway ? `あと${runway.days}日` : '90日以上'}
+        // Three states, not two.
+        //
+        //   null       -- not within the 90 days this KPI looks at. NOT "never":
+        //                 saying 「割りません」 would be a claim the projection
+        //                 cannot support.
+        //   days === 0 -- ALREADY below the floor. 「あと0日」 reads as a
+        //                 forecast about tomorrow; this is a fact about today,
+        //                 and it has to say so or it contradicts the 不足額 card
+        //                 sitting immediately to its left.
+        //   otherwise  -- the day it crosses.
+        value={runway === null ? '90日以上' : runway.days === 0 ? 'すでに下回っています' : `あと${runway.days}日`}
         caption={
-          runway
-            ? `${new Date(runway.date).toLocaleDateString('ja-JP')} に ${formatYen(minBalanceThreshold)} を割ります`
-            : `最低残高 ${formatYen(minBalanceThreshold)} を90日以内には割りません`
+          runway === null
+            ? `最低残高 ${formatYen(minBalanceThreshold)} を90日以内には割りません`
+            : runway.days === 0
+              ? `最低残高 ${formatYen(minBalanceThreshold)} を現在すでに下回っています`
+              : `${new Date(runway.date).toLocaleDateString('ja-JP')} に ${formatYen(minBalanceThreshold)} を割ります`
         }
         badge={
-          runway
-            ? { tone: runway.days <= 14 ? 'danger' : 'warning', text: `${runway.days}日` }
-            : { tone: 'success', text: '安全' }
+          runway === null
+            ? { tone: 'success', text: '安全' }
+            : runway.days === 0
+              ? { tone: 'danger', text: '要対応' }
+              : { tone: runway.days <= 14 ? 'danger' : 'warning', text: `${runway.days}日` }
         }
         delay={0.05}
       />
