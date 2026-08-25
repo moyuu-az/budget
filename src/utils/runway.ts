@@ -79,6 +79,23 @@ export interface SafeToSpend {
   horizonDays: number;
 }
 
+/**
+ * How a balance stands against the household's floor.
+ *
+ * ONE FUNCTION, because this judgement appeared in three places -- the KPI
+ * badge, the forecast chart's minimum-point dot, and the 最低残高 card -- and
+ * each held its own copy of `50000`. Making the floor configurable moved one of
+ * them and left the other two behind, so a ledger with a 300,000 floor saw
+ * 「注意」 in the KPI row and a green dot on the chart directly below it: two
+ * answers to one question, on one screen.
+ */
+export type BalanceTone = 'safe' | 'warning' | 'danger';
+
+export function balanceTone(balance: number, threshold: MinBalanceThreshold): BalanceTone {
+  if (balance < 0) return 'danger';
+  return balance < threshold ? 'warning' : 'safe';
+}
+
 export interface Runway {
   /** 'YYYY-MM-DD' of the first day the projection is below the threshold. */
   date: string;
@@ -169,14 +186,24 @@ export function safeToSpend(
  * 割りません」 rather than 「割りません」, because the second is a claim this
  * function cannot support.
  *
- * Today is excluded for the same reason as nextIncome: index 0 is the balance as
- * entered, and a household already below its own floor needs a different message
- * from one that will be in three weeks.
+ * A household already below its floor gets `days: 0` rather than null -- see the
+ * note in the body. Callers are expected to render that as 「すでに下回って
+ * います」 rather than as 「あと0日」.
  */
 export function runway(
   points: readonly ForecastPoint[],
   threshold: MinBalanceThreshold,
 ): Runway | null {
+  // ALREADY BELOW IT counts, and counts as zero days.
+  //
+  // Skipping straight to the future would answer 「90日以上」 for a household
+  // that is under its floor RIGHT NOW -- beside a 使っていい額 card correctly
+  // reporting a shortfall. Two contradictory statements in one row, and the
+  // reassuring one is the wrong one.
+  if (points.length > 0 && points[0].balance < threshold) {
+    return { date: points[0].date, days: 0 };
+  }
+
   for (let i = 1; i < points.length; i++) {
     if (points[i].balance < threshold) {
       return { date: points[i].date, days: i };

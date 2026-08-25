@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
 import { useForecast } from './useForecast';
-import type { LoadStatus } from '../stores/load-status';
+import { combineStatus, type LoadStatus } from '../stores/load-status';
 import { toYearMonth } from '../utils/forecast';
 import { runway, safeToSpend, type Runway, type SafeToSpend } from '../utils/runway';
-import { useMinBalanceThreshold } from '../stores/useSettingsStore';
+import { useSettingsStore } from '../stores/useSettingsStore';
 import type { ForecastPoint } from '../types';
 
 export interface NextLargeExpense {
@@ -126,14 +126,24 @@ export function useDashboardKpis(): DashboardKpis {
   const { status, points } = useForecast(KPI_HORIZON_DAYS);
 
   // The household's own floor, not a constant. 50,000 was hard-coded here, which
-  // made 「安全」 mean the same thing for every household -- and it is exactly
-  // the sort of figure a household has an opinion about. It has a usable default
-  // before its fetch lands (see useSettingsStore for why that is safe here and
-  // is not for the balance).
-  const threshold = useMinBalanceThreshold();
+  // made 「安全」 mean the same thing for every household.
+  const threshold = useSettingsStore((s) => s.settings.minBalanceThreshold);
+  const settingsStatus = useSettingsStore((s) => s.status);
+
+  // THE SETTINGS' READINESS IS PART OF THIS ROW'S READINESS.
+  //
+  // The store keeps a usable DEFAULT while the fetch is in flight, which is
+  // right for merely displaying a figure and wrong for JUDGING one. A ledger
+  // whose floor is 300,000 and whose settings request failed would sit here
+  // reporting 使っていい額 against 50,000 -- overstated by a quarter of a
+  // million yen, indefinitely, with a green badge beside it.
+  //
+  // The default is only trustworthy once the server has confirmed that nothing
+  // was configured, and `status: 'ready'` is exactly that confirmation.
+  const combined = combineStatus(status, settingsStatus);
 
   return useMemo(
-    () => ({ ...computeKpis(points, threshold), status }),
-    [points, threshold, status],
+    () => ({ ...computeKpis(points, threshold), status: combined }),
+    [points, threshold, combined],
   );
 }

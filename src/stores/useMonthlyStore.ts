@@ -7,11 +7,31 @@ import type {
 import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
 import { occursInMonth } from '../../shared/recurrence';
+import type { LoadStatus } from './load-status';
 import type { Recurrence } from '../types';
 
 interface MonthlyState {
   monthlyAmountsMap: MonthlyAmountsMap;
   monthlyActualsMap: MonthlyActualsMap;
+  /**
+   * Where the fetch for each 'YYYY-MM' has got to.
+   *
+   * WHY PER-MONTH AND NOT ONE FLAG
+   *   Both maps are empty for THREE different reasons -- never asked for, asked
+   *   for and still in flight, asked for and failed -- and for a fourth that is
+   *   not a problem at all: a month the household genuinely recorded nothing in.
+   *   With no status the four are indistinguishable, and a reader has to guess.
+   *
+   *   先月の予実 is where that guess is expensive. It renders 「実績が記録されて
+   *   いません」 from an empty map, which is a positive claim: during the initial
+   *   load it is briefly false, and after a failed request it is false forever,
+   *   for a household whose actuals exist and simply could not be fetched.
+   *
+   *   Keyed by month because months are fetched independently -- the dashboard
+   *   asks for a forward range, the variance card asks for last month, and
+   *   EntriesView asks for whichever month is on screen.
+   */
+  monthStatus: ReadonlyMap<string, MonthFetchStatus>;
   loading: boolean;
   reset: () => void;
   /**
@@ -49,9 +69,51 @@ interface MonthlyState {
   deleteMonthlyActual: (templateId: number, yearMonth: string) => Promise<void>;
 }
 
+/**
+ * A month's two halves, tracked separately because they are two requests.
+ *
+ * A card comparing plan against reality with one half missing reports a variance
+ * equal to whichever side arrived -- so 'ready' has to mean BOTH, and that can
+ * only be decided if both are recorded.
+ */
+export interface MonthFetchStatus {
+  amounts: LoadStatus;
+  actuals: LoadStatus;
+}
+
+const IDLE_MONTH: MonthFetchStatus = { amounts: 'idle', actuals: 'idle' };
+
+/** Records one half's status for one month, leaving every other month alone. */
+function setHalf(
+  current: ReadonlyMap<string, MonthFetchStatus>,
+  yearMonth: string,
+  half: keyof MonthFetchStatus,
+  status: LoadStatus,
+): ReadonlyMap<string, MonthFetchStatus> {
+  const next = new Map(current);
+  next.set(yearMonth, { ...(current.get(yearMonth) ?? IDLE_MONTH), [half]: status });
+  return next;
+}
+
+/**
+ * How far BOTH halves of `yearMonth` have got, as one status.
+ *
+ * The selector every reader should use; nothing outside this module should have
+ * to know the fetch comes in two pieces.
+ */
+export function monthStatusOf(
+  monthStatus: ReadonlyMap<string, MonthFetchStatus>,
+  yearMonth: string,
+): LoadStatus {
+  const half = monthStatus.get(yearMonth) ?? IDLE_MONTH;
+  if (half.amounts === 'error' || half.actuals === 'error') return 'error';
+  return half.amounts === 'ready' && half.actuals === 'ready' ? 'ready' : 'loading';
+}
+
 export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   monthlyAmountsMap: new Map(),
   monthlyActualsMap: new Map(),
+  monthStatus: new Map(),
   loading: false,
 
   /**
@@ -65,7 +127,12 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   // Fresh Maps, not a shared instance: the same object handed back on every
   // reset would let a stale reference keep mutating live state.
   reset: () =>
-    set({ monthlyAmountsMap: new Map(), monthlyActualsMap: new Map(), loading: false }),
+    set({
+      monthlyAmountsMap: new Map(),
+      monthlyActualsMap: new Map(),
+      monthStatus: new Map(),
+      loading: false,
+    }),
 
   forgetAmountsOutside: (templateId, recurrence) =>
     set((state) => {
@@ -107,7 +174,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   },
 
   fetchMonthlyAmounts: async (yearMonth: string) => {
-    set({ loading: true });
+    set({ loading: true, monthStatus: setHalf(get().monthStatus, yearMonth, 'amounts', 'loading') });
     try {
       const amounts = await getApi().getMonthlyAmounts(yearMonth);
       const newMap = new Map(get().monthlyAmountsMap);
@@ -116,9 +183,20 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
         monthMap.set(a.templateId, a.amount);
       }
       newMap.set(yearMonth, monthMap);
-      set({ monthlyAmountsMap: newMap, loading: false });
+      set({
+        monthlyAmountsMap: newMap,
+        loading: false,
+        monthStatus: setHalf(get().monthStatus, yearMonth, 'amounts', 'ready'),
+      });
     } catch (e) {
-      set({ loading: false });
+      // 'error', not silence. An empty map is indistinguishable from a month the
+      // household genuinely recorded nothing in, and 先月の予実 renders that as
+      // 「実績が記録されていません」 -- a positive claim that would be false, and
+      // permanently so, for a household whose data simply could not be fetched.
+      set({
+        loading: false,
+        monthStatus: setHalf(get().monthStatus, yearMonth, 'amounts', 'error'),
+      });
       reportError(e);
     }
   },
@@ -221,7 +299,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   },
 
   fetchMonthlyActuals: async (yearMonth: string) => {
-    set({ loading: true });
+    set({ loading: true, monthStatus: setHalf(get().monthStatus, yearMonth, 'actuals', 'loading') });
     try {
       const actuals = await getApi().getMonthlyActuals(yearMonth);
       const newMap = new Map(get().monthlyActualsMap);
@@ -230,9 +308,17 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
         monthMap.set(a.templateId, a.actualAmount);
       }
       newMap.set(yearMonth, monthMap);
-      set({ monthlyActualsMap: newMap, loading: false });
+      set({
+        monthlyActualsMap: newMap,
+        loading: false,
+        monthStatus: setHalf(get().monthStatus, yearMonth, 'actuals', 'ready'),
+      });
     } catch (e) {
-      set({ loading: false });
+      // See fetchMonthlyAmounts: silence here becomes 「実績が記録されていません」.
+      set({
+        loading: false,
+        monthStatus: setHalf(get().monthStatus, yearMonth, 'actuals', 'error'),
+      });
       reportError(e);
     }
   },

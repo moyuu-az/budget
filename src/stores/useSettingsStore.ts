@@ -13,16 +13,21 @@ import type { LoadStatus } from './load-status';
 //   default. `settings` therefore starts at DEFAULT_LEDGER_SETTINGS rather than
 //   at null, and every reader can use it immediately.
 //
-//   That is NOT the same forgiving treatment `useAssetStore` refuses to give the
-//   balance, and the difference is worth stating. A balance of ¥0 before the
-//   fetch is a FIGURE ABOUT THE HOUSEHOLD, and a wrong one; the default
-//   threshold is a policy the application supplies and is correct for any ledger
-//   that has not overridden it. Showing 「注意」 against the default for one
-//   round trip is at worst slightly early, never a fabricated warning.
+// BUT A USABLE VALUE IS NOT A TRUSTWORTHY ONE, and the difference decides who
+// may read it without checking `status`:
 //
-//   `status` is still tracked, because the SETTINGS SCREEN needs it: a form
-//   pre-filled with the default while the ledger's real figure is in flight
-//   would overwrite that figure the moment someone saved.
+//   DISPLAY may. Rendering the default for one round trip costs nothing.
+//
+//   JUDGEMENT may NOT. The default is only known to be right once the server has
+//   confirmed that nothing was configured -- and `status: 'ready'` IS that
+//   confirmation. A ledger whose floor is 300,000 and whose request failed would
+//   otherwise have its 使っていい額 computed against 50,000: overstated by a
+//   quarter of a million yen, indefinitely, with a green badge beside it. So
+//   useDashboardKpis folds this status into its own.
+//
+//   FORMS may NOT either, for the mirror-image reason: a field pre-filled with
+//   the default while the ledger's real figure is in flight would overwrite that
+//   figure the moment someone saved.
 // ---------------------------------------------------------------------------
 
 interface SettingsState {

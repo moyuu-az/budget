@@ -6,6 +6,7 @@ import { createMockApi } from '../../test/mock-api';
 import { useAssetStore } from '../../stores/useAssetStore';
 import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useMonthlyStore } from '../../stores/useMonthlyStore';
+import { useSettingsStore } from '../../stores/useSettingsStore';
 import { makeCashAsset, makeCashCategory, monthlyOn } from '../../test/factories';
 import type { EntryTemplate } from '../../types';
 
@@ -44,6 +45,10 @@ beforeEach(() => {
   // browser's connection limit makes routine.
   useTemplateStore.setState({ templates: [rent], status: 'ready' });
   useAssetStore.setState({ categories: [], assets: [], status: 'loading' });
+  // The floor every 安全/注意 judgement is measured against. Its own readiness
+  // now gates the KPI row: the default is only known to be right once the server
+  // has confirmed nothing was configured.
+  useSettingsStore.setState({ settings: { minBalanceThreshold: 50_000 }, status: 'ready' });
 });
 
 afterEach(() => {
@@ -88,7 +93,7 @@ describe('when the fetch failed', () => {
 });
 
 describe('once everything has arrived', () => {
-  it('lets the panels speak for themselves', () => {
+  it('lets the forecast panels speak for themselves', async () => {
     useAssetStore.setState({
       categories: [makeCashCategory()],
       assets: [makeCashAsset({ value: 3_000_000 })],
@@ -97,9 +102,29 @@ describe('once everything has arrived', () => {
 
     render(<DashboardView />);
 
-    // No gate left on screen: whatever the panels say now is about the data,
-    // which is the only time an empty state is honest.
+    // 先月の予実 fetches its own month and is legitimately still loading for a
+    // tick, so this asserts about the FORECAST panels rather than about every
+    // gate on the page -- and waits for that one to settle before checking that
+    // nothing else is left waiting.
+    expect(await screen.findByText('最小残高(90日)')).toBeInTheDocument();
+    await screen.findByText(/実績が記録されていません/);
     expect(screen.queryByRole('status', { name: /読み込み中/ })).not.toBeInTheDocument();
-    expect(screen.getByText('最小残高(90日)')).toBeInTheDocument();
+  });
+
+  it('gates the KPI row until the household’s floor is known', () => {
+    // The default is only trustworthy once the server has confirmed nothing was
+    // configured. A ledger whose floor is 300,000 and whose settings request is
+    // in flight would otherwise have 使っていい額 computed against 50,000.
+    useAssetStore.setState({
+      categories: [makeCashCategory()],
+      assets: [makeCashAsset({ value: 3_000_000 })],
+      status: 'ready',
+    });
+    useSettingsStore.setState({ settings: { minBalanceThreshold: 50_000 }, status: 'loading' });
+
+    render(<DashboardView />);
+
+    expect(screen.queryByText('最小残高(90日)')).not.toBeInTheDocument();
+    expect(screen.queryByText('使っていい額')).not.toBeInTheDocument();
   });
 });

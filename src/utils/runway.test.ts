@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { nextIncome, runway, safeToSpend } from './runway';
+import { balanceTone, nextIncome, runway, safeToSpend } from './runway';
 import type { ForecastPoint } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -172,6 +172,36 @@ describe('safeToSpend', () => {
   });
 });
 
+describe('balanceTone', () => {
+  // One function, because this judgement used to live in three places -- the KPI
+  // badge, the chart's minimum-point dot, and the 最低残高 card -- each with its
+  // own copy of 50000. Making the floor configurable moved one and left two
+  // behind: 「注意」 in the KPI row, a green dot directly below it.
+  it('is danger below zero, whatever the floor', () => {
+    expect(balanceTone(-1, 50_000)).toBe('danger');
+    expect(balanceTone(-1, 0)).toBe('danger');
+  });
+
+  it('is warning between zero and the floor', () => {
+    expect(balanceTone(0, 50_000)).toBe('warning');
+    expect(balanceTone(49_999, 50_000)).toBe('warning');
+  });
+
+  it('treats exactly the floor as safe -- it is what the household wants to KEEP', () => {
+    expect(balanceTone(50_000, 50_000)).toBe('safe');
+  });
+
+  it('follows the household’s own floor, not a constant', () => {
+    expect(balanceTone(100_000, 50_000)).toBe('safe');
+    expect(balanceTone(100_000, 300_000)).toBe('warning');
+  });
+
+  it('leaves only "negative" as a warning when the floor is zero', () => {
+    expect(balanceTone(0, 0)).toBe('safe');
+    expect(balanceTone(1, 0)).toBe('safe');
+  });
+});
+
 describe('runway', () => {
   it('finds the first day the projection crosses the floor', () => {
     const points = projection(100_000, [80_000], [40_000], [30_000]);
@@ -185,9 +215,21 @@ describe('runway', () => {
     expect(runway(points, 50_000)).toBeNull();
   });
 
-  it('excludes today, so an already-low balance is a different message', () => {
+  it('reports zero days when the balance is ALREADY below the floor', () => {
+    // Skipping straight to the future would answer 「90日以上」 for a household
+    // that is under its floor right now -- beside a 使っていい額 card correctly
+    // reporting a shortfall. Two contradictory statements in one row, and the
+    // reassuring one is the wrong one.
     const points = projection(10_000, [100_000], [200_000]);
-    expect(runway(points, 50_000)).toBeNull();
+    expect(runway(points, 50_000)).toEqual({ date: '2026-06-01', days: 0 });
+  });
+
+  it('agrees with safeToSpend about whether there is a problem right now', () => {
+    // The pair that contradicted each other. Whatever else they say, they must
+    // not disagree about the present.
+    const points = projection(10_000, [100_000], [200_000]);
+    expect(safeToSpend(points, 50_000).shortfall).toBeGreaterThan(0);
+    expect(runway(points, 50_000)).not.toBeNull();
   });
 
   it('treats exactly the threshold as still above it', () => {

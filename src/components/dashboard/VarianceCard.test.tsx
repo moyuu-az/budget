@@ -34,11 +34,25 @@ const FOOD = makeTemplate({ id: 2, name: '食費', categoryId: 1, defaultAmount:
 
 let api: AppApi;
 
-const seedActuals = (pairs: Array<[number, number]>): void => {
-  useMonthlyStore.setState({
-    monthlyAmountsMap: new Map(),
-    monthlyActualsMap: new Map([[LAST_MONTH, new Map(pairs)]]),
-  });
+/**
+ * Answers last month's two requests with `pairs` as its recorded actuals.
+ *
+ * Seeding the store directly would not work and should not: the hook's own
+ * effect fires both fetches on mount, which immediately marks the month
+ * 'loading' and overwrites anything put there beforehand. Going through the API
+ * is also the honest test -- it is the path the card actually takes.
+ */
+const answerWith = (pairs: Array<[number, number]> = []): void => {
+  api.getMonthlyAmounts = vi.fn().mockResolvedValue([]);
+  api.getMonthlyActuals = vi.fn().mockResolvedValue(
+    pairs.map(([templateId, actualAmount]) => ({
+      id: templateId,
+      templateId,
+      yearMonth: LAST_MONTH,
+      actualAmount,
+      createdAt: '2026-05-31T00:00:00Z',
+    })),
+  );
 };
 
 beforeEach(() => {
@@ -49,7 +63,11 @@ beforeEach(() => {
   setApi(api);
   useCategoryStore.setState({ categories: [HOUSING] });
   useTemplateStore.setState({ templates: [RENT, FOOD], status: 'ready' });
-  useMonthlyStore.setState({ monthlyAmountsMap: new Map(), monthlyActualsMap: new Map() });
+  useMonthlyStore.setState({
+    monthlyAmountsMap: new Map(),
+    monthlyActualsMap: new Map(),
+    monthStatus: new Map(),
+  });
 });
 
 afterEach(() => {
@@ -59,65 +77,67 @@ afterEach(() => {
 });
 
 describe('when actuals have been recorded', () => {
-  it('states the gap between plan and reality', () => {
-    seedActuals([[1, 100_000], [2, 92_000]]);
+  it('states the gap between plan and reality', async () => {
+    answerWith([[1, 100_000], [2, 92_000]]);
     render(<VarianceCard />);
 
-    expect(screen.getByText('5月の予定と実績')).toBeInTheDocument();
+    expect(await screen.findByText('5月の予定と実績')).toBeInTheDocument();
     expect(screen.getByTestId('variance-total')).toHaveTextContent('+¥32,000');
     expect(screen.getByText('超過')).toBeInTheDocument();
   });
 
-  it('names the largest overspend first', () => {
+  it('names the largest overspend first', async () => {
     // The reader is looking for what went wrong. Sorting by amount would bury a
     // ¥32,000 overrun under a rent that landed exactly as planned.
-    seedActuals([[1, 100_000], [2, 92_000]]);
+    answerWith([[1, 100_000], [2, 92_000]]);
     render(<VarianceCard />);
 
-    const rows = screen.getAllByRole('listitem');
+    const rows = await screen.findAllByRole('listitem');
     expect(rows[0]).toHaveTextContent('食費');
     expect(rows[0]).toHaveTextContent('+¥32,000');
   });
 
-  it('says 予算内 when the month came in under plan', () => {
-    seedActuals([[1, 95_000], [2, 55_000]]);
+  it('says 予算内 when the month came in under plan', async () => {
+    answerWith([[1, 95_000], [2, 55_000]]);
     render(<VarianceCard />);
 
-    expect(screen.getByText('予算内')).toBeInTheDocument();
+    expect(await screen.findByText('予算内')).toBeInTheDocument();
     expect(screen.getByTestId('variance-total')).toHaveTextContent('-¥10,000');
   });
 
-  it('reports what has NOT been recorded rather than folding it in', () => {
+  it('reports what has NOT been recorded rather than folding it in', async () => {
     // A surplus with entries still unrecorded is a very different story from the
     // same surplus with none, and only one of them is good news.
-    seedActuals([[1, 95_000]]);
+    answerWith([[1, 95_000]]);
     render(<VarianceCard />);
 
     // 家賃 only: ¥100,000 planned, ¥95,000 actual. 食費's ¥60,000 plan is NOT
     // counted, which would otherwise show a ¥65,000 surplus.
-    expect(screen.getByTestId('variance-total')).toHaveTextContent('-¥5,000');
+    expect(await screen.findByTestId('variance-total')).toHaveTextContent('-¥5,000');
     expect(screen.getByText('未入力 1 件は比較に含まれていません')).toBeInTheDocument();
   });
 });
 
 describe('when nothing has been recorded', () => {
-  it('says so instead of reporting a perfect month', () => {
+  it('says so instead of reporting a perfect month', async () => {
     // Counting plans alone would report that every month went exactly as
     // planned -- the most misleading possible answer.
+    answerWith();
     render(<VarianceCard />);
 
-    expect(screen.getByText(/5月の実績が記録されていません/)).toBeInTheDocument();
+    expect(await screen.findByText(/5月の実績が記録されていません/)).toBeInTheDocument();
     expect(screen.queryByText('予算内')).not.toBeInTheDocument();
     expect(screen.queryByText('超過')).not.toBeInTheDocument();
   });
 
-  it('says where to record them', () => {
+  it('says where to record them', async () => {
+    answerWith();
     render(<VarianceCard />);
-    expect(screen.getByText(/収支管理の「実績」欄/)).toBeInTheDocument();
+    expect(await screen.findByText(/収支管理の「実績」欄/)).toBeInTheDocument();
   });
 });
 
-describe('while the templates are still in flight', () => {
+describe('while the data is still in flight', () => {
   it('says it is loading rather than claiming nothing was recorded', () => {
     useTemplateStore.setState({ templates: [], status: 'loading' });
     render(<VarianceCard />);
@@ -125,12 +145,38 @@ describe('while the templates are still in flight', () => {
     expect(screen.getByRole('status')).toHaveTextContent('先月の予実を読み込み中');
   });
 
-  it('offers a retry when the fetch failed', () => {
+  it('waits for LAST MONTH’s own fetch, not just the templates', () => {
+    // The templates are loaded by the app shell and are ready long before this
+    // card's month is. With only their status the card would state 「実績が
+    // 記録されていません」 in the gap -- a positive claim, briefly false.
+    //
+    // A request that never settles is exactly that gap, held open.
+    api.getMonthlyAmounts = vi.fn().mockReturnValue(new Promise(() => {}));
+    api.getMonthlyActuals = vi.fn().mockReturnValue(new Promise(() => {}));
+    render(<VarianceCard />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('先月の予実を読み込み中');
+    expect(screen.queryByText(/実績が記録されていません/)).not.toBeInTheDocument();
+  });
+
+  it('offers a retry when the templates failed', () => {
     useTemplateStore.setState({ templates: [], status: 'error' });
     render(<VarianceCard />);
 
     expect(screen.getByText('先月の予実を読み込めませんでした')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '再読み込み' })).toBeInTheDocument();
+  });
+
+  it('offers a retry when LAST MONTH’s fetch failed', async () => {
+    // Permanently false otherwise: a household whose actuals exist and simply
+    // could not be fetched would be told, for as long as the page stays open,
+    // that it recorded nothing.
+    api.getMonthlyAmounts = vi.fn().mockResolvedValue([]);
+    api.getMonthlyActuals = vi.fn().mockRejectedValue(new Error('nope'));
+    render(<VarianceCard />);
+
+    expect(await screen.findByText('先月の予実を読み込めませんでした')).toBeInTheDocument();
+    expect(screen.queryByText(/実績が記録されていません/)).not.toBeInTheDocument();
   });
 });
 
@@ -138,6 +184,7 @@ describe('fetching', () => {
   it('asks for LAST month, which nothing else on the dashboard loads', () => {
     // The forecast range starts at THIS month, so without this the card would
     // silently compare an empty map and report nothing recorded.
+    answerWith();
     render(<VarianceCard />);
 
     expect(api.getMonthlyActuals).toHaveBeenCalledWith(LAST_MONTH);
