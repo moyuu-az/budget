@@ -4,6 +4,7 @@ import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
 import { useMonthlyStore } from './useMonthlyStore';
 import type { LoadStatus } from './load-status';
+import { applyIfCurrent, currentGeneration } from '../app/ledger-generation';
 
 // ---------------------------------------------------------------------------
 // WHY THE MUTATIONS RETURN boolean
@@ -56,13 +57,21 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
   reset: () => set({ templates: [], status: 'idle' }),
 
   fetchTemplates: async () => {
+      // Tagged before the request, checked after. A ledger switch in between
+      // makes this answer belong to a ledger nobody is looking at, and writing
+      // it would show the previous household's figures under the new one's name
+      // -- marked 'ready', so nothing would ever correct it.
+      // See src/app/ledger-generation.ts.
+    const tag = currentGeneration();
     set({ status: 'loading' });
     try {
       const templates = await getApi().getTemplates();
-      set({ templates, status: 'ready' });
+      applyIfCurrent(tag, () => set({ templates, status: 'ready' }));
     } catch (e) {
-      set({ status: 'error' });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ status: 'error' });
+        reportError(e);
+      });
     }
   },
 

@@ -134,6 +134,27 @@ describe('once they have', () => {
     expect(api.updateLedgerSettings).not.toHaveBeenCalled();
   });
 
+  it('discards a half-typed figure when the ledger changes', async () => {
+    // Editing ledger A's floor and switching to B before saving used to leave
+    // the draft in place: the form is hidden while B loads, comes back holding
+    // A's number, and 保存 writes it to B under B's header. SettingsView keys
+    // this component by ledger so switching remounts it -- which is what this
+    // simulates.
+    const user = userEvent.setup();
+    const { unmount } = render(<MinBalanceSetting />);
+
+    await user.clear(screen.getByLabelText('金額'));
+    await user.type(screen.getByLabelText('金額'), '120000');
+    expect(screen.getByLabelText('金額')).toHaveValue('120,000');
+
+    unmount();
+    useSettingsStore.setState({ settings: { minBalanceThreshold: 80_000 }, status: 'ready' });
+    render(<MinBalanceSetting />);
+
+    expect(screen.getByLabelText('金額')).toHaveValue('80,000');
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
+  });
+
   it('says nothing about success when the save failed', async () => {
     // The store swallows the throw (reportError has already raised the toast),
     // so a try/catch here could never run.

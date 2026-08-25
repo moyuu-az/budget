@@ -8,6 +8,7 @@ import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useMonthlyStore } from '../../stores/useMonthlyStore';
 import { useSettingsStore } from '../../stores/useSettingsStore';
 import { makeCashAsset, makeCashCategory, monthlyOn } from '../../test/factories';
+import { markForecastMonthsFetched } from '../../test/helpers';
 import type { EntryTemplate } from '../../types';
 
 // ---------------------------------------------------------------------------
@@ -49,6 +50,8 @@ beforeEach(() => {
   // now gates the KPI row: the default is only known to be right once the server
   // has confirmed nothing was configured.
   useSettingsStore.setState({ settings: { minBalanceThreshold: 50_000 }, status: 'ready' });
+  // Covers both the default 60-day period and the 90 the KPI row asks for.
+  markForecastMonthsFetched(90);
 });
 
 afterEach(() => {

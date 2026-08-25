@@ -3,6 +3,7 @@ import type { Asset, AssetCategory, AssetCategoryInput, AssetInput } from '../ty
 import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
 import type { LoadStatus } from './load-status';
+import { applyIfCurrent, currentGeneration } from '../app/ledger-generation';
 
 // ---------------------------------------------------------------------------
 // Asset categories and holdings in ONE store.
@@ -68,6 +69,12 @@ export const useAssetStore = create<AssetState>((set, get) => ({
   reset: () => set({ categories: [], assets: [], status: 'idle' }),
 
   fetchAssets: async () => {
+      // Tagged before the request, checked after. A ledger switch in between
+      // makes this answer belong to a ledger nobody is looking at, and writing
+      // it would show the previous household's figures under the new one's name
+      // -- marked 'ready', so nothing would ever correct it.
+      // See src/app/ledger-generation.ts.
+    const tag = currentGeneration();
     set({ status: 'loading' });
     try {
       // One await, not two sequential ones: the views need both before they can
@@ -76,13 +83,15 @@ export const useAssetStore = create<AssetState>((set, get) => ({
         getApi().getAssetCategories(),
         getApi().getAssets(),
       ]);
-      set({ categories, assets, status: 'ready' });
+      applyIfCurrent(tag, () => set({ categories, assets, status: 'ready' }));
     } catch (e) {
       // 'error', not back to 'idle': the balance is unknown either way, but only
       // this distinction lets the dashboard offer to try again instead of
       // pulsing a skeleton at someone who has no idea anything went wrong.
-      set({ status: 'error' });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ status: 'error' });
+        reportError(e);
+      });
     }
   },
 

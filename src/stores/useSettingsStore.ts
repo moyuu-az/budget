@@ -3,6 +3,7 @@ import type { LedgerSettings } from '../types';
 import { DEFAULT_LEDGER_SETTINGS } from '../../shared/ledger-settings';
 import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
+import { applyIfCurrent, currentGeneration } from '../app/ledger-generation';
 import type { LoadStatus } from './load-status';
 
 // ---------------------------------------------------------------------------
@@ -51,22 +52,37 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   reset: () => set({ settings: DEFAULT_LEDGER_SETTINGS, status: 'idle' }),
 
   fetchSettings: async () => {
+    // Tagged BEFORE the request, checked after: a ledger switch in between makes
+    // this answer belong to a ledger nobody is looking at, and writing it would
+    // leave the new ledger's screen showing the old one's floor -- marked
+    // 'ready', so nothing would ever correct it.
+    const tag = currentGeneration();
     set({ status: 'loading' });
     try {
-      set({ settings: await getApi().getLedgerSettings(), status: 'ready' });
+      const settings = await getApi().getLedgerSettings();
+      applyIfCurrent(tag, () => set({ settings, status: 'ready' }));
     } catch (e) {
-      set({ status: 'error' });
-      reportError(e);
+      // The error is not reported either. Nobody is waiting for this answer, and
+      // a toast about a ledger the user has already left is noise they cannot
+      // act on.
+      applyIfCurrent(tag, () => {
+        set({ status: 'error' });
+        reportError(e);
+      });
     }
   },
 
   updateSettings: async (patch) => {
+    const tag = currentGeneration();
     try {
       // The server's answer, not the patch. It clamps, and a form showing what
       // it asked for rather than what was kept would silently change on the
       // next reload.
-      set({ settings: await getApi().updateLedgerSettings(patch), status: 'ready' });
-      return true;
+      const settings = await getApi().updateLedgerSettings(patch);
+      // The WRITE already happened, and it happened against the ledger whose
+      // header the request carried -- so it is correct wherever it landed. What
+      // must not happen is showing it under a different ledger's name.
+      return applyIfCurrent(tag, () => set({ settings, status: 'ready' }));
     } catch (e) {
       reportError(e);
       return false;

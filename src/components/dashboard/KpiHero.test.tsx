@@ -7,6 +7,8 @@ import { useAssetStore } from '../../stores/useAssetStore';
 import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useSettingsStore } from '../../stores/useSettingsStore';
 import { makeCashAsset, makeCashCategory, monthlyOn } from '../../test/factories';
+import { markForecastMonthsFetched } from '../../test/helpers';
+import { useMonthlyStore } from '../../stores/useMonthlyStore';
 import type { EntryTemplate } from '../../types';
 
 // ---------------------------------------------------------------------------
@@ -39,6 +41,11 @@ beforeEach(() => {
   useTemplateStore.setState({ templates: [rent], status: 'ready' });
   useAssetStore.setState({ categories: [], assets: [], status: 'idle' });
   useSettingsStore.setState({ settings: { minBalanceThreshold: 50_000 }, status: 'ready' });
+  useMonthlyStore.getState().reset();
+  // The KPI row looks 90 days ahead and waits for every month's planned amounts:
+  // a month whose override never arrived is read at its template default, which
+  // turns a ¥500,000 rent into ¥100,000 and the verdict into 余裕.
+  markForecastMonthsFetched(90);
 });
 
 afterEach(() => {

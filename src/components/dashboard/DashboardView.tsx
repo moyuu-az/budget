@@ -2,7 +2,7 @@ import { useMemo, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import type { ForecastPeriod, ViewType } from '../../types';
 import { useMonthlyStore } from '../../stores/useMonthlyStore';
-import { useForecast } from '../../hooks/useForecast';
+import { useDashboardReadiness } from '../../hooks/useDashboardReadiness';
 import { toYearMonth, periodToDays, periodToMonths } from '../../utils/forecast';
 import { LoadGate } from '../ui/LoadGate';
 import ForecastChart from './ForecastChart';
@@ -31,13 +31,18 @@ function DashboardView({ onNavigate }: DashboardViewProps) {
     fetchMonthlyAmountsRange(startMonth, endMonth);
   }, [fetchMonthlyAmountsRange, forecastPeriod]);
 
-  // Not 'ready' until the balance and the templates have both arrived, and it is
-  // not cosmetic: with real expenses and a not-yet-loaded ¥0 balance every
-  // figure below reads 残高不足 in red. EVERY panel fed by `forecast` has to go
-  // through LoadGate -- an ungated one shows its empty state, and the empty
-  // states here are positive claims ("nothing is coming up") rather than blanks.
-  // See useForecast.
-  const { status, points: forecast } = useForecast(periodToDays(forecastPeriod));
+  // ONE readiness for every panel here, decided in one place.
+  //
+  // It is not cosmetic: with real expenses and a not-yet-loaded ¥0 balance every
+  // figure below reads 残高不足 in red, and with a not-yet-loaded floor the
+  // chart draws its reference line somewhere the household never put it. EVERY
+  // panel that states something about money goes through LoadGate on THIS status
+  // -- an ungated one shows its empty state, and the empty states here are
+  // positive claims ("nothing is coming up") rather than blanks.
+  //
+  // See useDashboardReadiness for what it waits for and why gating per panel is
+  // what produced two contradictory answers on one screen.
+  const { status, points: forecast } = useDashboardReadiness(periodToDays(forecastPeriod));
 
   const minimumPoint = useMemo(
     () => forecast.find((p) => p.isMinimum) ?? null,

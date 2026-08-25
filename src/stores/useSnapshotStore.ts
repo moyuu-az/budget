@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { BalanceSnapshot } from '../types';
 import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
+import { applyIfCurrent, currentGeneration } from '../app/ledger-generation';
 
 interface SnapshotState {
   snapshots: BalanceSnapshot[];
@@ -40,13 +41,19 @@ export const useSnapshotStore = create<SnapshotState>((set, get) => ({
   reset: () => set({ snapshots: [], loading: false }),
 
   fetchSnapshots: async () => {
+    // Tagged before the request, checked after: a ledger switch in between makes
+    // this answer belong to a ledger nobody is looking at. See
+    // src/app/ledger-generation.ts.
+    const tag = currentGeneration();
     set({ loading: true });
     try {
       const snapshots = await getApi().getSnapshots();
-      set({ snapshots, loading: false });
+      applyIfCurrent(tag, () => set({ snapshots, loading: false }));
     } catch (e) {
-      set({ loading: false });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ loading: false });
+        reportError(e);
+      });
     }
   },
 

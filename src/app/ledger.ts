@@ -5,6 +5,7 @@ import { useMonthlyStore } from '../stores/useMonthlyStore';
 import { useSessionStore } from '../stores/useSessionStore';
 import { useAssetStore } from '../stores/useAssetStore';
 import { useSettingsStore } from '../stores/useSettingsStore';
+import { invalidateInFlight } from './ledger-generation';
 
 // ---------------------------------------------------------------------------
 // Everything that has to happen when the active ledger changes.
@@ -30,6 +31,11 @@ const LEDGER_SCOPED_STORES: readonly { getState(): { reset(): void } }[] = [
 ];
 
 export function resetLedgerData(): void {
+  // Clearing what has ARRIVED and disowning what has NOT are two halves of the
+  // same act. Doing only the first leaves the previous ledger's in-flight
+  // responses free to land in the emptied stores, which is a household budget
+  // showing another household's figures under the right household's name.
+  invalidateInFlight();
   for (const store of LEDGER_SCOPED_STORES) store.getState().reset();
 }
 

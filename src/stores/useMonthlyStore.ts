@@ -6,6 +6,7 @@ import type {
 } from '../types';
 import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
+import { applyIfCurrent, currentGeneration } from '../app/ledger-generation';
 import { occursInMonth } from '../../shared/recurrence';
 import type { LoadStatus } from './load-status';
 import type { Recurrence } from '../types';
@@ -83,23 +84,53 @@ export interface MonthFetchStatus {
 
 const IDLE_MONTH: MonthFetchStatus = { amounts: 'idle', actuals: 'idle' };
 
-/** Records one half's status for one month, leaving every other month alone. */
+/** Records one half's status for one or more months, leaving the rest alone. */
 function setHalf(
   current: ReadonlyMap<string, MonthFetchStatus>,
-  yearMonth: string,
+  months: string | readonly string[],
   half: keyof MonthFetchStatus,
   status: LoadStatus,
 ): ReadonlyMap<string, MonthFetchStatus> {
   const next = new Map(current);
-  next.set(yearMonth, { ...(current.get(yearMonth) ?? IDLE_MONTH), [half]: status });
+  for (const yearMonth of typeof months === 'string' ? [months] : months) {
+    next.set(yearMonth, { ...(current.get(yearMonth) ?? IDLE_MONTH), [half]: status });
+  }
   return next;
+}
+
+/**
+ * Every 'YYYY-MM' from `start` to `end` inclusive.
+ *
+ * Needed because a RANGE fetch has to mark each month it covers: a status kept
+ * only for the range as a whole could not answer "is THIS month loaded", which
+ * is the question every reader actually has.
+ *
+ * Bounded at 240 (twenty years) so a malformed pair cannot spin: the callers
+ * derive both ends from the forecast horizon, but a loop with no ceiling is a
+ * hang waiting for the first bad input.
+ */
+function monthsInRange(start: string, end: string): string[] {
+  const months: string[] = [];
+  let year = Number(start.slice(0, 4));
+  let month = Number(start.slice(5, 7));
+  for (let i = 0; i < 240; i++) {
+    const key = `${year}-${String(month).padStart(2, '0')}`;
+    if (key > end) break;
+    months.push(key);
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+  return months;
 }
 
 /**
  * How far BOTH halves of `yearMonth` have got, as one status.
  *
- * The selector every reader should use; nothing outside this module should have
- * to know the fetch comes in two pieces.
+ * For a reader that needs plan AND reality -- the variance card. Nothing outside
+ * this module should have to know the fetch comes in two pieces.
  */
 export function monthStatusOf(
   monthStatus: ReadonlyMap<string, MonthFetchStatus>,
@@ -109,6 +140,33 @@ export function monthStatusOf(
   if (half.amounts === 'error' || half.actuals === 'error') return 'error';
   return half.amounts === 'ready' && half.actuals === 'ready' ? 'ready' : 'loading';
 }
+
+/**
+ * How far ONE half has got across every month in a range.
+ *
+ * For the forecast, which needs the planned overrides and has no use for the
+ * actuals. Asking for both would leave it permanently 'loading', because nothing
+ * fetches actuals for the months ahead.
+ *
+ * 'error' wins over 'loading' wins over 'ready': a projection built from a range
+ * where one month failed is not a cautious projection, it is one silently
+ * missing that month's override -- a ¥500,000 rent read as its ¥100,000 default.
+ */
+export function rangeStatusOf(
+  monthStatus: ReadonlyMap<string, MonthFetchStatus>,
+  months: readonly string[],
+  half: keyof MonthFetchStatus,
+): LoadStatus {
+  let sawPending = false;
+  for (const yearMonth of months) {
+    const status = (monthStatus.get(yearMonth) ?? IDLE_MONTH)[half];
+    if (status === 'error') return 'error';
+    if (status !== 'ready') sawPending = true;
+  }
+  return sawPending ? 'loading' : 'ready';
+}
+
+export { monthsInRange };
 
 export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   monthlyAmountsMap: new Map(),
@@ -151,7 +209,9 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     }),
 
   fetchActualsRange: async (startMonth: string, endMonth: string) => {
-    set({ loading: true });
+    const tag = currentGeneration();
+    const months = monthsInRange(startMonth, endMonth);
+    set({ loading: true, monthStatus: setHalf(get().monthStatus, months, 'actuals', 'loading') });
     try {
       const actuals = await getApi().getMonthlyActualsRange(startMonth, endMonth);
       const newMap = new Map(get().monthlyActualsMap);
@@ -166,14 +226,26 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
         }
         newMap.get(a.yearMonth)!.set(a.templateId, a.actualAmount);
       }
-      set({ monthlyActualsMap: newMap, loading: false });
+      applyIfCurrent(tag, () =>
+        set({
+          monthlyActualsMap: newMap,
+          loading: false,
+          monthStatus: setHalf(get().monthStatus, months, 'actuals', 'ready'),
+        }),
+      );
     } catch (e) {
-      set({ loading: false });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({
+          loading: false,
+          monthStatus: setHalf(get().monthStatus, months, 'actuals', 'error'),
+        });
+        reportError(e);
+      });
     }
   },
 
   fetchMonthlyAmounts: async (yearMonth: string) => {
+    const tag = currentGeneration();
     set({ loading: true, monthStatus: setHalf(get().monthStatus, yearMonth, 'amounts', 'loading') });
     try {
       const amounts = await getApi().getMonthlyAmounts(yearMonth);
@@ -183,26 +255,32 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
         monthMap.set(a.templateId, a.amount);
       }
       newMap.set(yearMonth, monthMap);
-      set({
-        monthlyAmountsMap: newMap,
-        loading: false,
-        monthStatus: setHalf(get().monthStatus, yearMonth, 'amounts', 'ready'),
-      });
+      applyIfCurrent(tag, () =>
+        set({
+          monthlyAmountsMap: newMap,
+          loading: false,
+          monthStatus: setHalf(get().monthStatus, yearMonth, 'amounts', 'ready'),
+        }),
+      );
     } catch (e) {
       // 'error', not silence. An empty map is indistinguishable from a month the
       // household genuinely recorded nothing in, and 先月の予実 renders that as
       // 「実績が記録されていません」 -- a positive claim that would be false, and
       // permanently so, for a household whose data simply could not be fetched.
-      set({
-        loading: false,
-        monthStatus: setHalf(get().monthStatus, yearMonth, 'amounts', 'error'),
+      applyIfCurrent(tag, () => {
+        set({
+          loading: false,
+          monthStatus: setHalf(get().monthStatus, yearMonth, 'amounts', 'error'),
+        });
+        reportError(e);
       });
-      reportError(e);
     }
   },
 
   fetchMonthlyAmountsRange: async (startMonth: string, endMonth: string) => {
-    set({ loading: true });
+    const tag = currentGeneration();
+    const months = monthsInRange(startMonth, endMonth);
+    set({ loading: true, monthStatus: setHalf(get().monthStatus, months, 'amounts', 'loading') });
     try {
       const amounts = await getApi().getMonthlyAmountsRange(startMonth, endMonth);
       const newMap = new Map(get().monthlyAmountsMap);
@@ -222,10 +300,24 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
         newMap.get(a.yearMonth)!.set(a.templateId, a.amount);
       }
 
-      set({ monthlyAmountsMap: newMap, loading: false });
+      applyIfCurrent(tag, () =>
+        set({
+          monthlyAmountsMap: newMap,
+          loading: false,
+          monthStatus: setHalf(get().monthStatus, months, 'amounts', 'ready'),
+        }),
+      );
     } catch (e) {
-      set({ loading: false });
-      reportError(e);
+      // Every month in the range is marked failed, not just "the fetch failed":
+      // a projection built from a range with one month silently missing reads a
+      // ¥500,000 rent as its ¥100,000 default and calls the result 余裕.
+      applyIfCurrent(tag, () => {
+        set({
+          loading: false,
+          monthStatus: setHalf(get().monthStatus, months, 'amounts', 'error'),
+        });
+        reportError(e);
+      });
     }
   },
 
@@ -299,6 +391,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
   },
 
   fetchMonthlyActuals: async (yearMonth: string) => {
+    const tag = currentGeneration();
     set({ loading: true, monthStatus: setHalf(get().monthStatus, yearMonth, 'actuals', 'loading') });
     try {
       const actuals = await getApi().getMonthlyActuals(yearMonth);
@@ -308,18 +401,22 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
         monthMap.set(a.templateId, a.actualAmount);
       }
       newMap.set(yearMonth, monthMap);
-      set({
-        monthlyActualsMap: newMap,
-        loading: false,
-        monthStatus: setHalf(get().monthStatus, yearMonth, 'actuals', 'ready'),
-      });
+      applyIfCurrent(tag, () =>
+        set({
+          monthlyActualsMap: newMap,
+          loading: false,
+          monthStatus: setHalf(get().monthStatus, yearMonth, 'actuals', 'ready'),
+        }),
+      );
     } catch (e) {
       // See fetchMonthlyAmounts: silence here becomes 「実績が記録されていません」.
-      set({
-        loading: false,
-        monthStatus: setHalf(get().monthStatus, yearMonth, 'actuals', 'error'),
+      applyIfCurrent(tag, () => {
+        set({
+          loading: false,
+          monthStatus: setHalf(get().monthStatus, yearMonth, 'actuals', 'error'),
+        });
+        reportError(e);
       });
-      reportError(e);
     }
   },
 

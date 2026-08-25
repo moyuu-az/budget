@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Category, CategoryInput } from '../types';
 import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
+import { applyIfCurrent, currentGeneration } from '../app/ledger-generation';
 
 interface CategoryState {
   categories: Category[];
@@ -36,13 +37,19 @@ export const useCategoryStore = create<CategoryState>((set, get) => ({
   reset: () => set({ categories: [], loading: false }),
 
   fetchCategories: async () => {
+    // Tagged before the request, checked after: a ledger switch in between makes
+    // this answer belong to a ledger nobody is looking at. See
+    // src/app/ledger-generation.ts.
+    const tag = currentGeneration();
     set({ loading: true });
     try {
       const categories = await getApi().getCategories();
-      set({ categories, loading: false });
+      applyIfCurrent(tag, () => set({ categories, loading: false }));
     } catch (e) {
-      set({ loading: false });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ loading: false });
+        reportError(e);
+      });
     }
   },
 
