@@ -8,7 +8,52 @@ type SNode = SankeyNode<CashFlowNode, CashFlowLink>;
 // Color constants for SVG text elements
 const SAVINGS_TEXT = '#34d399';
 const DEFICIT_TEXT = '#f87171';
-const MARGIN = { top: 32, right: 130, bottom: 16, left: 130 } as const;
+const MARGIN = { top: 32, bottom: 16 } as const;
+
+// ---------------------------------------------------------------------------
+// THE SIDE MARGINS HOLD THE LABELS, AND THEY USED TO BE FIXED AT 130px EACH.
+//
+// That is 260px gone before a single band is drawn, which was invisible while
+// this panel occupied two thirds of a wide row and fatal everywhere else:
+//
+//   - a phone (375px) gives the card about 295px of content -> 35px of diagram
+//   - a third of the dashboard's three-column row gives about 314px -> 54px
+//
+// Below `MIN_INNER_WIDTH` the old code returned null, so the card rendered its
+// heading and its 収入/支出/差引 footer with NOTHING between them. No error, no
+// empty state, no skeleton -- the diagram simply was not there, and the only
+// test covering it asserted on the heading, so nothing failed. It shipped that
+// way twice: once to phones, once to the desktop when a card was added beside
+// this one and its column narrowed.
+//
+// So the margins scale with the width, the labels are trimmed to fit them, and
+// a width that genuinely cannot carry the diagram SAYS SO rather than
+// disappearing. A panel that vanishes silently is the same class of mistake as
+// an empty state that makes a false claim: the screen stops telling the truth
+// about what it knows.
+// ---------------------------------------------------------------------------
+
+const MAX_SIDE = 130;
+const MIN_SIDE = 60;
+/** Narrower than this and there is no honest diagram to draw. */
+const MIN_INNER_WIDTH = 90;
+
+/** The side margin this width can afford, for labels and for the bands. */
+function sideMarginFor(width: number): number {
+  return Math.round(Math.min(MAX_SIDE, Math.max(MIN_SIDE, width * 0.2)));
+}
+
+/**
+ * Trims a label to what fits beside the node.
+ *
+ * At 11px a CJK glyph is about 11px wide, which is the worst case and the
+ * common one here (category names are Japanese). The full name stays reachable:
+ * every node carries it in its tooltip.
+ */
+function fitLabel(name: string, side: number): string {
+  const max = Math.max(3, Math.floor((side - 10) / 11));
+  return name.length <= max ? name : `${name.slice(0, max - 1)}…`;
+}
 
 const pathGen = sankeyLinkHorizontal();
 
@@ -50,13 +95,15 @@ export function SankeyCanvas({ cashFlowData, containerRef, onHover, onHoverEnd }
     return Math.max(300, maxNodes * 44 + MARGIN.top + MARGIN.bottom + 32);
   }, [cashFlowData]);
 
+  const side = sideMarginFor(width);
+  const innerWidth = width - side * 2;
+
   const layout = useMemo(() => {
     if (!cashFlowData || width === 0) return null;
 
-    const innerWidth = width - MARGIN.left - MARGIN.right;
     const innerHeight = svgHeight - MARGIN.top - MARGIN.bottom;
 
-    if (innerWidth < 100 || innerHeight < 50) return null;
+    if (innerWidth < MIN_INNER_WIDTH || innerHeight < 50) return null;
 
     const generator = d3Sankey<CashFlowNode, CashFlowLink>()
       .nodeWidth(16)
@@ -70,15 +117,28 @@ export function SankeyCanvas({ cashFlowData, containerRef, onHover, onHoverEnd }
     });
 
     return graph;
-  }, [cashFlowData, width, svgHeight]);
+  }, [cashFlowData, width, innerWidth, svgHeight]);
 
-  if (!(layout && width > 0)) return null;
+  // Still measuring. One frame, and drawing nothing is the truth.
+  if (width === 0) return null;
 
-  const svgWidth = Math.max(0, width - 48);
+  // Too narrow to draw. SAY IT -- the alternative is a card with a heading, a
+  // footer, and a hole where the diagram was.
+  if (!layout) {
+    return (
+      <div className="flex items-center justify-center text-center" style={{ minHeight: 120 }}>
+        <p className="text-slate-500 text-sm">
+          この幅ではフロー図を表示できません。
+          <br />
+          合計は下に表示しています。
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <svg width={svgWidth} height={svgHeight}>
-      <g transform={`translate(${MARGIN.left},${MARGIN.top})`}>
+    <svg width={width} height={svgHeight}>
+      <g transform={`translate(${side},${MARGIN.top})`}>
         <defs>
           {layout.links.map((link, i) => {
             const sourceNode = link.source as SNode;
@@ -203,7 +263,7 @@ export function SankeyCanvas({ cashFlowData, containerRef, onHover, onHoverEnd }
                     fill={node.type === 'savings' ? SAVINGS_TEXT : node.type === 'deficit' ? DEFICIT_TEXT : '#94a3b8'}
                     style={{ fontSize: '11px', fontWeight: node.type === 'savings' || node.type === 'deficit' ? 600 : 400 }}
                   >
-                    {node.name}
+                    {fitLabel(node.name, side)}
                   </text>
                   <text
                     x={isLeft ? x0 - 8 : x1 + 8}
