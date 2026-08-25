@@ -35,8 +35,8 @@ beforeEach(() => {
   setApi(createMockApi());
   // The templates have landed; the balance has not. This is the exact interval
   // that produced the false alarm.
-  useTemplateStore.setState({ templates: [rent], loading: false, loaded: true });
-  useAssetStore.setState({ categories: [], assets: [], loading: false, loaded: false });
+  useTemplateStore.setState({ templates: [rent], status: 'ready' });
+  useAssetStore.setState({ categories: [], assets: [], status: 'idle' });
 });
 
 afterEach(() => {
@@ -56,7 +56,23 @@ describe('while the balance is still in flight', () => {
     render(<KpiHero />);
 
     expect(screen.queryByText('最小残高(90日)')).not.toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('残高を読み込み中');
+    expect(screen.getByRole('status', { name: '残高を読み込み中' })).toBeInTheDocument();
+  });
+});
+
+describe('when the fetch failed', () => {
+  it('says so and offers to try again, instead of pulsing forever', () => {
+    // A failure folded into "not ready yet" is a skeleton with no end and no
+    // explanation: the error toast has already faded, the page looks like it is
+    // still working, and reloading is the only way out -- which nothing says.
+    useAssetStore.setState({ categories: [], assets: [], status: 'error' });
+
+    render(<KpiHero />);
+
+    expect(screen.getByText('残高を読み込めませんでした')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '再読み込み' })).toBeInTheDocument();
+    // And still no fabricated warning.
+    expect(screen.queryByText('残高不足')).not.toBeInTheDocument();
   });
 });
 
@@ -65,7 +81,7 @@ describe('once the balance lands', () => {
     useAssetStore.setState({
       categories: [makeCashCategory()],
       assets: [makeCashAsset({ value: 3_000_000 })],
-      loaded: true,
+      status: 'ready',
     });
 
     render(<KpiHero />);
@@ -82,7 +98,7 @@ describe('once the balance lands', () => {
     useAssetStore.setState({
       categories: [makeCashCategory()],
       assets: [makeCashAsset({ value: 1_000 })],
-      loaded: true,
+      status: 'ready',
     });
 
     render(<KpiHero />);

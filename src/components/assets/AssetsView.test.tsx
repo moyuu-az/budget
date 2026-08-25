@@ -34,7 +34,7 @@ let api: AppApi;
 beforeEach(() => {
   api = createMockApi();
   setApi(api);
-  useAssetStore.setState({ categories: [], assets: [], loading: false });
+  useAssetStore.setState({ categories: [], assets: [], status: 'ready' });
   useToastStore.setState({ toasts: [], queue: [] });
 });
 

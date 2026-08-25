@@ -124,6 +124,15 @@ export async function startTestDb(options: StartTestDbOptions = {}): Promise<Tes
     // CREATE on the schema so it can create the tables it will then own; the
     // objects it creates belong to it, which is what makes FORCE RLS meaningful.
     await adminPool.query(`GRANT CREATE, USAGE ON SCHEMA public TO ${OWNER_ROLE}`);
+    // And the DATABASE, which is not decoration: applyGrants issues
+    // `GRANT CONNECT ON DATABASE` and `GRANT USAGE ON SCHEMA`, and a non-owner
+    // running those gets `WARNING: no privileges were granted` rather than an
+    // error. The app role would still connect -- through PUBLIC's defaults, not
+    // through anything applyGrants did -- so the harness would be quietly
+    // weaker than production, where Cloud SQL's `postgres` owns the database.
+    await adminPool.query(
+      `ALTER DATABASE ${container.getDatabase()} OWNER TO ${OWNER_ROLE}`,
+    );
     ownerPool = connect(OWNER_ROLE, OWNER_PASSWORD);
   }
 

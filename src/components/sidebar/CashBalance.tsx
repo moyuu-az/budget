@@ -3,6 +3,7 @@ import { useAssetStore } from '../../stores/useAssetStore';
 import { useCashBalance } from '../../hooks/useCashBalance';
 import { findCashCategory } from '../../utils/net-worth';
 import { formatYen } from '../../utils/currency';
+import { Skeleton } from '../ui/Skeleton';
 
 interface Props {
   /**
@@ -34,11 +35,18 @@ function CashBalance({ onEdit }: Props): ReactElement {
   const balance = useCashBalance();
   const categories = useAssetStore((s) => s.categories);
   const assets = useAssetStore((s) => s.assets);
+  const status = useAssetStore((s) => s.status);
 
   const cashCategory = findCashCategory(categories);
   const holdingCount = cashCategory
     ? assets.filter((asset) => asset.categoryId === cashCategory.id).length
     : 0;
+
+  // Until the fetch lands the figure is ¥0 and the count is 0, which the caption
+  // below would state as 「登録すると反映されます」 -- a confident claim that the
+  // household has recorded no cash, made while its cash is still in flight.
+  // Blank is the only honest thing to say here.
+  const loaded = status === 'ready';
 
   return (
     <div>
@@ -49,10 +57,10 @@ function CashBalance({ onEdit }: Props): ReactElement {
         <dl className="min-w-0">
           <dt className="mb-1.5 text-xs text-[var(--color-content-muted)]">現在の残高</dt>
           <dd className="truncate text-2xl font-bold tabular-nums text-[var(--color-content-primary)]">
-            {formatYen(balance)}
+            {loaded ? formatYen(balance) : <Skeleton height={28} width={120} />}
           </dd>
         </dl>
-        {onEdit && (
+        {loaded && onEdit && (
           <button
             type="button"
             onClick={onEdit}
@@ -63,9 +71,11 @@ function CashBalance({ onEdit }: Props): ReactElement {
         )}
       </div>
       <p className="mt-1 text-xs text-[var(--color-content-muted)]">
-        {holdingCount === 0
-          ? '資産の「現金」に登録すると反映されます'
-          : `資産の「${cashCategory?.name}」${holdingCount} 件の合計`}
+        {!loaded
+          ? '\u00a0'
+          : holdingCount === 0
+            ? '資産の「現金」に登録すると反映されます'
+            : `資産の「${cashCategory?.name}」${holdingCount} 件の合計`}
       </p>
     </div>
   );

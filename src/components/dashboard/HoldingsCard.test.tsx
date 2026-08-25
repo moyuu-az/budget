@@ -18,7 +18,7 @@ beforeEach(() => {
   useAssetStore.setState({
     categories: [CASH],
     assets: [makeCashAsset({ value: 500_000 })],
-    loading: false,
+    status: 'ready',
   });
   useUIStore.setState({ holdingsView: 'cash' });
 });
@@ -29,12 +29,21 @@ afterEach(() => {
 });
 
 describe('before the categories have loaded', () => {
-  it('renders nothing at all', () => {
-    // Not "renders ¥0": that would read as a figure. Every ledger has a cash
-    // category once the fetch lands, so an empty list means "not loaded".
-    useAssetStore.setState({ categories: [], assets: [] });
-    const { container } = render(<HoldingsCard />);
-    expect(container).toBeEmptyDOMElement();
+  it('shows a placeholder, never a figure', () => {
+    // Not ¥0: that reads as a reading. Every ledger has a cash category once the
+    // fetch lands, so this state is always "not loaded", never "nothing here".
+    useAssetStore.setState({ categories: [], assets: [], status: 'loading' });
+    render(<HoldingsCard />);
+
+    expect(screen.getByRole('status', { name: '資産を読み込み中' })).toBeInTheDocument();
+    expect(screen.queryByText('¥0')).not.toBeInTheDocument();
+  });
+
+  it('offers a retry when the fetch failed', () => {
+    useAssetStore.setState({ categories: [], assets: [], status: 'error' });
+    render(<HoldingsCard />);
+
+    expect(screen.getByText('資産を読み込めませんでした')).toBeInTheDocument();
   });
 });
 

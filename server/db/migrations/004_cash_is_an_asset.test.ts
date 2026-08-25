@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startTestDb, migrationsDir, raw, type TestDb } from '../../test/pg';
 import { migrate } from '../migrate';
+import { MAX_ASSET_VALUE } from '../../../shared/asset-fields';
 import { CASH_CATEGORY_DEFAULTS } from '../../../shared/asset-templates';
 
 // ---------------------------------------------------------------------------
@@ -58,6 +59,17 @@ let zeroValuedCashRow: number;
 let unparseableBalance: number;
 let hugeBalance: number;
 let fractionalBalance: number;
+let twoCashCategoriesBothHolding: number;
+
+/**
+ * Everything the migration warned about, as the operator would see it.
+ *
+ * The migration deliberately does not abort on a value it cannot use -- one bad
+ * row must not block a deployment for every ledger -- so warnings are the ONLY
+ * way anyone learns that a figure was rewritten. Captured here because "reported
+ * rather than thrown" is worthless if the report goes nowhere.
+ */
+let warnings: string[] = [];
 
 /** Creates an asset category at the 003 schema (no `kind` column yet in spirit). */
 async function category(ledgerId: number, name: string, sortOrder: number): Promise<number> {
@@ -168,8 +180,37 @@ beforeAll(async () => {
   fractionalBalance = await ledger('fractional-balance');
   await balanceSetting(fractionalBalance, '1234.56');
 
+  // (10) TWO categories named 現金, each holding ONE row, with the money in the
+  //      one that sorts first... by row count they tie, so only the amount can
+  //      decide. Picking the smaller would leave net worth right and the
+  //      forecast starting from the wrong half.
+  twoCashCategoriesBothHolding = await ledger('two-cash-both-holding');
+  await holding(
+    twoCashCategoriesBothHolding,
+    await category(twoCashCategoriesBothHolding, '現金', 0),
+    '財布A',
+    100_000,
+  );
+  await holding(
+    twoCashCategoriesBothHolding,
+    await category(twoCashCategoriesBothHolding, '現金', 1),
+    '銀行',
+    200_000,
+  );
+
   // ... and now the migration under test, applied by the schema owner.
-  await migrate(db.ownerPool, migrationsDir());
+  //
+  // console.warn is where migrate() forwards PostgreSQL notices; see the
+  // listener it installs and why.
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(' '));
+  };
+  try {
+    await migrate(db.ownerPool, migrationsDir());
+  } finally {
+    console.warn = warn;
+  }
 }, 120_000);
 
 afterAll(async () => {
@@ -291,6 +332,32 @@ describe('the old balance', () => {
   });
 });
 
+describe('two categories named 現金 that both hold something', () => {
+  it('promotes the one holding the most, since the row counts tie', async () => {
+    // The failure this catches leaves net worth CORRECT and only the balance
+    // wrong -- exactly the kind of error no screen would show as an error.
+    expect(await cashHoldings(twoCashCategoriesBothHolding)).toEqual([
+      { name: '銀行', value: '200000.00' },
+    ]);
+  });
+
+  it('leaves the smaller one as an ordinary asset rather than losing it', async () => {
+    expect(await netWorth(twoCashCategoriesBothHolding)).toBe('300000.00');
+  });
+
+  it('tells the operator that the ledger had duplicates', () => {
+    // The household will see its balance drop from 300,000 to 200,000 -- correct
+    // under the new rule, and inexplicable without someone knowing why.
+    // Named by ledger id -- there is more than one such ledger in this fixture,
+    // and an operator needs to know WHICH household to look at.
+    expect(
+      warnings.filter((line) =>
+        line.includes(`ledger ${twoCashCategoriesBothHolding}: more than one category is named 現金`),
+      ),
+    ).toHaveLength(1);
+  });
+});
+
 describe('a ledger with two categories named 現金', () => {
   it('promotes the one holding the money, not the first by sort order', async () => {
     // Promoting the empty one and carrying 300,000 into it would leave the real
@@ -335,9 +402,27 @@ describe('balances nothing ever validated', () => {
 
   it('clamps a value too large for an asset to hold', async () => {
     // NUMERIC(14,2) tops out below 10^12; the old column had no such limit.
+    //
+    // Compared against MAX_ASSET_VALUE rather than a literal: the migration
+    // spells the same number out in SQL (it cannot import TypeScript), and this
+    // is what stops the two from drifting apart unnoticed -- the same guard the
+    // CASH_CATEGORY_DEFAULTS test provides for the category's shape.
     expect(await cashHoldings(hugeBalance)).toEqual([
-      { name: '口座残高', value: '999999999999.00' },
+      { name: '口座残高', value: `${MAX_ASSET_VALUE}.00` },
     ]);
+  });
+
+  it('tells the operator about each figure it rewrote', () => {
+    // Silence here would be the worst outcome: the migration succeeds, the
+    // deployment proceeds, and a balance of ¥99,999,999,999,999,999 has quietly
+    // become ¥999,999,999,999 with nobody informed. node-postgres discards
+    // notices unless something listens, so this asserts the listener as much as
+    // the SQL.
+    expect(warnings.filter((line) => line.includes('is not a number'))).toHaveLength(1);
+    expect(warnings.filter((line) => line.includes('exceeds what an asset value can hold')))
+      .toHaveLength(1);
+    // Prefixed and labelled, so it is findable in a deployment log.
+    expect(warnings.every((line) => line.startsWith('[migration] '))).toBe(true);
   });
 
   it('keeps the original of both, so neither is silently rewritten', async () => {
@@ -377,9 +462,11 @@ describe('applying it a second time', () => {
     await db.ownerPool.query(sql);
 
     expect(await cashHoldings(onlySetting)).toEqual(before.cash);
+    // THIS is the ledger the guard protects: its carried-in 口座残高 is itself
+    // ¥0, so `cash_total = 0` is still true on the second pass and the insert
+    // would run again. (zeroValuedCashRow below is NOT a witness -- after the
+    // first pass it holds ¥500,000, so the amount test stops it earlier.)
     expect(await cashHoldings(nothingAtAll)).toEqual(before.empty);
-    // The zero-sum case ADDS a row rather than replacing one, so it is the one
-    // that would stack duplicates without a guard.
     expect(await cashHoldings(zeroValuedCashRow)).toEqual(before.zero);
     // And the retired balances survive: the naive
     // "DELETE legacy; UPDATE current_balance -> legacy" form wiped them here.

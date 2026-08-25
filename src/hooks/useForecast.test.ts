@@ -30,8 +30,7 @@ const cashOnly = (): void => {
   useAssetStore.setState({
     categories: [makeCashCategory()],
     assets: [makeCashAsset({ value: 300_000 })],
-    loading: false,
-    loaded: true,
+    status: 'ready',
   });
 };
 
@@ -40,13 +39,12 @@ const withNonCashAssets = (): void => {
   useAssetStore.setState({
     categories: [makeCashCategory(), makeAssetCategory({ id: 1 })],
     assets: [makeCashAsset({ value: 300_000 }), nisa],
-    loading: false,
-    loaded: true,
+    status: 'ready',
   });
 };
 
 beforeEach(() => {
-  useTemplateStore.setState({ templates: [rent], loaded: true });
+  useTemplateStore.setState({ templates: [rent], status: 'ready' });
   cashOnly();
   useUIStore.setState({ holdingsView: 'cash' });
 });
@@ -127,10 +125,10 @@ describe('the forecast is cash, and only cash', () => {
 
 describe('a projection is not offered until its inputs have arrived', () => {
   it('is not ready, and holds no points, before the balance lands', () => {
-    useAssetStore.setState({ categories: [], assets: [], loaded: false });
+    useAssetStore.setState({ categories: [], assets: [], status: 'idle' });
     const { result } = renderHook(() => useForecast(90));
 
-    expect(result.current.ready).toBe(false);
+    expect(result.current.status).toBe('loading');
     // Empty rather than "computed from zero": a caller that ignores `ready`
     // renders "no data", which is honest. There is no arrangement of this API
     // that renders a fabricated warning.
@@ -138,30 +136,30 @@ describe('a projection is not offered until its inputs have arrived', () => {
   });
 
   it('is not ready before the templates land either', () => {
-    useTemplateStore.setState({ templates: [], loaded: false });
+    useTemplateStore.setState({ templates: [], status: 'idle' });
     const { result } = renderHook(() => useForecast(90));
 
-    expect(result.current.ready).toBe(false);
+    expect(result.current.status).toBe('loading');
   });
 
   it('never reports a shortfall from a balance that has not loaded', () => {
     // The regression itself: real expenses, balance still in flight.
-    useAssetStore.setState({ categories: [], assets: [], loaded: false });
+    useAssetStore.setState({ categories: [], assets: [], status: 'idle' });
     const { result } = renderHook(() => useDashboardKpis());
 
-    expect(result.current.ready).toBe(false);
+    expect(result.current.status).toBe('loading');
     expect(result.current.minBalance90d).toBe(0);
     expect(result.current.minBalance90dDate).toBeNull();
   });
 
   it('becomes ready when the fetch lands, with the real figures', () => {
-    useAssetStore.setState({ categories: [], assets: [], loaded: false });
+    useAssetStore.setState({ categories: [], assets: [], status: 'idle' });
     const { result, rerender } = renderHook(() => useForecast(90));
 
     act(cashOnly);
     rerender();
 
-    expect(result.current.ready).toBe(true);
+    expect(result.current.status).toBe('ready');
     expect(result.current.points[0].balance).toBe(300_000);
   });
 
@@ -170,14 +168,14 @@ describe('a projection is not offered until its inputs have arrived', () => {
     // answer as still valid is what would brief one household's figures onto
     // another's screen.
     const { result, rerender } = renderHook(() => useForecast(90));
-    expect(result.current.ready).toBe(true);
+    expect(result.current.status).toBe('ready');
 
     act(() => {
       useAssetStore.getState().reset();
     });
     rerender();
 
-    expect(result.current.ready).toBe(false);
+    expect(result.current.status).toBe('loading');
   });
 });
 

@@ -4,6 +4,7 @@ import { Card } from '../ui/Card';
 import { Tabs } from '../ui/Tabs';
 import { useAssetStore } from '../../stores/useAssetStore';
 import { useUIStore } from '../../stores/useUIStore';
+import { LoadGate } from './LoadGate';
 import { summarizeHoldings } from '../../utils/net-worth';
 import { formatYen } from '../../utils/currency';
 import type { HoldingsView } from '../../types/ui';
@@ -28,16 +29,21 @@ const VIEWS: { value: HoldingsView; label: string }[] = [
  * enforced structurally -- the forecast comes from useForecast(), which reads
  * useCashBalance() and cannot see this state at all.
  */
-function HoldingsCard(): ReactElement | null {
+function HoldingsCard(): ReactElement {
   const categories = useAssetStore((s) => s.categories);
   const assets = useAssetStore((s) => s.assets);
+  const status = useAssetStore((s) => s.status);
   const view = useUIStore((s) => s.holdingsView);
   const setView = useUIStore((s) => s.setHoldingsView);
 
-  // Before the first fetch lands there is nothing to summarise -- not even the
-  // cash category, which the server provisions on read. Rendering ¥0 for that
-  // instant would read as a figure rather than as "not loaded".
-  if (categories.length === 0) return null;
+  // Through the same gate as everything else, rather than the older
+  // `categories.length === 0` test. Both were true at the same moments -- every
+  // ledger has a cash category, so a loaded list is never empty -- but two
+  // notions of "has it arrived" is one more than can be kept in step, and this
+  // one also distinguishes a failure from a wait.
+  if (status !== 'ready') {
+    return <LoadGate status={status} height={104} label="資産" children={null} />;
+  }
 
   const holdings = summarizeHoldings(categories, assets);
 

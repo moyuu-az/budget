@@ -24,7 +24,7 @@ let api: AppApi;
 beforeEach(() => {
   api = createMockApi();
   setApi(api);
-  useAssetStore.setState({ categories: [], assets: [], loading: false });
+  useAssetStore.setState({ categories: [], assets: [], status: 'ready' });
   useToastStore.setState({ toasts: [], queue: [] });
 });
 
@@ -44,15 +44,18 @@ describe('fetchAssets', () => {
 
     expect(useAssetStore.getState().categories).toHaveLength(1);
     expect(useAssetStore.getState().assets).toHaveLength(1);
-    expect(useAssetStore.getState().loading).toBe(false);
+    expect(useAssetStore.getState().status).toBe('ready');
   });
 
-  it('clears loading and reports the failure once', async () => {
+  it('records the failure as its own state, and reports it once', async () => {
     api.getAssetCategories = vi.fn().mockRejectedValue(new Error('boom'));
 
     await useAssetStore.getState().fetchAssets();
 
-    expect(useAssetStore.getState().loading).toBe(false);
+    // 'error', not back to 'idle'. Folded into "not loaded yet" this becomes a
+    // dashboard skeleton that pulses forever, with nothing saying what happened
+    // and no way to try again short of reloading the page.
+    expect(useAssetStore.getState().status).toBe('error');
     expect(useToastStore.getState().toasts).toHaveLength(1);
     expect(useToastStore.getState().toasts[0].type).toBe('error');
   });
@@ -67,7 +70,22 @@ describe('fetchAssets', () => {
 
     expect(useAssetStore.getState().categories).toEqual([]);
     expect(useAssetStore.getState().assets).toEqual([]);
-    expect(useAssetStore.getState().loading).toBe(false);
+    expect(useAssetStore.getState().status).toBe('error');
+  });
+
+  it('recovers when a retry succeeds', async () => {
+    // The retry the dashboard offers on failure has to be able to clear the
+    // error, or the button is decoration.
+    api.getAssetCategories = vi.fn().mockRejectedValue(new Error('boom'));
+    await useAssetStore.getState().fetchAssets();
+    expect(useAssetStore.getState().status).toBe('error');
+
+    api.getAssetCategories = vi.fn().mockResolvedValue([makeCategory()]);
+    api.getAssets = vi.fn().mockResolvedValue([makeAsset()]);
+    await useAssetStore.getState().fetchAssets();
+
+    expect(useAssetStore.getState().status).toBe('ready');
+    expect(useAssetStore.getState().categories).toHaveLength(1);
   });
 });
 
@@ -237,9 +255,16 @@ describe('deleteAsset', () => {
 
 describe('reset', () => {
   it('empties everything, so a ledger switch cannot leave the previous household on screen', () => {
-    useAssetStore.setState({ categories: [makeCategory()], assets: [makeAsset()], loading: true });
+    useAssetStore.setState({
+      categories: [makeCategory()],
+      assets: [makeAsset()],
+      status: 'ready',
+    });
     useAssetStore.getState().reset();
-    expect(useAssetStore.getState()).toMatchObject({ categories: [], assets: [], loading: false });
+    // Back to 'idle', not 'ready': the next ledger's balance is unknown until
+    // its own fetch lands, and a stale 'ready' would let the dashboard render
+    // ¥0 as a figure during the switch.
+    expect(useAssetStore.getState()).toMatchObject({ categories: [], assets: [], status: 'idle' });
   });
 });
 

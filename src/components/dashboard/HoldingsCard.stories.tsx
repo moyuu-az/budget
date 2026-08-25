@@ -22,7 +22,7 @@ interface StoryArgs {
  * would show the previous story's state for a frame.
  */
 const seed = async ({ args }: { args: StoryArgs }): Promise<Record<string, never>> => {
-  useAssetStore.setState({ categories: args.categories, assets: args.assets, loading: false });
+  useAssetStore.setState({ categories: args.categories, assets: args.assets, status: 'ready' });
   useUIStore.setState({ holdingsView: args.view });
   return {};
 };

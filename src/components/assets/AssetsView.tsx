@@ -43,7 +43,7 @@ interface AssetDialogState {
 function AssetsView(): ReactElement {
   const categories = useAssetStore((s) => s.categories);
   const assets = useAssetStore((s) => s.assets);
-  const loading = useAssetStore((s) => s.loading);
+  const loading = useAssetStore((s) => s.status === 'loading');
   const addCategory = useAssetStore((s) => s.addCategory);
   const updateCategory = useAssetStore((s) => s.updateCategory);
   const deleteCategory = useAssetStore((s) => s.deleteCategory);

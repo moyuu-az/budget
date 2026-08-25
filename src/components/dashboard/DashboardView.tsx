@@ -4,7 +4,7 @@ import type { ForecastPeriod, ViewType } from '../../types';
 import { useMonthlyStore } from '../../stores/useMonthlyStore';
 import { useForecast } from '../../hooks/useForecast';
 import { toYearMonth, periodToDays, periodToMonths } from '../../utils/forecast';
-import { Skeleton } from '../ui/Skeleton';
+import { LoadGate } from './LoadGate';
 import ForecastChart from './ForecastChart';
 import KpiHero from './KpiHero';
 import HoldingsCard from './HoldingsCard';
@@ -30,10 +30,13 @@ function DashboardView({ onNavigate }: DashboardViewProps) {
     fetchMonthlyAmountsRange(startMonth, endMonth);
   }, [fetchMonthlyAmountsRange, forecastPeriod]);
 
-  // `ready` is false until the balance and the templates have both arrived. It
-  // is not cosmetic: with real expenses and a not-yet-loaded ¥0 balance, every
-  // figure below reads 残高不足 in red. See useForecast.
-  const { ready, points: forecast } = useForecast(periodToDays(forecastPeriod));
+  // Not 'ready' until the balance and the templates have both arrived, and it is
+  // not cosmetic: with real expenses and a not-yet-loaded ¥0 balance every
+  // figure below reads 残高不足 in red. EVERY panel fed by `forecast` has to go
+  // through LoadGate -- an ungated one shows its empty state, and the empty
+  // states here are positive claims ("nothing is coming up") rather than blanks.
+  // See useForecast.
+  const { status, points: forecast } = useForecast(periodToDays(forecastPeriod));
 
   const minimumPoint = useMemo(
     () => forecast.find((p) => p.isMinimum) ?? null,
@@ -64,7 +67,7 @@ function DashboardView({ onNavigate }: DashboardViewProps) {
       <HoldingsCard />
 
       {/* Forecast Chart - full width */}
-      {ready ? (
+      <LoadGate status={status} height={360} label="残高予測">
         <ForecastChart
           data={forecast}
           minimumPoint={minimumPoint}
@@ -72,17 +75,13 @@ function DashboardView({ onNavigate }: DashboardViewProps) {
           onPeriodChange={setForecastPeriod}
           onOpenAnalytics={onNavigate ? () => onNavigate('analytics') : undefined}
         />
-      ) : (
-        <Skeleton height={360} className="w-full" />
-      )}
+      </LoadGate>
 
       {/* MinBalanceCard (1/3) + SankeyChart (2/3) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {ready ? (
+        <LoadGate status={status} height={148} label="最低残高予測">
           <MinBalanceCard point={minimumPoint} daysUntil={daysUntilMinimum} />
-        ) : (
-          <Skeleton height={148} />
-        )}
+        </LoadGate>
         <div className="lg:col-span-2">
           <SankeyChart />
         </div>
@@ -94,7 +93,12 @@ function DashboardView({ onNavigate }: DashboardViewProps) {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, delay: 0.4 }}
       >
-        <UpcomingEvents events={forecast} />
+        {/* Gated like the rest: its empty state says 「14日以内の予定はありません」,
+            which an empty-because-not-loaded list turns into a false statement
+            about the user's month. */}
+        <LoadGate status={status} height={200} label="今後の予定">
+          <UpcomingEvents events={forecast} />
+        </LoadGate>
       </motion.div>
     </motion.div>
   );

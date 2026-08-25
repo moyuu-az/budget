@@ -122,10 +122,18 @@ BEGIN
 
     IF cash_id IS NULL THEN
       -- Ordered by holdings first: see the note above on duplicate 現金.
+      --
+      -- Then by VALUE, which decides the tie the row count cannot. Two
+      -- categories holding one row each are level on the first key, and picking
+      -- by sort_order there would make ¥100,000 the balance while ¥200,000 sat
+      -- beside it as an ordinary asset -- net worth right, forecast starting
+      -- from the smaller half. The count stays the first key because what B1
+      -- needed was "the one that holds anything at all".
       SELECT c.id INTO cash_id
         FROM asset_categories c
        WHERE c.ledger_id = led.id AND c.name = '現金'
        ORDER BY (SELECT count(*) FROM assets a WHERE a.category_id = c.id) DESC,
+                (SELECT coalesce(sum(a.value), 0) FROM assets a WHERE a.category_id = c.id) DESC,
                 c.sort_order,
                 c.id
        LIMIT 1;
@@ -146,6 +154,17 @@ BEGIN
         RETURNING id INTO cash_id;
     ELSE
       UPDATE asset_categories SET kind = 'cash', updated_at = now() WHERE id = cash_id;
+
+      -- Worth saying out loud: the ledger keeps a second category called 現金
+      -- that is now an ordinary asset. Nothing is lost and net worth is right,
+      -- but 現在の残高 no longer includes it, so the household will see the
+      -- balance drop unless someone merges the rows by hand.
+      IF (SELECT count(*) FROM asset_categories
+           WHERE ledger_id = led.id AND name = '現金') > 1 THEN
+        RAISE WARNING
+          'ledger %: more than one category is named 現金. The one holding the most was promoted; the rest are ordinary assets now.',
+          led.id;
+      END IF;
     END IF;
 
     -- 2. Does the old balance still need a home? ---------------------------
