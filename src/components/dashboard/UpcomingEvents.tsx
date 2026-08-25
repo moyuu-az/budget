@@ -146,7 +146,14 @@ function UpcomingEvents({ events }: UpcomingEventsProps) {
           return (
             <motion.li
               key={`${event.date}-${event.name}-${index}`}
-              className="flex items-center justify-between rounded-xl px-4 py-2.5 transition-colors hover:bg-white/5"
+              // Wraps below the breakpoint, like the entry rows.
+              //
+              // The fixed columns here add up to about 330px -- date, dot,
+              // amount, and the 112px balance -- which on a 375px screen leaves
+              // roughly 40px for the event's name. And unlike the entry rows the
+              // name is NOT truncated, so instead of being unreadable it pushes
+              // the row wider and the whole page scrolls sideways.
+              className="flex flex-wrap items-center justify-between gap-y-1 rounded-xl px-4 py-2.5 transition-colors hover:bg-white/5"
               style={{
                 background: isToday ? 'rgba(59, 130, 246, 0.08)' : 'transparent',
                 border: isToday && showDate ? '1px solid rgba(59, 130, 246, 0.15)' : '1px solid transparent',
@@ -155,22 +162,22 @@ function UpcomingEvents({ events }: UpcomingEventsProps) {
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.3, delay: index * 0.03 }}
             >
-              <div className="flex items-center gap-3">
-                <span className={`text-xs w-12 font-medium ${showDate ? (isToday ? 'text-blue-400' : isTomorrow ? 'text-blue-300/60' : 'text-slate-500') : 'text-transparent'}`}>
+              <div className="flex min-w-0 flex-1 items-center gap-3">
+                <span className={`shrink-0 text-xs w-12 font-medium ${showDate ? (isToday ? 'text-blue-400' : isTomorrow ? 'text-blue-300/60' : 'text-slate-500') : 'text-transparent'}`}>
                   {showDate ? label : ''}
                 </span>
                 <span
                   className="w-2.5 h-2.5 rounded-full flex-shrink-0"
                   style={{ backgroundColor: catColor }}
                 />
-                <span className="text-sm text-slate-300">{event.name}</span>
+                <span className="truncate text-sm text-slate-300">{event.name}</span>
                 {event.isToday && (
                   <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 font-medium">
                     反映済み
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex w-full items-center justify-end gap-4 sm:w-auto">
                 <span className={`text-sm font-medium tabular-nums ${isIncome ? 'text-emerald-400' : 'text-red-400'}`}>
                   {isIncome ? '+' : '-'}¥{event.amount.toLocaleString()}
                 </span>
