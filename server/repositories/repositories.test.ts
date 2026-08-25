@@ -4,6 +4,7 @@ import { withLedgerRepositories, type Repositories } from './index';
 import { buildSetClause } from './sql';
 import type { Recurrence } from '../../shared/recurrence';
 import { DEFAULT_LEDGER_SETTINGS } from '../../shared/ledger-settings';
+import { withLedgerScope } from '../db/ledger-scope';
 
 /** Shorthand for the shape almost every test template has. */
 const monthlyOn = (dayOfMonth: number): Recurrence => ({ kind: 'monthly', dayOfMonth });
@@ -223,6 +224,33 @@ describe('settings repository', () => {
 
     await inPrivate((r) => r.settings.update({ minBalanceThreshold: 30_000 }));
     expect(await inHousehold((r) => r.settings.get())).toEqual({ minBalanceThreshold: 120_000 });
+  });
+
+  it('cannot be written into another ledger, even with the row already there', async () => {
+    // The UPSERT is `ON CONFLICT (ledger_id, key) DO UPDATE`, and the read test
+    // above only proves the USING half of the policy. This proves the WITH CHECK
+    // half: a write aimed at another ledger has to be REFUSED, not merely
+    // invisible. Without it, one member of a shared household could quietly
+    // raise the other's warning threshold.
+    //
+    // The `ledger_id` a repository writes always comes from the same argument
+    // that opened its scope, so reaching this needs a hand-built statement --
+    // which is exactly what a future refactor could produce.
+    await inPrivate((r) => r.settings.update({ minBalanceThreshold: 30_000 }));
+
+    await expect(
+      withLedgerScope(db.pool, householdId, (client) =>
+        client.query(
+          `INSERT INTO settings (ledger_id, key, value, updated_at)
+             VALUES ($1, 'min_balance_threshold', '999', now())
+           ON CONFLICT (ledger_id, key) DO UPDATE SET value = excluded.value`,
+          [privateId],
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '42501' });
+
+    // And the other ledger's figure is untouched.
+    expect(await inPrivate((r) => r.settings.get())).toEqual({ minBalanceThreshold: 30_000 });
   });
 });
 
