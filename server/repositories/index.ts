@@ -10,6 +10,7 @@ import {
   createMonthlyActualRepository,
   type MonthlyActualRepository,
 } from './monthly-actual.repository';
+import { createSettingsRepository, type SettingsRepository } from './settings.repository';
 import { createSnapshotRepository, type SnapshotRepository } from './snapshot.repository';
 import {
   createAssetCategoryRepository,
@@ -18,6 +19,7 @@ import {
 import { createAssetRepository, type AssetRepository } from './asset.repository';
 
 export interface Repositories {
+  settings: SettingsRepository;
   category: CategoryRepository;
   template: TemplateRepository;
   monthlyAmount: MonthlyAmountRepository;
@@ -58,6 +60,7 @@ export interface Repositories {
  */
 export function createRepositories(client: PoolClient, ledgerId: number): Repositories {
   return {
+    settings: createSettingsRepository(client, ledgerId),
     category: createCategoryRepository(client, ledgerId),
     template: createTemplateRepository(client, ledgerId),
     monthlyAmount: createMonthlyAmountRepository(client, ledgerId),

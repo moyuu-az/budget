@@ -2,6 +2,8 @@ import { memo } from 'react';
 import { motion } from 'framer-motion';
 import CountUp from 'react-countup';
 import type { ForecastPoint } from '../../types';
+import { balanceTone } from '../../utils/runway';
+import { useMinBalanceThreshold } from '../../stores/useSettingsStore';
 
 interface MinBalanceCardProps {
   point: ForecastPoint | null;
@@ -9,6 +11,10 @@ interface MinBalanceCardProps {
 }
 
 function MinBalanceCard({ point, daysUntil }: MinBalanceCardProps) {
+  // Read before the early return: hooks cannot be called conditionally, and the
+  // "no data" branch below is a legitimate render of this component.
+  const minBalanceThreshold = useMinBalanceThreshold();
+
   if (!point) {
     return (
       <motion.div
@@ -23,11 +29,12 @@ function MinBalanceCard({ point, daysUntil }: MinBalanceCardProps) {
     );
   }
 
-  const colorKey = point.balance < 0
-    ? 'red'
-    : point.balance < 50000
-      ? 'amber'
-      : 'green';
+  // The SAME judgement the KPI badge and the chart's dot make. This held its own
+  // copy of `50000`, so making the floor configurable moved one of the three and
+  // left this one green while the KPI row above said 「注意」.
+  const colorKey = ({ danger: 'red', warning: 'amber', safe: 'green' } as const)[
+    balanceTone(point.balance, minBalanceThreshold)
+  ];
 
   const colorMap = {
     red: {

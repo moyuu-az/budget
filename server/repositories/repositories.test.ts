@@ -3,6 +3,8 @@ import { startTestDb, resetDb, createLedger, raw, type TestDb } from '../test/pg
 import { withLedgerRepositories, type Repositories } from './index';
 import { buildSetClause } from './sql';
 import type { Recurrence } from '../../shared/recurrence';
+import { DEFAULT_LEDGER_SETTINGS } from '../../shared/ledger-settings';
+import { withLedgerScope } from '../db/ledger-scope';
 
 /** Shorthand for the shape almost every test template has. */
 const monthlyOn = (dayOfMonth: number): Recurrence => ({ kind: 'monthly', dayOfMonth });
@@ -163,6 +165,92 @@ describe('category repository', () => {
     const [template] = await inHousehold((r) => r.template.getAll());
     expect(template.id).toBe(templateId);
     expect(template.categoryId).toBeNull();
+  });
+});
+
+describe('settings repository', () => {
+  // -------------------------------------------------------------------------
+  // The `settings` table has existed since migration 001 and lost its only key
+  // in 004, when the balance became the sum of the cash holdings. These tests
+  // are about the shape that gives it a reader again -- and about the one thing
+  // a key/value table makes easy to get wrong: what a MISSING row means.
+  // -------------------------------------------------------------------------
+  it('answers with the defaults for a ledger that has configured nothing', async () => {
+    // Not null, not an empty object. A caller deciding for itself what absence
+    // means is a caller that will decide differently from the next one.
+    expect(await inHousehold((r) => r.settings.get())).toEqual(DEFAULT_LEDGER_SETTINGS);
+  });
+
+  it('round-trips a stored value', async () => {
+    await inHousehold((r) => r.settings.update({ minBalanceThreshold: 120_000 }));
+    expect(await inHousehold((r) => r.settings.get())).toEqual({ minBalanceThreshold: 120_000 });
+  });
+
+  it('answers with what was STORED, not with what was asked for', async () => {
+    // The parser clamps. A form shown the figure it requested rather than the
+    // one that was kept would silently change on the next reload.
+    const stored = await inHousehold((r) => r.settings.update({ minBalanceThreshold: -5 }));
+    expect(stored.minBalanceThreshold).toBe(0);
+    expect(await inHousehold((r) => r.settings.get())).toEqual(stored);
+  });
+
+  it('accepts zero, which means "warn me only if I would go negative"', async () => {
+    // A legitimate setting, and one a naive falsy check would drop.
+    await inHousehold((r) => r.settings.update({ minBalanceThreshold: 0 }));
+    expect(await inHousehold((r) => r.settings.get())).toEqual({ minBalanceThreshold: 0 });
+  });
+
+  it('leaves a setting alone when the patch omits it', async () => {
+    await inHousehold((r) => r.settings.update({ minBalanceThreshold: 120_000 }));
+    await inHousehold((r) => r.settings.update({}));
+    expect(await inHousehold((r) => r.settings.get())).toEqual({ minBalanceThreshold: 120_000 });
+  });
+
+  it('falls back to the default for a value written around the schema', async () => {
+    // The column is TEXT. A hand-edited row must not take the dashboard down
+    // over a comfort threshold -- a household would lose its balance forecast
+    // because a preference is malformed.
+    await raw(
+      db.adminPool,
+      "INSERT INTO settings (ledger_id, key, value) VALUES ($1, 'min_balance_threshold', 'nonsense')",
+      [householdId],
+    );
+    expect(await inHousehold((r) => r.settings.get())).toEqual(DEFAULT_LEDGER_SETTINGS);
+  });
+
+  it('keeps each ledger’s settings to itself', async () => {
+    await inHousehold((r) => r.settings.update({ minBalanceThreshold: 120_000 }));
+    expect(await inPrivate((r) => r.settings.get())).toEqual(DEFAULT_LEDGER_SETTINGS);
+
+    await inPrivate((r) => r.settings.update({ minBalanceThreshold: 30_000 }));
+    expect(await inHousehold((r) => r.settings.get())).toEqual({ minBalanceThreshold: 120_000 });
+  });
+
+  it('cannot be written into another ledger, even with the row already there', async () => {
+    // The UPSERT is `ON CONFLICT (ledger_id, key) DO UPDATE`, and the read test
+    // above only proves the USING half of the policy. This proves the WITH CHECK
+    // half: a write aimed at another ledger has to be REFUSED, not merely
+    // invisible. Without it, one member of a shared household could quietly
+    // raise the other's warning threshold.
+    //
+    // The `ledger_id` a repository writes always comes from the same argument
+    // that opened its scope, so reaching this needs a hand-built statement --
+    // which is exactly what a future refactor could produce.
+    await inPrivate((r) => r.settings.update({ minBalanceThreshold: 30_000 }));
+
+    await expect(
+      withLedgerScope(db.pool, householdId, (client) =>
+        client.query(
+          `INSERT INTO settings (ledger_id, key, value, updated_at)
+             VALUES ($1, 'min_balance_threshold', '999', now())
+           ON CONFLICT (ledger_id, key) DO UPDATE SET value = excluded.value`,
+          [privateId],
+        ),
+      ),
+    ).rejects.toMatchObject({ code: '42501' });
+
+    // And the other ledger's figure is untouched.
+    expect(await inPrivate((r) => r.settings.get())).toEqual({ minBalanceThreshold: 30_000 });
   });
 });
 

@@ -112,16 +112,31 @@ function EntriesView() {
       addToast('リセットする月別金額はありません', 'info');
       return;
     }
-    try {
-      const promises = Array.from(monthMap.keys()).map((templateId) =>
-        deleteMonthlyAmount(templateId, currentYearMonth)
-      );
-      await Promise.all(promises);
+    // Every result is collected, not just "did any throw".
+    //
+    // The store swallows its own failures (reportError has already raised the
+    // toast), so a try/catch here could never run -- 「リセットしました」 would
+    // fire even when half the deletes failed. And a partial failure is the
+    // likely one: these run concurrently, and one refusal does not stop the
+    // rest.
+    const results = await Promise.all(
+      Array.from(monthMap.keys()).map((templateId) =>
+        deleteMonthlyAmount(templateId, currentYearMonth),
+      ),
+    );
+
+    if (results.every(Boolean)) {
       addToast('デフォルト金額にリセットしました', 'success');
-    } catch {
-      addToast('リセットに失敗しました', 'error');
+      return;
     }
-  }, [currentYearMonth, monthlyAmountsMap, deleteMonthlyAmount, addToast]);
+
+    // Some rows are reset and some are not, and which is which is only knowable
+    // from the server. Re-reading the month is what stops the screen from
+    // disagreeing with storage; reportError has already said that something
+    // failed, so this only has to say what state things are now in.
+    await fetchMonthlyAmounts(currentYearMonth);
+    addToast('一部の金額をリセットできませんでした', 'error');
+  }, [currentYearMonth, monthlyAmountsMap, deleteMonthlyAmount, fetchMonthlyAmounts, addToast]);
 
   return (
     <motion.div

@@ -3,6 +3,8 @@ import type { ViewType } from '../../types';
 import { Card } from '../ui/Card';
 import CashBalance from '../sidebar/CashBalance';
 import CategoryManager from './CategoryManager';
+import MinBalanceSetting from './MinBalanceSetting';
+import { useSessionStore } from '../../stores/useSessionStore';
 
 interface Props {
   /** Lets the balance card send the user to 資産, where the figure is edited. */
@@ -10,6 +12,16 @@ interface Props {
 }
 
 function SettingsView({ onNavigate }: Props) {
+  // Keyed by ledger so switching REMOUNTS the form, discarding whatever was
+  // half-typed into it.
+  //
+  // Without this, editing ledger A's floor and switching to B before saving
+  // leaves the draft in place: the form is hidden while B loads, comes back
+  // holding A's number, and pressing 保存 writes it to B under B's header.
+  // Clearing the draft from an effect would work and would also be one more
+  // thing to remember for the next field added here; a key cannot be forgotten.
+  const activeLedgerId = useSessionStore((s) => s.activeLedgerId);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -24,6 +36,10 @@ function SettingsView({ onNavigate }: Props) {
               the holdings the figure is made of. */}
           <CashBalance onEdit={onNavigate ? () => onNavigate('assets') : undefined} />
         </Card>
+        {/* Beside the balance on purpose: the floor is a statement ABOUT that
+            figure, and reading them together is how someone decides what the
+            floor should be. */}
+        <MinBalanceSetting key={activeLedgerId ?? 'none'} />
         <CategoryManager />
       </div>
     </motion.div>

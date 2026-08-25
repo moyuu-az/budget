@@ -14,6 +14,9 @@ import {
 import type { ForecastPoint, ForecastPeriod } from '../../types';
 import { formatYAxisTick, formatXAxis } from '../../utils/forecast';
 import { Tabs, type TabItem } from '../ui/Tabs';
+import { useMinBalanceThreshold } from '../../stores/useSettingsStore';
+import { balanceTone } from '../../utils/runway';
+import { formatYen } from '../../utils/currency';
 
 interface ForecastChartProps {
   data: ForecastPoint[];
@@ -77,18 +80,24 @@ function getXAxisInterval(period: ForecastPeriod): number {
 
 function ForecastChart({ data, minimumPoint, period, onPeriodChange, onOpenAnalytics }: ForecastChartProps) {
   const todayPoint = data.find((p) => p.isToday) ?? null;
+  const minBalanceThreshold = useMinBalanceThreshold();
 
-  const minBalance = Math.min(...data.map((d) => d.balance));
-  const maxBalance = Math.max(...data.map((d) => d.balance));
+  // The floor is part of the range on purpose. A projection that never comes
+  // near it would otherwise scale the y-axis so the line sits off-chart -- and a
+  // threshold you cannot see is one you cannot check the line against, which is
+  // the only reason to draw it.
+  const minBalance = Math.min(...data.map((d) => d.balance), minBalanceThreshold);
+  const maxBalance = Math.max(...data.map((d) => d.balance), minBalanceThreshold);
   const padding = (maxBalance - minBalance) * 0.1 || 10000;
 
+  // The SAME judgement the KPI badge makes. It used to be a second copy of
+  // `50000` here, so a ledger with a 300,000 floor saw 「注意」 in the KPI row
+  // and a green dot on this chart directly below it -- two answers to one
+  // question, on one screen.
+  const DOT_COLOR = { danger: '#ef4444', warning: '#f59e0b', safe: '#22c55e' } as const;
   const dotColor = minimumPoint
-    ? minimumPoint.balance < 0
-      ? '#ef4444'
-      : minimumPoint.balance < 50000
-        ? '#f59e0b'
-        : '#22c55e'
-    : '#22c55e';
+    ? DOT_COLOR[balanceTone(minimumPoint.balance, minBalanceThreshold)]
+    : DOT_COLOR.safe;
 
   return (
     <motion.div
@@ -175,6 +184,30 @@ function ForecastChart({ data, minimumPoint, period, onPeriodChange, onOpenAnaly
               filter: 'url(#glow)',
             }}
           />
+          {/* THE HOUSEHOLD'S FLOOR, drawn.
+              
+              Everything the dashboard calls 安全/注意 is measured against this
+              figure, and until it was drawn here the household had to hold it in
+              their head while reading the line. With it, the question 「いつ
+              割るのか」 is answered by looking rather than by arithmetic -- which
+              is the whole reason a chart beats a table.
+              
+              Hidden at 0: a line along the axis is not a threshold, it is the
+              axis, and drawing it would suggest a setting nobody made. */}
+          {minBalanceThreshold > 0 && (
+            <ReferenceLine
+              y={minBalanceThreshold}
+              stroke="var(--color-semantic-warning)"
+              strokeDasharray="6 4"
+              strokeOpacity={0.7}
+              label={{
+                value: `最低残高 ${formatYen(minBalanceThreshold)}`,
+                position: 'insideTopLeft',
+                fill: 'var(--color-semantic-warning)',
+                fontSize: 11,
+              }}
+            />
+          )}
           {/* Today's vertical dashed line */}
           {todayPoint && (
             <ReferenceLine

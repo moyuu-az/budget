@@ -4,9 +4,11 @@
 
 import type { AssetFieldDef, AssetFieldValues } from './asset-fields';
 import type { Recurrence } from './recurrence';
+import type { LedgerSettings } from './ledger-settings';
 
 export type { AssetFieldDef, AssetFieldType, AssetFieldValue, AssetFieldValues } from './asset-fields';
 export type { Recurrence, RecurrenceKind, YearMonth, IsoDate } from './recurrence';
+export type { LedgerSettings } from './ledger-settings';
 
 // --- Category ---
 
@@ -256,6 +258,24 @@ export interface AppApi {
   // the cash category's holdings (see the Assets note above), so a method
   // returning it would be a second source for a figure that already has one --
   // and a method setting it would have no way to say WHICH holding changed.
+  /**
+   * What this ledger has configured.
+   *
+   * ALWAYS COMPLETE. A ledger that has never opened the settings screen gets the
+   * defaults, so no caller has to decide what a missing value means -- that
+   * decision lives once, in shared/ledger-settings.ts.
+   */
+  getLedgerSettings(): Promise<LedgerSettings>;
+
+  /**
+   * Applies a patch and answers with the FULL settings as STORED.
+   *
+   * Returning the stored value rather than the patch matters: the parser clamps
+   * out-of-range figures, and a form showing what it asked for instead of what
+   * was kept would silently change on the next reload.
+   */
+  updateLedgerSettings(patch: Partial<LedgerSettings>): Promise<LedgerSettings>;
+
   getCategories(): Promise<Category[]>;
   addCategory(category: CategoryInput): Promise<Category>;
   updateCategory(id: number, category: Partial<CategoryInput>): Promise<void>;

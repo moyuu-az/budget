@@ -4,6 +4,8 @@ import { useSnapshotStore } from '../stores/useSnapshotStore';
 import { useMonthlyStore } from '../stores/useMonthlyStore';
 import { useSessionStore } from '../stores/useSessionStore';
 import { useAssetStore } from '../stores/useAssetStore';
+import { useSettingsStore } from '../stores/useSettingsStore';
+import { invalidateInFlight } from './ledger-generation';
 
 // ---------------------------------------------------------------------------
 // Everything that has to happen when the active ledger changes.
@@ -25,9 +27,15 @@ const LEDGER_SCOPED_STORES: readonly { getState(): { reset(): void } }[] = [
   useSnapshotStore,
   useMonthlyStore,
   useAssetStore,
+  useSettingsStore,
 ];
 
 export function resetLedgerData(): void {
+  // Clearing what has ARRIVED and disowning what has NOT are two halves of the
+  // same act. Doing only the first leaves the previous ledger's in-flight
+  // responses free to land in the emptied stores, which is a household budget
+  // showing another household's figures under the right household's name.
+  invalidateInFlight();
   for (const store of LEDGER_SCOPED_STORES) store.getState().reset();
 }
 
@@ -48,6 +56,11 @@ export async function loadLedgerData(): Promise<void> {
     // headline figure and the forecast its starting point. If it is ever made
     // lazy, the balance goes with it.
     useAssetStore.getState().fetchAssets(),
+    // The floor every 安全/注意 judgement is measured against, and the figure
+    // 使っていい額 is what is left above. It has a usable default, so nothing
+    // waits on it -- but a ledger that raised its floor must not be told
+    // 「安全」 against the application's default for a round trip.
+    useSettingsStore.getState().fetchSettings(),
   ]);
 }
 

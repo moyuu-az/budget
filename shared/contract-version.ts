@@ -31,16 +31,28 @@
 //
 // WHEN TO BUMP IT
 //   Whenever an existing field changes shape or disappears from `AppApi` or the
-//   types it references. NOT for a purely additive change: an old client
-//   ignoring a new field is fine, and bumping for those would force a reload on
-//   every deploy.
+//   types it references.
+//
+//   AND WHENEVER A METHOD THE CLIENT REQUIRES IS ADDED. This one is easy to miss
+//   because it LOOKS additive -- nothing existing changed. It is not: the new
+//   bundle calls a method the old server has never heard of, and that server
+//   answers 404 while stamping the version it does know. The stamp matches, the
+//   skew goes undetected, and the client reports the failure as an ordinary
+//   error -- which for `getLedgerSettings` stops the whole dashboard, because
+//   its readiness depends on it.
+//
+//   NOT for a field added to a response, or a method the client can work without.
+//   An old client ignoring a new field is fine, and bumping for those would force
+//   a reload on every deploy.
 //
 //   HISTORY
 //     1 -- the contract as of migration 004 (cash is an asset).
 //     2 -- migration 005: EntryTemplate.dayOfMonth -> EntryTemplate.recurrence.
+//     3 -- getLedgerSettings / updateLedgerSettings added, and the dashboard
+//          cannot render its judgements without the first of them.
 // ---------------------------------------------------------------------------
 
-export const CONTRACT_VERSION = 2;
+export const CONTRACT_VERSION = 3;
 
 /**
  * Lower-cased because Hono's `c.req.header()` matches case-insensitively but the
