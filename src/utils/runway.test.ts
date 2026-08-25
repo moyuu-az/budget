@@ -105,6 +105,19 @@ describe('safeToSpend', () => {
     expect(result.horizonDays).toBe(2);
   });
 
+  it('lets a later income raise the answer, because the dip is what bounds it', () => {
+    // Not blindly conservative: a projection that recovers is allowed to.
+    // 300,000 today, a 250,000 dip, then income. The dip is the bound.
+    const points = projection(
+      300_000,
+      [250_000, [{ name: '家賃', amount: 50_000, type: 'expense' }]],
+      [650_000, [{ name: '給料', amount: 400_000, type: 'income' }]],
+      [600_000, [{ name: '家賃', amount: 50_000, type: 'expense' }]],
+    );
+
+    expect(safeToSpend(points, 50_000).amount).toBe(200_000);
+  });
+
   it('uses the MINIMUM over the window, not the balance on payday', () => {
     // The dip matters. A household paid on the 25th with rent due on the 27th
     // has a low point between; an allowance computed from the payday balance
@@ -133,9 +146,9 @@ describe('safeToSpend', () => {
     expect(result.shortfall).toBe(12_000);
   });
 
-  it('covers the whole projection when no income is expected', () => {
-    // A household with no recorded income still deserves an answer -- it just
-    // means something different, and `until: null` is what says so.
+  it('reports the window it looked at, so the figure can be checked', () => {
+    // 「90日先まで見て」 is what makes the allowance a claim someone can verify
+    // rather than a number from nowhere.
     const points = projection(200_000, [190_000], [180_000]);
 
     const result = safeToSpend(points, 50_000);
@@ -158,17 +171,49 @@ describe('safeToSpend', () => {
     });
   });
 
-  it('does not look past the next income', () => {
-    // A large expense AFTER payday is not this question's business; it belongs to
-    // the next window. Including it would make the allowance shrink for a bill
-    // the next salary is there to cover.
+  it('DOES look past the next income, because the income may not cover what follows', () => {
+    // The first version of this function stopped at the next income, reasoning
+    // that a later expense "belongs to the next window and the salary is there
+    // to cover it". That holds only when the salary actually does.
+    //
+    // Here it does not: 300,000 today, 200,000 in, 400,000 out. Bounding at the
+    // income answered 250,000 -- and spending it lands the household at
+    // -150,000 two days later, on a payment this application already knew
+    // about. An allowance the app's own figures contradict is worse than none.
     const points = projection(
       300_000,
       [500_000, [{ name: '給料', amount: 200_000, type: 'income' }]],
       [100_000, [{ name: '車検', amount: 400_000, type: 'expense' }]],
     );
 
-    expect(safeToSpend(points, 50_000).amount).toBe(250_000);
+    // The projection's low point is 100,000; the floor is 50,000.
+    expect(safeToSpend(points, 50_000).amount).toBe(50_000);
+  });
+
+  it('still names the next income, as context rather than as a boundary', () => {
+    const points = projection(
+      300_000,
+      [500_000, [{ name: '給料', amount: 200_000, type: 'income' }]],
+      [100_000, [{ name: '車検', amount: 400_000, type: 'expense' }]],
+    );
+
+    expect(safeToSpend(points, 50_000).until).toMatchObject({ names: ['給料'] });
+  });
+
+  it('is a figure the projection itself cannot contradict', () => {
+    // The property the whole function has to have: spend the allowance today and
+    // no projected day falls below the floor.
+    const points = projection(
+      300_000,
+      [280_000, [{ name: '光熱費', amount: 20_000, type: 'expense' }]],
+      [480_000, [{ name: '給料', amount: 200_000, type: 'income' }]],
+      [80_000, [{ name: '車検', amount: 400_000, type: 'expense' }]],
+    );
+
+    const { amount } = safeToSpend(points, 50_000);
+    for (const point of points) {
+      expect(point.balance - amount).toBeGreaterThanOrEqual(50_000);
+    }
   });
 });
 

@@ -68,13 +68,11 @@ export interface SafeToSpend {
   /** Null when no income is projected in the window; see `horizonDays`. */
   until: NextIncome | null;
   /**
-   * The window the answer covers, in days.
+   * The window the answer covers, in days: the whole projection.
    *
-   * Equal to `until.daysUntil` when there is a next income. When there is NOT --
-   * a household with no recorded income, or a projection that ends first -- it is
-   * the length of the projection, and the answer means "for the rest of what is
-   * projected" rather than "until payday". A caller must say which; the two read
-   * identically as a number and mean very different things.
+   * Kept in the result rather than assumed by callers, because it is the honest
+   * qualifier on the figure -- 「90日先まで見て」 is what makes 使っていい額 a
+   * claim someone can check rather than a number from nowhere.
    */
   horizonDays: number;
 }
@@ -141,31 +139,38 @@ export function nextIncome(points: readonly ForecastPoint[]): NextIncome | null 
  *   would produce an allowance that, if spent, lands exactly on the warning the
  *   rest of the dashboard is about to raise.
  *
- * WHY IT USES THE PROJECTED MINIMUM RATHER THAN THE END BALANCE
- *   The committed expenses do not all land on the last day. A household paid on
- *   the 25th with rent due on the 27th has a dip in between, and an allowance
- *   computed from the balance on the 25th would fund a month whose rent has not
- *   left yet. The minimum over the window is the only figure that survives every
- *   day in it.
+ * WHY IT USES THE PROJECTED MINIMUM OVER THE WHOLE PROJECTION
+ *   Spending money today lowers EVERY later point by the same amount. So the
+ *   most that can be spent without ever breaching the floor is exactly the
+ *   lowest the projection gets, minus the floor. Nothing else is safe, and
+ *   nothing less is necessary.
+ *
+ *   THE FIRST VERSION OF THIS STOPPED AT THE NEXT INCOME, AND THAT WAS WRONG.
+ *   The reasoning was that an expense after payday "belongs to the next window,
+ *   and the salary is there to cover it" -- which holds only when the salary
+ *   actually does cover it. It frequently does not: 300,000 today, 200,000 in
+ *   on the 25th, 400,000 out on the 27th. Bounding at the income answered
+ *   250,000; spending it lands the household at -150,000 two days later, on a
+ *   payment this application already knew about.
+ *
+ *   An allowance that the app's own figures contradict is worse than no
+ *   allowance. The window is the projection.
  */
 export function safeToSpend(
   points: readonly ForecastPoint[],
   threshold: MinBalanceThreshold,
 ): SafeToSpend {
-  const income = nextIncome(points);
-  // Without a next income the answer covers whatever is projected. `points` is
-  // empty only when the forecast is not ready, and callers gate on that -- but
-  // the guard keeps this function total rather than reading points[0] of [].
-  const horizonDays = income?.daysUntil ?? Math.max(points.length - 1, 0);
+  // `points` is empty only when the forecast is not ready, and callers gate on
+  // that -- but the guard keeps this function total rather than reading
+  // points[0] of [].
   if (points.length === 0) {
     return { amount: 0, shortfall: 0, until: null, horizonDays: 0 };
   }
 
-  // The lowest the balance gets at any point in the window, today included:
-  // today's balance is itself a candidate, and for a household with no expenses
-  // before payday it is the answer.
+  // The lowest the projection gets, today included: today's balance is itself a
+  // candidate, and for a household with nothing scheduled it is the answer.
   let low = points[0].balance;
-  for (let i = 1; i <= horizonDays && i < points.length; i++) {
+  for (let i = 1; i < points.length; i++) {
     if (points[i].balance < low) low = points[i].balance;
   }
 
@@ -173,8 +178,10 @@ export function safeToSpend(
   return {
     amount: Math.max(free, 0),
     shortfall: Math.max(-free, 0),
-    until: income,
-    horizonDays,
+    // Context for the caption, NOT a boundary on the figure above -- see the
+    // note on why bounding at it was wrong.
+    until: nextIncome(points),
+    horizonDays: points.length - 1,
   };
 }
 

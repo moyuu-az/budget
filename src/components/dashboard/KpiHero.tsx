@@ -78,8 +78,12 @@ function KpiHero(): ReactElement {
   //
   // What is left answers, in order: what may I spend, how long have I got, how
   // bad does it get, and what is the next big thing.
+  // The caption names the WINDOW, because that is what makes the figure
+  // checkable, and mentions the next income as context. It used to say only the
+  // income, back when the income also bounded the calculation -- which was the
+  // bug: an expense the income could not cover was simply ignored.
   const safeCaption = safeToSpend.until
-    ? `${safeToSpend.until.names[0]}まであと${safeToSpend.until.daysUntil}日`
+    ? `今後${safeToSpend.horizonDays}日の予定を差し引いた額・次の${safeToSpend.until.names[0]}まであと${safeToSpend.until.daysUntil}日`
     : `今後${safeToSpend.horizonDays}日の予定を差し引いた額`;
 
   return (
