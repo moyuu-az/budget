@@ -313,12 +313,33 @@ describe('the range constraints', () => {
 });
 
 describe('the index', () => {
-  it('no longer names a column that is NULL for one-offs', async () => {
+  it('is left exactly as migration 001 created it', async () => {
+    // Asserted rather than assumed. The migration deliberately does NOT rebuild
+    // it -- a btree indexes NULLs fine, so the only thing a rebuild would buy is
+    // tidiness, at the price of an ACCESS EXCLUSIVE lock taken on a live table
+    // immediately before a deploy. A future edit that "fixes" the index should
+    // have to delete this test and read the reasoning above it first.
     const { rows } = await db.adminPool.query<{ indexdef: string }>(
       "SELECT indexdef FROM pg_indexes WHERE indexname = 'entry_templates_ledger_idx'",
     );
     expect(rows).toHaveLength(1);
-    expect(rows[0].indexdef).toContain('recurrence_kind');
-    expect(rows[0].indexdef).not.toContain('day_of_month');
+    expect(rows[0].indexdef).toContain('sort_order');
+    expect(rows[0].indexdef).toContain('day_of_month');
+  });
+
+  it('still indexes a one-off, whose day_of_month is NULL', async () => {
+    // The concern that prompted the rebuild, checked directly: a NULL in an
+    // indexed column does not make the row unindexable, and the row is still
+    // returned by an ordinary read.
+    await db.adminPool.query(
+      `INSERT INTO entry_templates (ledger_id, name, type, default_amount, recurrence_kind, on_date)
+         VALUES ($1, 'indexed one-off', 'expense', 0, 'once', DATE '2026-11-20')`,
+      [ledgerId],
+    );
+    const { rows } = await db.adminPool.query(
+      "SELECT 1 FROM entry_templates WHERE ledger_id = $1 AND name = 'indexed one-off'",
+      [ledgerId],
+    );
+    expect(rows).toHaveLength(1);
   });
 });

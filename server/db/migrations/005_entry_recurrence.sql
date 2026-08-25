@@ -161,13 +161,25 @@ ALTER TABLE entry_templates
   CHECK (anchor_month IS NULL OR anchor_month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$');
 
 -- ---------------------------------------------------------------------------
--- The index that scoped reads by (ledger, sort, day) named day_of_month, which
--- is now NULL for one-offs. Rebuilt on recurrence_kind so the ordering the
--- repository asks for is still covered, and so it stays defined for every row.
+-- entry_templates_ledger_idx (ledger_id, sort_order, day_of_month) IS LEFT
+-- ALONE, deliberately.
+--
+-- The first instinct was to rebuild it: day_of_month is now NULL for one-offs,
+-- and an index naming a column that is sometimes absent looks wrong. It is not.
+-- A btree indexes NULLs like any other value, so the index stays valid and its
+-- (ledger_id, sort_order) prefix -- the part that actually serves the
+-- repository's read -- is unaffected.
+--
+-- Rebuilding would have cost something real for that cosmetic tidiness: DROP
+-- INDEX takes an ACCESS EXCLUSIVE lock on the table, and this migration runs
+-- against a live production database immediately before a deploy. Taking a lock
+-- to change an index no query's plan depends on is risk with no return.
+--
+-- (The third column does not serve the ORDER BY either way. getAll() orders by
+-- COALESCE(day_of_month, day of on_date), which no plain-column index can
+-- satisfy -- so if this ever becomes a measured problem, the answer is an
+-- expression index, not a reshuffle of these three columns.)
 -- ---------------------------------------------------------------------------
-DROP INDEX IF EXISTS entry_templates_ledger_idx;
-CREATE INDEX IF NOT EXISTS entry_templates_ledger_idx
-  ON entry_templates (ledger_id, sort_order, recurrence_kind);
 
 -- ---------------------------------------------------------------------------
 -- Verification.
