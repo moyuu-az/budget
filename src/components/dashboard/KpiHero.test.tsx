@@ -5,6 +5,7 @@ import { setApi } from '../../lib/api';
 import { createMockApi } from '../../test/mock-api';
 import { useAssetStore } from '../../stores/useAssetStore';
 import { useTemplateStore } from '../../stores/useTemplateStore';
+import { useSettingsStore } from '../../stores/useSettingsStore';
 import { makeCashAsset, makeCashCategory, monthlyOn } from '../../test/factories';
 import type { EntryTemplate } from '../../types';
 
@@ -37,6 +38,7 @@ beforeEach(() => {
   // that produced the false alarm.
   useTemplateStore.setState({ templates: [rent], status: 'ready' });
   useAssetStore.setState({ categories: [], assets: [], status: 'idle' });
+  useSettingsStore.setState({ settings: { minBalanceThreshold: 50_000 }, status: 'ready' });
 });
 
 afterEach(() => {
@@ -86,11 +88,83 @@ describe('once the balance lands', () => {
 
     render(<KpiHero />);
 
-    expect(screen.getByText('最小残高(90日)')).toBeInTheDocument();
-    // 3,000,000 against 120,000/month of rent: comfortably safe, and nowhere
-    // near the 残高不足 the same templates produced against an unloaded balance.
-    expect(screen.getByText('安全')).toBeInTheDocument();
+    // Scoped to the card, because 安全 is now a badge on two of them -- 最小残高
+    // and 残高がもつ期間 both say it when there is nothing to warn about.
+    const minCard = screen.getByText('最小残高(90日)').closest('div')!.parentElement!;
+    expect(minCard).toHaveTextContent('安全');
     expect(screen.queryByText('残高不足')).not.toBeInTheDocument();
+  });
+
+  it('says what is free to spend, and when the next income arrives', () => {
+    // The figure this row was missing. 「90日後の最小残高」 is true and
+    // unactionable; this is the same projection asked as a question the
+    // household can answer today.
+    useAssetStore.setState({
+      categories: [makeCashCategory()],
+      assets: [makeCashAsset({ value: 3_000_000 })],
+      status: 'ready',
+    });
+    useTemplateStore.setState({
+      templates: [
+        rent,
+        {
+          ...rent, id: 2, name: '給料', type: 'income',
+          recurrence: monthlyOn(25), defaultAmount: 400_000,
+        },
+      ],
+      status: 'ready',
+    });
+
+    render(<KpiHero />);
+
+    expect(screen.getByText('使っていい額')).toBeInTheDocument();
+    expect(screen.getByText(/給料まであと\d+日/)).toBeInTheDocument();
+  });
+
+  it('reports a SHORTFALL rather than a negative allowance', () => {
+    // 「-¥12,000 使えます」 is not a sentence.
+    useAssetStore.setState({
+      categories: [makeCashCategory()],
+      assets: [makeCashAsset({ value: 55_000 })],
+      status: 'ready',
+    });
+
+    render(<KpiHero />);
+
+    expect(screen.getByText('不足額')).toBeInTheDocument();
+    expect(screen.queryByText('使っていい額')).not.toBeInTheDocument();
+  });
+
+  it('measures 安全/注意 against the HOUSEHOLD’s floor, not a constant', () => {
+    // 50,000 was hard-coded here, which made 「安全」 mean the same thing for
+    // every household -- and nothing on screen said where it came from.
+    useAssetStore.setState({
+      categories: [makeCashCategory()],
+      assets: [makeCashAsset({ value: 3_000_000 })],
+      status: 'ready',
+    });
+    // A household that wants to keep three million on hand is NOT safe at
+    // 3,000,000 minus a month of rent.
+    useSettingsStore.setState({ settings: { minBalanceThreshold: 3_000_000 }, status: 'ready' });
+
+    render(<KpiHero />);
+
+    const minCard = screen.getByText('最小残高(90日)').closest('div')!.parentElement!;
+    expect(minCard).toHaveTextContent('注意');
+  });
+
+  it('says 90日以上 rather than claiming the balance never runs out', () => {
+    // Null from `runway` means "not within the window this KPI looks at". Saying
+    // 「割りません」 would be a claim the projection cannot support.
+    useAssetStore.setState({
+      categories: [makeCashCategory()],
+      assets: [makeCashAsset({ value: 10_000_000 })],
+      status: 'ready',
+    });
+
+    render(<KpiHero />);
+
+    expect(screen.getByText('90日以上')).toBeInTheDocument();
   });
 
   it('does raise the warning when the balance really is too low', () => {

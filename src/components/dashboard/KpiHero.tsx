@@ -4,7 +4,7 @@ import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { LoadGate } from '../ui/LoadGate';
 import { useDashboardKpis } from '../../hooks/useDashboardKpis';
-import { formatYen, formatSignedYen } from '../../utils/currency';
+import { formatYen } from '../../utils/currency';
 
 interface KpiCardProps {
   label: string;
@@ -39,11 +39,12 @@ function KpiCard({ label, value, caption, badge, delay }: KpiCardProps): ReactEl
 
 function KpiHero(): ReactElement {
   const {
-    thisMonthNet,
     minBalance90d,
     minBalance90dDate,
     nextLargeExpense,
-    forecastSlopePerDay,
+    safeToSpend,
+    runway,
+    minBalanceThreshold,
     status,
   } = useDashboardKpis();
 
@@ -60,28 +61,74 @@ function KpiHero(): ReactElement {
     ? new Date(minBalance90dDate).toLocaleDateString('ja-JP')
     : undefined;
 
-  const slopeMonthly = forecastSlopePerDay * 30;
+  // WHAT THIS ROW IS FOR, AND WHY TWO CARDS LEFT IT
+  //
+  // Four slots, and adding 使っていい額 and 残高がもつ期間 meant two had to go.
+  // The two that went were the two that were not actionable HERE:
+  //
+  //   予測傾き (「¥-12,000/月」) is a fact about the projection rather than
+  //   about the household, and nobody does anything differently because of it.
+  //   The worry it was gesturing at -- "is this going down?" -- is answered
+  //   better by 残高がもつ期間, in the form a household actually asks it.
+  //
+  //   今月の収支 is REDUNDANT: 今月のサマリー in the sidebar shows the same
+  //   figure as 差引, on every screen including this one. Two cards showing one
+  //   number is one card's worth of information taking two slots.
+  //
+  // What is left answers, in order: what may I spend, how long have I got, how
+  // bad does it get, and what is the next big thing.
+  const safeCaption = safeToSpend.until
+    ? `${safeToSpend.until.names[0]}まであと${safeToSpend.until.daysUntil}日`
+    : `今後${safeToSpend.horizonDays}日の予定を差し引いた額`;
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       <KpiCard
-        label="今月の収支"
-        value={formatSignedYen(thisMonthNet)}
-        badge={{
-          tone: thisMonthNet >= 0 ? 'success' : 'danger',
-          text: thisMonthNet >= 0 ? '黒字' : '赤字',
-        }}
+        label={safeToSpend.shortfall > 0 ? '不足額' : '使っていい額'}
+        value={formatYen(safeToSpend.shortfall > 0 ? safeToSpend.shortfall : safeToSpend.amount)}
+        caption={
+          safeToSpend.shortfall > 0
+            ? `最低残高 ${formatYen(minBalanceThreshold)} を下回ります`
+            : safeCaption
+        }
+        badge={
+          safeToSpend.shortfall > 0
+            ? { tone: 'danger', text: '要対応' }
+            : { tone: 'success', text: '余裕' }
+        }
         delay={0}
+      />
+      <KpiCard
+        label="残高がもつ期間"
+        // Null is "not within the 90 days this KPI looks at", NOT "never" --
+        // saying 「割りません」 would be a claim the projection cannot support.
+        value={runway ? `あと${runway.days}日` : '90日以上'}
+        caption={
+          runway
+            ? `${new Date(runway.date).toLocaleDateString('ja-JP')} に ${formatYen(minBalanceThreshold)} を割ります`
+            : `最低残高 ${formatYen(minBalanceThreshold)} を90日以内には割りません`
+        }
+        badge={
+          runway
+            ? { tone: runway.days <= 14 ? 'danger' : 'warning', text: `${runway.days}日` }
+            : { tone: 'success', text: '安全' }
+        }
+        delay={0.05}
       />
       <KpiCard
         label="最小残高(90日)"
         value={formatYen(minBalance90d)}
         caption={minDateLabel ? `${minDateLabel} 時点` : undefined}
+        // Measured against the HOUSEHOLD's floor. This was `50000`, hard-coded,
+        // which made 「安全」 mean the same thing for every household -- and
+        // there was nothing on screen saying where the number came from.
         badge={{
-          tone: minBalance90d < 0 ? 'danger' : minBalance90d < 50000 ? 'warning' : 'success',
-          text: minBalance90d < 0 ? '残高不足' : minBalance90d < 50000 ? '注意' : '安全',
+          tone:
+            minBalance90d < 0 ? 'danger' : minBalance90d < minBalanceThreshold ? 'warning' : 'success',
+          text:
+            minBalance90d < 0 ? '残高不足' : minBalance90d < minBalanceThreshold ? '注意' : '安全',
         }}
-        delay={0.05}
+        delay={0.1}
       />
       <KpiCard
         label="次の大型支出(60日)"
@@ -92,16 +139,6 @@ function KpiHero(): ReactElement {
             : '予定なし'
         }
         badge={nextLargeExpense ? { tone: 'danger', text: '支出' } : undefined}
-        delay={0.1}
-      />
-      <KpiCard
-        label="予測傾き"
-        value={`${formatSignedYen(slopeMonthly)}/月`}
-        caption={`1日あたり ${formatSignedYen(forecastSlopePerDay)}`}
-        badge={{
-          tone: forecastSlopePerDay >= 0 ? 'success' : 'danger',
-          text: forecastSlopePerDay >= 0 ? '増加傾向' : '減少傾向',
-        }}
         delay={0.15}
       />
     </div>

@@ -1,9 +1,14 @@
 import { vi } from 'vitest';
 import { configureApi } from '../lib/api';
 import type { AppApi } from '../types';
+import { DEFAULT_LEDGER_SETTINGS } from '../../shared/ledger-settings';
 
 // A fully-mocked AppApi for tests. Override individual methods per test as needed.
 export const createMockApi = (): AppApi => ({
+
+  // The defaults, which is what a ledger that has never opened 設定 really gets.
+  getLedgerSettings: vi.fn().mockResolvedValue(DEFAULT_LEDGER_SETTINGS),
+  updateLedgerSettings: vi.fn().mockResolvedValue(DEFAULT_LEDGER_SETTINGS),
 
   getCategories: vi.fn().mockResolvedValue([]),
   addCategory: vi
@@ -13,8 +18,12 @@ export const createMockApi = (): AppApi => ({
   deleteCategory: vi.fn().mockResolvedValue(undefined),
 
   getTemplates: vi.fn().mockResolvedValue([]),
+  // `recurrence`, not the `dayOfMonth` this carried before migration 005. It
+  // went unnoticed because `mockResolvedValue` is loosely typed -- a mock that
+  // returns a shape the contract no longer has is a test passing against a
+  // payload the server cannot send.
   addTemplate: vi.fn().mockResolvedValue({
-    id: 1, name: '', dayOfMonth: 1, type: 'expense', enabled: true,
+    id: 1, name: '', recurrence: { kind: 'monthly', dayOfMonth: 1 }, type: 'expense', enabled: true,
     sortOrder: 0, categoryId: null, defaultAmount: 0,
     createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
   }),

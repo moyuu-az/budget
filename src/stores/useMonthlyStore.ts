@@ -282,7 +282,9 @@ export function resolveAmount(
   templateId: number,
   yearMonth: string,
   monthlyAmountsMap: MonthlyAmountsMap,
-  templates: EntryTemplate[]
+  // `readonly` because this only ever reads. Requiring a mutable array forced
+  // every caller holding a readonly list to copy it, for no reason.
+  templates: readonly EntryTemplate[]
 ): number {
   const monthMap = monthlyAmountsMap.get(yearMonth);
   if (monthMap?.has(templateId)) {

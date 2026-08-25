@@ -155,6 +155,13 @@ async function snapshotLedger(ledgerId: number): Promise<string> {
  * without deciding how it could be abused here is a compile error.
  */
 const ADVERSARIAL_ARGS: { [M in DataMethod]: (victim: Fixture) => unknown[] } = {
+  // Settings take no id at all: the only thing naming a ledger is the header,
+  // which the sweep already forges. The attack these two have to survive is
+  // therefore "read/write the OTHER ledger's settings by claiming to be in it",
+  // and the sweep supplies that on its own.
+  getLedgerSettings: () => [],
+  updateLedgerSettings: () => [{ minBalanceThreshold: 999_999 }],
+
   // No arguments to subvert -- these are covered by asserting the RESPONSE holds
   // nothing of the other ledger's.
   getCategories: () => [],

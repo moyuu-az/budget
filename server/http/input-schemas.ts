@@ -8,6 +8,7 @@ import {
   MAX_FIELD_UNIT_LENGTH,
 } from '../../shared/asset-fields';
 import { parseRecurrence, type Recurrence } from '../../shared/recurrence';
+import { MAX_MIN_BALANCE_THRESHOLD } from '../../shared/ledger-settings';
 
 // Input validation at the trust boundary.
 //
@@ -145,6 +146,30 @@ export const templateInputSchema = z.object({
 // effect optional, which is what a patch needs: absent means "leave the timing
 // alone", and any value present still goes through the same narrowing.
 export const templatePatchSchema = templateInputSchema.partial();
+
+/**
+ * A patch of this ledger's settings.
+ *
+ * Every field optional: `undefined` means "leave alone", which is what lets a
+ * form save one setting without asserting a value for every other one that will
+ * ever exist. `.strict()` rejects an unknown key rather than dropping it -- a
+ * misspelled setting name that silently does nothing is worse than an error,
+ * because the user sees the form save and the figure not change.
+ *
+ * The bounds mirror shared/ledger-settings.ts, which is also where the reader
+ * clamps. Both exist on purpose: this one gives the user a message, and that one
+ * keeps a value written around this schema from making the dashboard unusable.
+ */
+export const ledgerSettingsPatchSchema = z
+  .object({
+    minBalanceThreshold: z
+      .number()
+      .finite()
+      .min(0, '最低残高は0以上で指定してください')
+      .max(MAX_MIN_BALANCE_THRESHOLD, '最低残高が大きすぎます')
+      .optional(),
+  })
+  .strict();
 
 // ---------------------------------------------------------------------------
 // Assets

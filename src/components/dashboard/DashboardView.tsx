@@ -11,6 +11,7 @@ import HoldingsCard from './HoldingsCard';
 import MinBalanceCard from './MinBalanceCard';
 import SankeyChart from './SankeyChart';
 import UpcomingEvents from './UpcomingEvents';
+import VarianceCard from './VarianceCard';
 
 interface DashboardViewProps {
   onNavigate?: (view: ViewType) => void;
@@ -77,14 +78,19 @@ function DashboardView({ onNavigate }: DashboardViewProps) {
         />
       </LoadGate>
 
-      {/* MinBalanceCard (1/3) + SankeyChart (2/3) */}
+      {/* MinBalanceCard + 先月の予実 (1/3 each) + SankeyChart (1/3)
+          
+          先月の予実 sits here rather than in the KPI row because it is about the
+          PAST: the row above answers "what do I do now", and mixing a
+          retrospective figure into it would blunt that. It is still above the
+          fold, which is the point -- it lived only in 分析, and anyone who
+          reaches 分析 is already thinking about their spending. */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <LoadGate status={status} height={148} label="最低残高予測">
           <MinBalanceCard point={minimumPoint} daysUntil={daysUntilMinimum} />
         </LoadGate>
-        <div className="lg:col-span-2">
-          <SankeyChart />
-        </div>
+        <VarianceCard />
+        <SankeyChart />
       </div>
 
       {/* Upcoming Events - full width */}

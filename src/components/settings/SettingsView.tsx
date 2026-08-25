@@ -3,6 +3,7 @@ import type { ViewType } from '../../types';
 import { Card } from '../ui/Card';
 import CashBalance from '../sidebar/CashBalance';
 import CategoryManager from './CategoryManager';
+import MinBalanceSetting from './MinBalanceSetting';
 
 interface Props {
   /** Lets the balance card send the user to 資産, where the figure is edited. */
@@ -24,6 +25,10 @@ function SettingsView({ onNavigate }: Props) {
               the holdings the figure is made of. */}
           <CashBalance onEdit={onNavigate ? () => onNavigate('assets') : undefined} />
         </Card>
+        {/* Beside the balance on purpose: the floor is a statement ABOUT that
+            figure, and reading them together is how someone decides what the
+            floor should be. */}
+        <MinBalanceSetting />
         <CategoryManager />
       </div>
     </motion.div>

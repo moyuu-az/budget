@@ -2,6 +2,8 @@ import { useMemo } from 'react';
 import { useForecast } from './useForecast';
 import type { LoadStatus } from '../stores/load-status';
 import { toYearMonth } from '../utils/forecast';
+import { runway, safeToSpend, type Runway, type SafeToSpend } from '../utils/runway';
+import { useMinBalanceThreshold } from '../stores/useSettingsStore';
 import type { ForecastPoint } from '../types';
 
 export interface NextLargeExpense {
@@ -23,6 +25,23 @@ export interface DashboardKpis {
   /** Average projected balance change per day over the 90-day window. */
   forecastSlopePerDay: number;
   /**
+   * What is free to spend before the next income arrives.
+   *
+   * The figure this dashboard was missing. 「90日後の最小残高 ¥120,000」 is true
+   * and unactionable; 「次の給料まで12日、自由に使えるのは ¥48,000」 is the same
+   * projection asked as a question the household can answer today.
+   */
+  safeToSpend: SafeToSpend;
+  /**
+   * When the projection first falls below the household's floor, or null.
+   *
+   * Null means "not within the 90-day window", NOT "never" -- a caller must say
+   * 「90日以内には割りません」 rather than 「割りません」.
+   */
+  runway: Runway | null;
+  /** The floor those two are measured against, so a caller can name it. */
+  minBalanceThreshold: number;
+  /**
    * Where the forecast's inputs have got to.
    *
    * Every figure above is zero unless this is 'ready', and zero is not a reading
@@ -41,7 +60,7 @@ function daysBetween(fromMidnight: Date, dateStr: string): number {
   return Math.round((target.getTime() - fromMidnight.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-function computeKpis(points: ForecastPoint[]): DashboardKpis {
+function computeKpis(points: ForecastPoint[], threshold: number): DashboardKpis {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const currentMonth = toYearMonth(today);
@@ -90,6 +109,12 @@ function computeKpis(points: ForecastPoint[]): DashboardKpis {
     minBalance90dDate,
     nextLargeExpense,
     forecastSlopePerDay,
+    // Both read the SAME points this function already walked, rather than
+    // rebuilding a projection: two projections would be two answers to "when
+    // does the rent leave". See useForecast for why there is exactly one.
+    safeToSpend: safeToSpend(points, threshold),
+    runway: runway(points, threshold),
+    minBalanceThreshold: threshold,
     // Overwritten by the caller; computeKpis has no opinion about loading.
     status: 'ready',
   };
@@ -99,5 +124,16 @@ export function useDashboardKpis(): DashboardKpis {
   // Same projection as the chart, just a fixed horizon -- see useForecast for
   // why there is only one place that builds it, and why it reports readiness.
   const { status, points } = useForecast(KPI_HORIZON_DAYS);
-  return useMemo(() => ({ ...computeKpis(points), status }), [points, status]);
+
+  // The household's own floor, not a constant. 50,000 was hard-coded here, which
+  // made 「安全」 mean the same thing for every household -- and it is exactly
+  // the sort of figure a household has an opinion about. It has a usable default
+  // before its fetch lands (see useSettingsStore for why that is safe here and
+  // is not for the balance).
+  const threshold = useMinBalanceThreshold();
+
+  return useMemo(
+    () => ({ ...computeKpis(points, threshold), status }),
+    [points, threshold, status],
+  );
 }
