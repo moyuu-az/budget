@@ -87,7 +87,7 @@ function TemplateEditor({ template, onSave, onCancel }: Props) {
         exit={{ opacity: 0, height: 0 }}
         transition={{ duration: 0.2 }}
       >
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {/* Name */}
           <div>
             <label className="block text-xs text-slate-400 mb-1">名前</label>

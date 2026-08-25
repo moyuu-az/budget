@@ -3,7 +3,22 @@ import { ViewType } from '../../types';
 interface Props {
   currentView: ViewType;
   onNavigate: (view: ViewType) => void;
+  /**
+   * Icon-only, for the desktop sidebar when it is narrowed.
+   *
+   * Ignored in the horizontal layout, which is always icon-plus-label: a bottom
+   * bar of six unlabelled icons is a guessing game, and it has the width for
+   * both.
+   */
   collapsed?: boolean;
+  /**
+   * 'vertical' is the desktop sidebar; 'horizontal' is the phone's bottom bar.
+   *
+   * One component rather than two, because the LIST is the thing worth keeping
+   * single: a screen added to one and forgotten in the other is a screen that
+   * exists on a desktop and not on a phone, which nothing would catch.
+   */
+  orientation?: 'vertical' | 'horizontal';
 }
 
 const navItems: { id: ViewType; label: string; icon: React.ReactNode }[] = [
@@ -64,29 +79,57 @@ const navItems: { id: ViewType; label: string; icon: React.ReactNode }[] = [
   },
 ];
 
-function Navigation({ currentView, onNavigate, collapsed = false }: Props) {
+function Navigation({
+  currentView,
+  onNavigate,
+  collapsed = false,
+  orientation = 'vertical',
+}: Props) {
+  const horizontal = orientation === 'horizontal';
+
   return (
-    <ul className="space-y-1">
+    <ul className={horizontal ? 'flex items-stretch' : 'space-y-1'}>
       {navItems.map((item) => {
         const isActive = currentView === item.id;
         return (
-          <li key={item.id}>
+          <li key={item.id} className={horizontal ? 'flex-1' : undefined}>
             <button
               onClick={() => onNavigate(item.id)}
-              title={collapsed ? item.label : undefined}
+              title={collapsed && !horizontal ? item.label : undefined}
               aria-label={item.label}
-              className={`w-full px-3 py-2.5 flex items-center rounded-lg transition-all duration-200 border-l-2 ${
-                collapsed ? 'justify-center gap-0' : 'text-left gap-3'
-              } ${
-                isActive
-                  ? 'bg-[var(--color-accent-primary)]/15 text-[var(--color-content-primary)] border-[var(--color-accent-primary)]'
-                  : 'text-[var(--color-content-muted)] hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-content-secondary)] border-transparent'
-              }`}
+              aria-current={isActive ? 'page' : undefined}
+              className={
+                horizontal
+                  ? // A 44px-tall target, which is the smallest a thumb hits
+                    // reliably. The active marker is on TOP here rather than on
+                    // the left, because a left border on a full-width column
+                    // reads as a divider between tabs.
+                    `flex w-full flex-col items-center gap-0.5 border-t-2 px-1 py-2 transition-colors ${
+                      isActive
+                        ? 'border-[var(--color-accent-primary)] text-[var(--color-accent-primary)]'
+                        : 'border-transparent text-[var(--color-content-muted)]'
+                    }`
+                  : `w-full px-3 py-2.5 flex items-center rounded-lg transition-all duration-200 border-l-2 ${
+                      collapsed ? 'justify-center gap-0' : 'text-left gap-3'
+                    } ${
+                      isActive
+                        ? 'bg-[var(--color-accent-primary)]/15 text-[var(--color-content-primary)] border-[var(--color-accent-primary)]'
+                        : 'text-[var(--color-content-muted)] hover:bg-[var(--color-surface-raised)] hover:text-[var(--color-content-secondary)] border-transparent'
+                    }`
+              }
             >
-              <span className={isActive ? 'text-[var(--color-accent-primary)]' : ''}>
+              <span
+                className={
+                  !horizontal && isActive ? 'text-[var(--color-accent-primary)]' : undefined
+                }
+              >
                 {item.icon}
               </span>
-              {!collapsed && <span className="text-sm font-medium">{item.label}</span>}
+              {horizontal ? (
+                <span className="text-[10px] font-medium leading-none">{item.label}</span>
+              ) : (
+                !collapsed && <span className="text-sm font-medium">{item.label}</span>
+              )}
             </button>
           </li>
         );

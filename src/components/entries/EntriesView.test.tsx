@@ -371,6 +371,112 @@ describe('resetting to defaults', () => {
   });
 });
 
+describe('recording amounts with the keyboard', () => {
+  // Recording a month's actuals is the same gesture twenty times. Enter used to
+  // save and leave nothing focused, so the next cell needed the mouse again --
+  // every ledger-shaped thing people already use moves DOWN on Enter.
+  const FOOD = makeTemplate({
+    id: 7, name: '食費', type: 'expense', categoryId: 1, defaultAmount: 60_000, recurrence: monthlyOn(5),
+  });
+
+  /**
+   * The planned cells, in the order they appear.
+   *
+   * Selected by the data attribute Enter itself navigates by, rather than by
+   * accessible name: 「デフォルトにリセット」 in the action bar matches a name
+   * regex for 「デフォルト」 too, and a test that silently picked it up would
+   * be asserting about the wrong control.
+   */
+  const plannedCells = (container: HTMLElement): HTMLElement[] =>
+    Array.from(container.querySelectorAll<HTMLElement>('[data-entry-cell="planned"]'));
+
+  it('saves and opens the next row’s SAME column', async () => {
+    const user = userEvent.setup();
+    api.setMonthlyAmount = vi.fn().mockResolvedValue(undefined);
+    useTemplateStore.setState({ templates: [RENT, FOOD] });
+    const { container } = render(<EntriesView />);
+
+    // 食費 sorts first (day 5 before day 27).
+    await user.click(plannedCells(container)[0]);
+    // Cleared first: the cell opens pre-filled with the current figure and
+    // selects it, so a real keystroke replaces. userEvent types at the caret.
+    await user.clear(screen.getByLabelText('予定金額を編集'));
+    await user.type(screen.getByLabelText('予定金額を編集'), '55000');
+    await user.keyboard('{Enter}');
+
+    expect(api.setMonthlyAmount).toHaveBeenCalledWith(FOOD.id, '2026-06', 55_000);
+
+    // An OPEN cell is an input and carries no `data-entry-cell`, so exactly one
+    // closed cell remaining means exactly one is open. That remaining one is
+    // 食費 -- the row we just left -- which is what makes the open one 家賃.
+    await vi.waitFor(() => expect(plannedCells(container)).toHaveLength(1));
+    expect(plannedCells(container)[0].dataset.templateId).toBe(String(FOOD.id));
+    expect(screen.getByLabelText('予定金額を編集')).toBeInTheDocument();
+  });
+
+  it('goes back UP on Shift+Enter', async () => {
+    const user = userEvent.setup();
+    api.setMonthlyAmount = vi.fn().mockResolvedValue(undefined);
+    useTemplateStore.setState({ templates: [RENT, FOOD] });
+    const { container } = render(<EntriesView />);
+
+    await user.click(plannedCells(container)[1]);
+    await user.keyboard('{Shift>}{Enter}{/Shift}');
+
+    await vi.waitFor(() => expect(plannedCells(container)).toHaveLength(1));
+    // The remaining closed cell is the LOWER one, so the open one is above it.
+    expect(plannedCells(container)[0].dataset.templateId).toBe(String(RENT.id));
+  });
+
+  it('stops at the last row rather than wrapping to the top', async () => {
+    // Wrapping puts the caret at the top of a screen the user has scrolled away
+    // from, which reads as the app losing their place.
+    const user = userEvent.setup();
+    api.setMonthlyAmount = vi.fn().mockResolvedValue(undefined);
+    useTemplateStore.setState({ templates: [RENT, FOOD] });
+    const { container } = render(<EntriesView />);
+
+    await user.click(plannedCells(container)[1]);
+    await user.keyboard('{Enter}');
+
+    // Every cell closed: the save landed and nothing was opened after it.
+    await vi.waitFor(() => expect(plannedCells(container)).toHaveLength(2));
+  });
+
+  it('walks the ACTUAL column independently of the planned one', async () => {
+    const user = userEvent.setup();
+    api.setMonthlyActual = vi.fn().mockResolvedValue(undefined);
+    useTemplateStore.setState({ templates: [RENT, FOOD] });
+    const { container } = render(<EntriesView />);
+
+    const actualCells = (): HTMLElement[] =>
+      Array.from(container.querySelectorAll<HTMLElement>('[data-entry-cell="actual"]'));
+
+    await user.click(actualCells()[0]);
+    await user.clear(screen.getByLabelText('実績金額を編集'));
+    await user.type(screen.getByLabelText('実績金額を編集'), '58000');
+    await user.keyboard('{Enter}');
+
+    expect(api.setMonthlyActual).toHaveBeenCalledWith(FOOD.id, '2026-06', 58_000);
+    await vi.waitFor(() => expect(actualCells()).toHaveLength(1));
+    // The planned column is untouched.
+    expect(plannedCells(container)).toHaveLength(2);
+  });
+
+  it('Escape abandons the edit without saving', async () => {
+    const user = userEvent.setup();
+    api.setMonthlyAmount = vi.fn();
+    useTemplateStore.setState({ templates: [RENT] });
+    const { container } = render(<EntriesView />);
+
+    await user.click(plannedCells(container)[0]);
+    await user.type(screen.getByLabelText('予定金額を編集'), '1');
+    await user.keyboard('{Escape}');
+
+    expect(api.setMonthlyAmount).not.toHaveBeenCalled();
+  });
+});
+
 describe('navigating to another month', () => {
   it('moves an entry between the two sections', async () => {
     const user = userEvent.setup();

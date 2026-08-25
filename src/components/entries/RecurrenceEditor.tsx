@@ -199,7 +199,7 @@ function RecurrenceEditor({ value, onChange, disabled = false }: Props) {
         </select>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {value.kind === 'monthly' && dayField(value.dayOfMonth, (dayOfMonth) => onChange({ ...value, dayOfMonth }))}
 
         {value.kind === 'yearly' && (
@@ -238,7 +238,7 @@ function RecurrenceEditor({ value, onChange, disabled = false }: Props) {
               onCommit={(everyMonths) => onChange({ ...value, everyMonths })}
             />
             {dayField(value.dayOfMonth, (dayOfMonth) => onChange({ ...value, dayOfMonth }))}
-            <div className="col-span-2">
+            <div className="sm:col-span-2">
               <label className={labelClass} htmlFor={`${id}-anchor`}>
                 起点の月
               </label>
@@ -261,7 +261,7 @@ function RecurrenceEditor({ value, onChange, disabled = false }: Props) {
         )}
 
         {value.kind === 'once' && (
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <label className={labelClass} htmlFor={`${id}-date`}>
               日付
             </label>

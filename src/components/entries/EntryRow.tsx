@@ -4,6 +4,7 @@ import { useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
 import { useToastStore } from '../../stores/useToastStore';
 import { formatWithCommas, handleCurrencyInput, parseCommaNumber } from '../../utils/currency';
 import { describeRecurrenceShort } from '../../../shared/recurrence';
+import { focusAdjacentCell } from './entry-cell-focus';
 import TemplateEditor from './TemplateEditor';
 import type { EntryTemplate } from '../../types';
 
@@ -124,13 +125,41 @@ function EntryRow({ template, yearMonth }: Props) {
     }
   };
 
+  // ENTER SAVES AND MOVES DOWN THE COLUMN.
+  //
+  // Recording a month's actuals is the same gesture twenty times, and Enter used
+  // to save and then leave the user with nothing focused -- so the next cell
+  // needed the mouse again. Every ledger-shaped thing people already use (a
+  // spreadsheet, a bank's import screen) moves down on Enter, and that is the
+  // muscle memory worth matching.
+  //
+  // Shift+Enter goes back up, for the correction that is one row above.
+  //
+  // Tab is left alone deliberately: it walks the whole ROW, which is right for
+  // Tab and wrong for this task.
+  //
+  // The move happens AFTER the save resolves, because the current cell has to
+  // have turned back into its button before the next one is asked to open --
+  // otherwise two inputs are mounted at once and the focus lands in the older.
+  const moveTo = (direction: 1 | -1) => {
+    focusAdjacentCell(template.id, 'planned', direction);
+  };
+
   const handlePlannedKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') savePlanned();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const direction = e.shiftKey ? -1 : 1;
+      void savePlanned().then(() => moveTo(direction));
+    }
     if (e.key === 'Escape') cancelPlanned();
   };
 
   const handleActualKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') saveActual();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const direction = e.shiftKey ? -1 : 1;
+      void saveActual().then(() => focusAdjacentCell(template.id, 'actual', direction));
+    }
     if (e.key === 'Escape') cancelActual();
   };
 
@@ -199,6 +228,11 @@ function EntryRow({ template, yearMonth }: Props) {
               onKeyDown={(e) => handleTriggerKeyDown(e, startEditPlanned)}
               role="button"
               tabIndex={0}
+              // How Enter finds the next cell down. See entry-cell-focus.ts: the
+              // move crosses rows, and the DOM already holds them in the order
+              // the user sees.
+              data-entry-cell="planned"
+              data-template-id={template.id}
               className="text-right w-full group"
               title={hasMonthlyOverride ? '月別設定' : 'デフォルト金額'}
             >
@@ -238,6 +272,8 @@ function EntryRow({ template, yearMonth }: Props) {
               onKeyDown={(e) => handleTriggerKeyDown(e, startEditActual)}
               role="button"
               tabIndex={0}
+              data-entry-cell="actual"
+              data-template-id={template.id}
               className="text-right w-full group"
               title="実績金額"
             >

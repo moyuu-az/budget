@@ -2,7 +2,11 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover is what makes `env(safe-area-inset-bottom)` non-zero.
+         Without it the bottom navigation bar sits UNDER the home indicator on
+         an iPhone -- the one control the whole mobile layout is built around,
+         permanently half-covered. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="icon" href="/icon.png" />
     <title>Balance Forecast</title>
   </head>
