@@ -70,6 +70,8 @@ export interface AssetCategoryRow {
   color: string | null;
   sort_order: number;
   fields: unknown;
+  /** 'cash' on the one category whose holdings are the balance; see migration 004. */
+  kind: string | null;
   created_at: string;
   updated_at: string;
 }

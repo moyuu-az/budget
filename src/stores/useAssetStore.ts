@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Asset, AssetCategory, AssetCategoryInput, AssetInput } from '../types';
 import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
+import type { LoadStatus } from './load-status';
 
 // ---------------------------------------------------------------------------
 // Asset categories and holdings in ONE store.
@@ -24,7 +25,24 @@ import { reportError } from '../app/reportError';
 interface AssetState {
   categories: AssetCategory[];
   assets: Asset[];
-  loading: boolean;
+  /**
+   * Where the fetch for the ACTIVE ledger has got to.
+   *
+   * Load-bearing, not bookkeeping. The cash category's holdings are 現在の残高,
+   * so before the first fetch lands this store reports a balance of ¥0 -- and a
+   * ¥0 balance combined with the (already loaded) expense templates projects
+   * straight into 残高不足, which the dashboard showed in red on every cold
+   * load. Everything downstream keys off this to say "not yet" instead.
+   *
+   * An empty `categories` array cannot stand in for it: every ledger has a cash
+   * category, so "empty" and "not fetched yet" look identical, and reading one
+   * as the other would hide a genuine ¥0 balance instead.
+   *
+   * 'error' is a state of its own for the same reason. Folded into "not ready"
+   * it becomes a skeleton that pulses forever, with nothing on screen saying
+   * what happened or offering to try again.
+   */
+  status: LoadStatus;
   reset: () => void;
   fetchAssets: () => Promise<void>;
   addCategory: (input: AssetCategoryInput) => Promise<boolean>;
@@ -38,13 +56,19 @@ interface AssetState {
 export const useAssetStore = create<AssetState>((set, get) => ({
   categories: [],
   assets: [],
-  loading: false,
+  status: 'idle',
 
-  /** Cleared on a ledger switch, like every other ledger-scoped store. */
-  reset: () => set({ categories: [], assets: [], loading: false }),
+  /**
+   * Cleared on a ledger switch, like every other ledger-scoped store.
+   *
+   * The status goes back with the data: the next ledger's balance is unknown
+   * until its own fetch lands, and treating the previous answer as still valid
+   * is what would let one household's figures brief the other's screen.
+   */
+  reset: () => set({ categories: [], assets: [], status: 'idle' }),
 
   fetchAssets: async () => {
-    set({ loading: true });
+    set({ status: 'loading' });
     try {
       // One await, not two sequential ones: the views need both before they can
       // render anything, so serialising them only adds a round trip.
@@ -52,9 +76,12 @@ export const useAssetStore = create<AssetState>((set, get) => ({
         getApi().getAssetCategories(),
         getApi().getAssets(),
       ]);
-      set({ categories, assets, loading: false });
+      set({ categories, assets, status: 'ready' });
     } catch (e) {
-      set({ loading: false });
+      // 'error', not back to 'idle': the balance is unknown either way, but only
+      // this distinction lets the dashboard offer to try again instead of
+      // pulsing a skeleton at someone who has no idea anything went wrong.
+      set({ status: 'error' });
       reportError(e);
     }
   },

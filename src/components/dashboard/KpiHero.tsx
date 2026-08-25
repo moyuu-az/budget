@@ -2,6 +2,7 @@ import { memo, type ReactElement } from 'react';
 import { motion } from 'framer-motion';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
+import { LoadGate } from '../ui/LoadGate';
 import { useDashboardKpis } from '../../hooks/useDashboardKpis';
 import { formatYen, formatSignedYen } from '../../utils/currency';
 
@@ -37,8 +38,23 @@ function KpiCard({ label, value, caption, badge, delay }: KpiCardProps): ReactEl
 }
 
 function KpiHero(): ReactElement {
-  const { thisMonthNet, minBalance90d, minBalance90dDate, nextLargeExpense, forecastSlopePerDay } =
-    useDashboardKpis();
+  const {
+    thisMonthNet,
+    minBalance90d,
+    minBalance90dDate,
+    nextLargeExpense,
+    forecastSlopePerDay,
+    status,
+  } = useDashboardKpis();
+
+  // Never the figures before the inputs arrive. Every KPI here is zero until the
+  // balance lands, and 「最小残高 ¥0 / 残高不足」 in red is the false alarm this
+  // whole mechanism exists to stop -- it appeared on every cold load, because
+  // the balance takes one more round trip than the expenses it is compared
+  // against.
+  if (status !== 'ready') {
+    return <LoadGate status={status} height={116} label="残高" />;
+  }
 
   const minDateLabel = minBalance90dDate
     ? new Date(minBalance90dDate).toLocaleDateString('ja-JP')

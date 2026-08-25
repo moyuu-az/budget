@@ -98,9 +98,16 @@ export interface BalanceSnapshot {
 
 // --- Assets ---
 //
-// Asset tracking is OPTIONAL: a ledger with no asset categories simply has an
-// empty 資産 view, and nothing is created until the user asks for it. That is why
-// nothing here is seeded on ledger creation -- the starting points live in
+// CASH IS AN ASSET, AND THE BALANCE IS THE SUM OF IT.
+//
+// Every ledger has exactly one category with `kind: 'cash'`, and 「現在の残高」 --
+// the figure the forecast starts from -- is the total of its holdings. There is
+// no separate balance field anywhere in this contract, which is the point: two
+// places to record the same money is what let the dashboard count it twice.
+//
+// Everything else about asset tracking stays optional. A household that ignores
+// 資産 sees one category holding one row, which is what it had before under
+// another name; the starting points for the rest live in
 // shared/asset-templates.ts and are applied by an explicit action.
 
 /**
@@ -121,6 +128,23 @@ export interface AssetCategory {
   sortOrder: number;
   /** Definitions of the extra parameters assets in this category must carry. */
   fields: AssetFieldDef[];
+  /**
+   * `'cash'` marks the one category whose holdings ARE the account balance.
+   *
+   * Exactly one per ledger, guaranteed by a partial unique index and provisioned
+   * by the server -- so `categories.find(c => c.kind === 'cash')` is a total
+   * function in practice, and a client that finds none is looking at a list it
+   * has not finished loading.
+   *
+   * It is a separate field rather than a name match ON PURPOSE: the user may
+   * rename 現金 to their bank's name, and the forecast must not start reading
+   * zero because of it.
+   *
+   * The cash category cannot be deleted (the server refuses) and cannot be
+   * created (`AssetCategoryInput` has no `kind`). Its name, colour and parameter
+   * definitions are ordinary editable fields.
+   */
+  kind: 'cash' | null;
 }
 
 export interface AssetCategoryInput {
@@ -211,9 +235,10 @@ export interface AppApi {
    */
   getSession(): Promise<Session>;
 
-  getBalance(): Promise<number>;
-  setBalance(balance: number): Promise<void>;
-
+  // There is deliberately no getBalance/setBalance. The balance is the sum of
+  // the cash category's holdings (see the Assets note above), so a method
+  // returning it would be a second source for a figure that already has one --
+  // and a method setting it would have no way to say WHICH holding changed.
   getCategories(): Promise<Category[]>;
   addCategory(category: CategoryInput): Promise<Category>;
   updateCategory(id: number, category: Partial<CategoryInput>): Promise<void>;
@@ -250,6 +275,14 @@ export interface AppApi {
   // editing a category's field definitions and editing a holding are different
   // actions with different failure modes, and nesting would make every holding
   // edit rewrite the category.
+  /**
+   * Every asset category, cash first.
+   *
+   * Provisions the ledger's cash category if it is somehow missing, so this is
+   * the call that makes `kind: 'cash'` a guarantee rather than a hope. See
+   * server/repositories/asset-category.repository.ts for why the guarantee is
+   * enforced on read rather than at ledger creation.
+   */
   getAssetCategories(): Promise<AssetCategory[]>;
   addAssetCategory(input: AssetCategoryInput): Promise<AssetCategory>;
   updateAssetCategory(id: number, input: Partial<AssetCategoryInput>): Promise<void>;

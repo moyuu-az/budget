@@ -4,8 +4,6 @@ import type { AppApi } from '../types';
 
 // A fully-mocked AppApi for tests. Override individual methods per test as needed.
 export const createMockApi = (): AppApi => ({
-  getBalance: vi.fn().mockResolvedValue(0),
-  setBalance: vi.fn().mockResolvedValue(undefined),
 
   getCategories: vi.fn().mockResolvedValue([]),
   addCategory: vi

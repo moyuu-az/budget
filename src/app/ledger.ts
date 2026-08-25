@@ -1,4 +1,3 @@
-import { useBalanceStore } from '../stores/useBalanceStore';
 import { useCategoryStore } from '../stores/useCategoryStore';
 import { useTemplateStore } from '../stores/useTemplateStore';
 import { useSnapshotStore } from '../stores/useSnapshotStore';
@@ -21,7 +20,6 @@ import { useAssetStore } from '../stores/useAssetStore';
 
 /** Every store whose contents belong to a single ledger. */
 const LEDGER_SCOPED_STORES: readonly { getState(): { reset(): void } }[] = [
-  useBalanceStore,
   useCategoryStore,
   useTemplateStore,
   useSnapshotStore,
@@ -42,13 +40,13 @@ export function resetLedgerData(): void {
  */
 export async function loadLedgerData(): Promise<void> {
   await Promise.all([
-    useBalanceStore.getState().fetchBalance(),
     useCategoryStore.getState().fetchCategories(),
     useTemplateStore.getState().fetchTemplates(),
     useSnapshotStore.getState().fetchSnapshots(),
-    // Fetched up front even though asset tracking is optional: the request is
-    // two small reads, and loading it lazily would mean the 資産 view flashing
-    // its empty state at households that DO use it.
+    // NOT optional, and not merely for the 資産 view: the cash category's
+    // holdings ARE 現在の残高, so this fetch is what gives the dashboard its
+    // headline figure and the forecast its starting point. If it is ever made
+    // lazy, the balance goes with it.
     useAssetStore.getState().fetchAssets(),
   ]);
 }

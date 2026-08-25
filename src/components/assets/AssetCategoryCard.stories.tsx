@@ -1,38 +1,24 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import AssetCategoryCard from './AssetCategoryCard';
-import type { Asset, AssetCategory } from '../../types';
+import { makeAsset, makeAssetCategory, makeCashCategory } from '../../test/factories';
+import type { Asset } from '../../types';
 
-const nisa: AssetCategory = {
+const nisa = makeAssetCategory({
   id: 1,
   name: 'NISA',
-  color: '#22c55e',
-  sortOrder: 0,
   fields: [
     { key: 'f1', label: '銘柄', type: 'text', required: true, unit: null },
     { key: 'f2', label: '証券会社', type: 'text', required: false, unit: null },
     { key: 'f3', label: '保有数量', type: 'number', required: false, unit: '口' },
     { key: 'f4', label: '取得単価', type: 'number', required: false, unit: '円' },
   ],
-};
-
-const cash: AssetCategory = {
-  id: 2,
-  name: '現金',
-  color: '#38bdf8',
-  sortOrder: 1,
-  fields: [{ key: 'f1', label: '保管場所', type: 'text', required: false, unit: null }],
-};
-
-const asset = (overrides: Partial<Asset>): Asset => ({
-  id: 1,
-  categoryId: 1,
-  name: 'つみたて投資枠',
-  value: 1_200_000,
-  fields: {},
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-  ...overrides,
 });
+
+// kind: 'cash' -- so this story shows the 現在の残高 badge and NO delete button.
+const cash = makeCashCategory({ id: 2 });
+
+const asset = (overrides: Partial<Asset>): Asset =>
+  makeAsset({ name: 'つみたて投資枠', value: 1_200_000, ...overrides });
 
 const meta = {
   title: 'Assets/AssetCategoryCard',

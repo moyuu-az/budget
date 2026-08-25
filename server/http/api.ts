@@ -49,20 +49,10 @@ export interface MethodSpec<M extends DataMethod> {
  * kept now that the transport is HTTP.
  *
  * Note there is no route-name table. The method name IS the route
- * (POST /api/setBalance), which removes a hand-maintained mapping and the whole
+ * (POST /api/getCategories), which removes a hand-maintained mapping and the whole
  * class of "added the handler, forgot the channel" mistakes.
  */
 export const METHODS: { [M in DataMethod]: MethodSpec<M> } = {
-  // --- Settings ---
-  getBalance: {
-    args: z.tuple([]),
-    handle: (repos) => repos.settings.getBalance(),
-  },
-  setBalance: {
-    args: z.tuple([finiteNumberSchema]),
-    handle: (repos, [balance]) => repos.settings.setBalance(balance),
-  },
-
   // --- Categories ---
   getCategories: {
     args: z.tuple([]),

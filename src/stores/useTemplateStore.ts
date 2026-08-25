@@ -2,10 +2,18 @@ import { create } from 'zustand';
 import type { EntryTemplate, EntryTemplateInput } from '../types';
 import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
+import type { LoadStatus } from './load-status';
 
 interface TemplateState {
   templates: EntryTemplate[];
-  loading: boolean;
+  /**
+   * Where the fetch for the ACTIVE ledger has got to.
+   *
+   * The forecast needs these as much as it needs the balance; see
+   * src/hooks/useForecast.ts for why a projection is not shown until both have
+   * arrived, and why a failure must not look like a wait.
+   */
+  status: LoadStatus;
   reset: () => void;
   fetchTemplates: () => Promise<void>;
   addTemplate: (input: EntryTemplateInput) => Promise<void>;
@@ -16,7 +24,7 @@ interface TemplateState {
 
 export const useTemplateStore = create<TemplateState>((set, get) => ({
   templates: [],
-  loading: false,
+  status: 'idle',
 
   /**
    * Clears everything this store holds.
@@ -26,15 +34,15 @@ export const useTemplateStore = create<TemplateState>((set, get) => ({
    * came back -- brief, but a household budget showing someone else's figures
    * even for a moment is not acceptable.
    */
-  reset: () => set({ templates: [], loading: false }),
+  reset: () => set({ templates: [], status: 'idle' }),
 
   fetchTemplates: async () => {
-    set({ loading: true });
+    set({ status: 'loading' });
     try {
       const templates = await getApi().getTemplates();
-      set({ templates, loading: false });
+      set({ templates, status: 'ready' });
     } catch (e) {
-      set({ loading: false });
+      set({ status: 'error' });
       reportError(e);
     }
   },
