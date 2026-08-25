@@ -209,6 +209,53 @@ END
 （次回以降の確認では、ユーザーが年次や単発を登録していれば 0 でなくなる。
 これは正常。）
 
+### 005 適用後はリビジョンのロールバックが安全でなくなる
+
+**これは 005 に限った話ではなく、契約（`shared/types.ts` の `AppApi`）が
+非互換に変わったときは常にそうなる。** 005 が最初の実例なのでここに書く。
+
+`entry_templates` に `monthly` 以外の行が 1 つでも作られると、旧リビジョンへ
+戻すことは**データの誤読**を意味する:
+
+- 旧コードは `day_of_month` しか読まない。`yearly` / `interval` の行は
+  **毎月の項目として集計される**（年払いの保険料が 12 回計上される）
+- `once` の行は `day_of_month` が NULL なので**予測から消える**
+
+migration 005 自体はロールバックしても壊れない（列が増えているだけ）。危険なのは
+**新しい形のデータが作られた後**。戻す前に必ず確認する:
+
+```sh
+psql "$DATABASE_URL" -P pager=off -c "
+DO \$\$
+DECLARE led RECORD; n INTEGER;
+BEGIN
+  FOR led IN SELECT id, name FROM ledgers ORDER BY id LOOP
+    PERFORM set_config('app.current_ledger_id', led.id::TEXT, true);
+    SELECT count(*) INTO n FROM entry_templates WHERE recurrence_kind <> 'monthly';
+    IF n > 0 THEN RAISE WARNING '% (id %): monthly 以外が % 件。ロールバック不可', led.name, led.id, n; END IF;
+  END LOOP;
+END
+\$\$"
+```
+
+**1 件でも出たらリビジョンを戻さない。** 前に進んで直す。
+
+### 開いたままのタブは自動的にブロックされる
+
+デプロイはタブが開いたままのブラウザの下でサーバーを差し替える。005 より前の
+変更は全て追加的だったので旧タブは知らないフィールドを無視するだけで済んだが、
+`dayOfMonth` → `recurrence` はそれを終わらせた。**旧ビルドが新レスポンスを読むと
+`dayOfMonth` が無いので予測から全項目が消え、平坦で安心できる残高線を描く。**
+
+そのため全リクエストが `X-Contract-Version` を送り、サーバーが一致しないものを
+**426 Upgrade Required** で拒否する（`shared/contract-version.ts`）。旧タブには
+「アプリが更新されました。再読み込みしてください」が全画面で出る。
+
+- **契約を非互換に変えたら `CONTRACT_VERSION` を上げる**。上げ忘れると旧タブが
+  黙って誤ったデータを読む
+- **追加的な変更では上げない**。上げるとデプロイのたびに全員が再読み込みになる
+- デプロイ後に 426 がログに出るのは正常（開いていた旧タブの分）
+
 ## 5. デプロイ
 
 ```sh

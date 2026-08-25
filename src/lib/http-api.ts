@@ -1,5 +1,6 @@
 import type { AppApi } from '../types';
 import { isErrorEnvelope, type ErrorEnvelope } from '../../shared/errors';
+import { CONTRACT_VERSION, CONTRACT_VERSION_HEADER } from '../../shared/contract-version';
 
 // ---------------------------------------------------------------------------
 // The browser client.
@@ -52,7 +53,13 @@ export function createHttpApi(options: HttpApiOptions): AppApi {
   const baseUrl = options.baseUrl ?? '';
 
   async function call(method: string, args: unknown[]): Promise<unknown> {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      // Which wire contract this bundle was built against. A server that has
+      // moved on refuses rather than answering with data this build would
+      // misread -- see shared/contract-version.ts for why silence is the danger.
+      [CONTRACT_VERSION_HEADER]: String(CONTRACT_VERSION),
+    };
 
     // getSession runs before any ledger is known, and the server does not
     // require the header for it.

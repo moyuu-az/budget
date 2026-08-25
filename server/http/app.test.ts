@@ -9,6 +9,7 @@ import type { IdentityVerifier, VerifiedIdentity } from '../auth/identity';
 import type { ErrorEnvelope } from '../../shared/errors';
 import type { Session } from '../../shared/types';
 import type { Recurrence } from '../../shared/recurrence';
+import { CONTRACT_VERSION, CONTRACT_VERSION_HEADER } from '../../shared/contract-version';
 
 /** Shorthand for the shape almost every test template has. */
 const monthlyOn = (dayOfMonth: number): Recurrence => ({ kind: 'monthly', dayOfMonth });
@@ -48,6 +49,14 @@ interface CallOptions {
   args?: unknown[];
   contentType?: string | null;
   fetchSite?: string;
+  /**
+   * Which wire contract the caller claims to be built against.
+   *
+   * `undefined` sends the current one, which is what every test that is not
+   * about the version gate wants. `null` sends NO header, which is what a build
+   * predating the gate looks like.
+   */
+  contractVersion?: string | null;
 }
 
 async function call(method: string, options: CallOptions = {}): Promise<Response> {
@@ -59,6 +68,9 @@ async function call(method: string, options: CallOptions = {}): Promise<Response
     headers.set('content-type', options.contentType ?? 'application/json');
   }
   if (options.fetchSite) headers.set('sec-fetch-site', options.fetchSite);
+  if (options.contractVersion !== null) {
+    headers.set(CONTRACT_VERSION_HEADER, options.contractVersion ?? String(CONTRACT_VERSION));
+  }
 
   return app.request(`/api/${method}`, {
     method: 'POST',
@@ -172,7 +184,12 @@ describe('ledger authorisation', () => {
     for (const value of ['abc', '0', '-1', '1.5']) {
       const response = await app.request('/api/getCategories', {
         method: 'POST',
-        headers: { 'x-test-user': ALICE, 'content-type': 'application/json', [LEDGER_HEADER]: value },
+        headers: {
+          'x-test-user': ALICE,
+          'content-type': 'application/json',
+          [CONTRACT_VERSION_HEADER]: String(CONTRACT_VERSION),
+          [LEDGER_HEADER]: value,
+        },
         body: JSON.stringify({ args: [] }),
       });
       expect(response.status, value).toBe(400);
@@ -228,6 +245,83 @@ describe('ledger authorisation', () => {
 
     const shared = await call('getCategories', { as: ALICE, ledgerId: sharedLedgerOf(alice) });
     expect(await shared.json()).toEqual([]);
+  });
+});
+
+describe('the contract version gate', () => {
+  // -------------------------------------------------------------------------
+  // A deploy replaces the server under tabs that are still open. Every change
+  // before migration 005 was additive, so an old tab ignored what it did not
+  // know about; replacing EntryTemplate.dayOfMonth with `recurrence` ended that.
+  //
+  // An old build reading a new response finds no `dayOfMonth`, drops EVERY
+  // planned entry from its forecast, and draws a flat balance line -- wrong, in
+  // the reassuring direction, in an application whose entire purpose is to warn
+  // about running out of money. Refusing loudly is the only acceptable answer.
+  // -------------------------------------------------------------------------
+  it('refuses a request carrying no version header at all', async () => {
+    // What a build predating this gate looks like. Absent must NOT read as
+    // "fine" -- that is precisely the caller this exists to stop.
+    const response = await call('getSession', { as: ALICE, contractVersion: null });
+
+    expect(response.status).toBe(426);
+    expect((await envelopeOf(response)).code).toBe('STALE_CLIENT');
+  });
+
+  it('refuses a request naming an older contract', async () => {
+    const response = await call('getSession', { as: ALICE, contractVersion: '1' });
+    expect(response.status).toBe(426);
+  });
+
+  it('refuses a request naming a NEWER contract', async () => {
+    // A rolled-back server under a tab holding the newer bundle. Symmetrical for
+    // the same reason: neither side can read the other correctly, and guessing
+    // which one is "ahead" would not change the answer.
+    const response = await call('getSession', { as: ALICE, contractVersion: '99' });
+    expect(response.status).toBe(426);
+  });
+
+  it('says what fixes it, and says it even in production', async () => {
+    // The message is written FOR the user: it is the only thing on screen that
+    // tells them a reload is the remedy. Redacting it would leave 「予期しない
+    // エラー」 on a stuck tab forever.
+    const production = createApp({
+      pool: db.pool,
+      verifier: headerVerifier(),
+      sessions: createSessionService(db.pool, { allowedEmails: [ALICE], sharedLedgerName: '家計' }),
+      exposeInternals: false,
+    });
+
+    const response = await production.request('/api/getSession', {
+      method: 'POST',
+      headers: { 'x-test-user': ALICE, 'content-type': 'application/json' },
+      body: '{}',
+    });
+
+    expect(response.status).toBe(426);
+    const envelope = (await response.json()) as ErrorEnvelope;
+    expect(envelope.code).toBe('STALE_CLIENT');
+    expect(envelope.message).toContain('再読み込み');
+  });
+
+  it('is checked BEFORE authentication', async () => {
+    // An old tab whose session also happens to be bad must be told to reload,
+    // not told to sign in -- it would report the second as something the user
+    // cannot act on, and the reload would never happen.
+    const response = await call('getSession', { as: undefined, contractVersion: null });
+    expect(response.status).toBe(426);
+  });
+
+  it('does not gate the health check', async () => {
+    // Cloud Run's liveness probe sends no such header and must never be told to
+    // reload; a gated /healthz would fail every deploy.
+    const response = await app.request('/healthz');
+    expect(response.status).toBe(200);
+  });
+
+  it('lets the current contract through', async () => {
+    const response = await call('getSession', { as: ALICE });
+    expect(response.status).toBe(200);
   });
 });
 
@@ -441,6 +535,7 @@ describe('argument validation', () => {
       headers: {
         'x-test-user': ALICE,
         'content-type': 'application/json',
+        [CONTRACT_VERSION_HEADER]: String(CONTRACT_VERSION),
         [LEDGER_HEADER]: String(sharedLedgerOf(alice)),
       },
       body: JSON.stringify({ args: { nope: true } }),
@@ -619,7 +714,11 @@ describe('responses', () => {
     const session = (await (
       await production.request('/api/getSession', {
         method: 'POST',
-        headers: { 'x-test-user': ALICE, 'content-type': 'application/json' },
+        headers: {
+          'x-test-user': ALICE,
+          'content-type': 'application/json',
+          [CONTRACT_VERSION_HEADER]: String(CONTRACT_VERSION),
+        },
         body: '{}',
       })
     ).json()) as Session;
@@ -632,6 +731,7 @@ describe('responses', () => {
       headers: {
         'x-test-user': ALICE,
         'content-type': 'application/json',
+        [CONTRACT_VERSION_HEADER]: String(CONTRACT_VERSION),
         [LEDGER_HEADER]: String(sharedLedgerOf(session)),
       },
       body: JSON.stringify({ args: ['2026-01-01', 1e30] }),

@@ -8,6 +8,7 @@ import { UnauthorizedError } from './http/errors';
 import type { IdentityVerifier } from './auth/identity';
 import type { Session } from '../shared/types';
 import type { Recurrence } from '../shared/recurrence';
+import { CONTRACT_VERSION, CONTRACT_VERSION_HEADER } from '../shared/contract-version';
 
 /** Shorthand for the shape almost every test template has. */
 const monthlyOn = (dayOfMonth: number): Recurrence => ({ kind: 'monthly', dayOfMonth });
@@ -64,6 +65,10 @@ async function post(method: string, as: string, ledgerId: number, args: unknown[
     headers: {
       'x-test-user': as,
       'content-type': 'application/json',
+      // Every request states which wire contract it was built against; without
+      // it the server refuses the caller as a stale client, and this whole
+      // sweep would pass for the wrong reason.
+      [CONTRACT_VERSION_HEADER]: String(CONTRACT_VERSION),
       [LEDGER_HEADER]: String(ledgerId),
     },
     body: JSON.stringify({ args }),
@@ -73,7 +78,11 @@ async function post(method: string, as: string, ledgerId: number, args: unknown[
 async function signIn(email: string): Promise<Session> {
   const response = await app.request('/api/getSession', {
     method: 'POST',
-    headers: { 'x-test-user': email, 'content-type': 'application/json' },
+    headers: {
+      'x-test-user': email,
+      'content-type': 'application/json',
+      [CONTRACT_VERSION_HEADER]: String(CONTRACT_VERSION),
+    },
     body: '{}',
   });
   return (await response.json()) as Session;

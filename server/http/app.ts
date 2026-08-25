@@ -8,12 +8,14 @@ import { METHODS, isDataMethod, type DataMethod } from './api';
 import {
   AppError,
   ForbiddenError,
+  StaleClientError,
   UnauthorizedError,
   ValidationError,
   mapUnknownToAppError,
   statusFor,
   toEnvelope,
 } from './errors';
+import { CONTRACT_VERSION, CONTRACT_VERSION_HEADER } from '../../shared/contract-version';
 import type { Session } from '../../shared/types';
 
 export interface AppDependencies {
@@ -70,6 +72,31 @@ type Variables = { session: Session };
 function assertSameSite(fetchSite: string | undefined): void {
   if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none') {
     throw new ForbiddenError('クロスサイトからのリクエストは受け付けません');
+  }
+}
+
+/**
+ * Refuses a caller whose bundle was built against a different wire contract.
+ *
+ * A deploy replaces the server under tabs that are still open. Until migration
+ * 005 every change had been additive and an old tab simply ignored what it did
+ * not know about; replacing `EntryTemplate.dayOfMonth` with `recurrence` ended
+ * that. An old build reading a new response finds no `dayOfMonth`, drops EVERY
+ * planned entry from its forecast, and draws a flat balance line -- wrong, in
+ * the reassuring direction, with nothing on screen to say so.
+ *
+ * A MISSING HEADER IS A MISMATCH, not a pass. Every build that knows about this
+ * gate sends it; a request without one is by definition from a build that
+ * predates it, which is exactly the case this exists for. (Non-browser callers
+ * do not exist here -- there is no public API, only the bundle this server
+ * serves.)
+ *
+ * Checked BEFORE authentication so an old tab gets the reload prompt rather than
+ * an auth error it would report as something else entirely.
+ */
+function assertContractVersion(header: string | undefined): void {
+  if (header !== String(CONTRACT_VERSION)) {
+    throw new StaleClientError();
   }
 }
 
@@ -156,6 +183,9 @@ export function createApp(deps: AppDependencies): Hono<{ Variables: Variables }>
   // Everything under /api is authenticated. The session is resolved once per
   // request and reused by the handler.
   app.use('/api/*', async (c, next) => {
+    // Before anything else that could fail for a different reason: a tab running
+    // an old bundle must be told to reload, not told its session is bad.
+    assertContractVersion(c.req.header(CONTRACT_VERSION_HEADER));
     assertSameSite(c.req.header('sec-fetch-site'));
     const identity = await deps.verifier.verify(c.req.raw.headers);
     c.set('session', await deps.sessions.resolve(identity));
