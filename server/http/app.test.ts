@@ -8,6 +8,11 @@ import { UnauthorizedError } from './errors';
 import type { IdentityVerifier, VerifiedIdentity } from '../auth/identity';
 import type { ErrorEnvelope } from '../../shared/errors';
 import type { Session } from '../../shared/types';
+import type { Recurrence } from '../../shared/recurrence';
+import { CONTRACT_VERSION, CONTRACT_VERSION_HEADER } from '../../shared/contract-version';
+
+/** Shorthand for the shape almost every test template has. */
+const monthlyOn = (dayOfMonth: number): Recurrence => ({ kind: 'monthly', dayOfMonth });
 
 // ---------------------------------------------------------------------------
 // The HTTP boundary: authentication, authorisation, and argument validation.
@@ -44,6 +49,14 @@ interface CallOptions {
   args?: unknown[];
   contentType?: string | null;
   fetchSite?: string;
+  /**
+   * Which wire contract the caller claims to be built against.
+   *
+   * `undefined` sends the current one, which is what every test that is not
+   * about the version gate wants. `null` sends NO header, which is what a build
+   * predating the gate looks like.
+   */
+  contractVersion?: string | null;
 }
 
 async function call(method: string, options: CallOptions = {}): Promise<Response> {
@@ -55,6 +68,9 @@ async function call(method: string, options: CallOptions = {}): Promise<Response
     headers.set('content-type', options.contentType ?? 'application/json');
   }
   if (options.fetchSite) headers.set('sec-fetch-site', options.fetchSite);
+  if (options.contractVersion !== null) {
+    headers.set(CONTRACT_VERSION_HEADER, options.contractVersion ?? String(CONTRACT_VERSION));
+  }
 
   return app.request(`/api/${method}`, {
     method: 'POST',
@@ -168,7 +184,12 @@ describe('ledger authorisation', () => {
     for (const value of ['abc', '0', '-1', '1.5']) {
       const response = await app.request('/api/getCategories', {
         method: 'POST',
-        headers: { 'x-test-user': ALICE, 'content-type': 'application/json', [LEDGER_HEADER]: value },
+        headers: {
+          'x-test-user': ALICE,
+          'content-type': 'application/json',
+          [CONTRACT_VERSION_HEADER]: String(CONTRACT_VERSION),
+          [LEDGER_HEADER]: value,
+        },
         body: JSON.stringify({ args: [] }),
       });
       expect(response.status, value).toBe(400);
@@ -227,6 +248,104 @@ describe('ledger authorisation', () => {
   });
 });
 
+describe('the contract version gate', () => {
+  // -------------------------------------------------------------------------
+  // A deploy replaces the server under tabs that are still open. Every change
+  // before migration 005 was additive, so an old tab ignored what it did not
+  // know about; replacing EntryTemplate.dayOfMonth with `recurrence` ended that.
+  //
+  // An old build reading a new response finds no `dayOfMonth`, drops EVERY
+  // planned entry from its forecast, and draws a flat balance line -- wrong, in
+  // the reassuring direction, in an application whose entire purpose is to warn
+  // about running out of money. Refusing loudly is the only acceptable answer.
+  // -------------------------------------------------------------------------
+  it('refuses a request carrying no version header at all', async () => {
+    // What a build predating this gate looks like. Absent must NOT read as
+    // "fine" -- that is precisely the caller this exists to stop.
+    const response = await call('getSession', { as: ALICE, contractVersion: null });
+
+    expect(response.status).toBe(426);
+    expect((await envelopeOf(response)).code).toBe('STALE_CLIENT');
+  });
+
+  it('refuses a request naming an older contract', async () => {
+    const response = await call('getSession', { as: ALICE, contractVersion: '1' });
+    expect(response.status).toBe(426);
+  });
+
+  it('refuses a request naming a NEWER contract', async () => {
+    // A rolled-back server under a tab holding the newer bundle. Symmetrical for
+    // the same reason: neither side can read the other correctly, and guessing
+    // which one is "ahead" would not change the answer.
+    const response = await call('getSession', { as: ALICE, contractVersion: '99' });
+    expect(response.status).toBe(426);
+  });
+
+  it('says what fixes it, and says it even in production', async () => {
+    // The message is written FOR the user: it is the only thing on screen that
+    // tells them a reload is the remedy. Redacting it would leave 「予期しない
+    // エラー」 on a stuck tab forever.
+    const production = createApp({
+      pool: db.pool,
+      verifier: headerVerifier(),
+      sessions: createSessionService(db.pool, { allowedEmails: [ALICE], sharedLedgerName: '家計' }),
+      exposeInternals: false,
+    });
+
+    const response = await production.request('/api/getSession', {
+      method: 'POST',
+      headers: { 'x-test-user': ALICE, 'content-type': 'application/json' },
+      body: '{}',
+    });
+
+    expect(response.status).toBe(426);
+    const envelope = (await response.json()) as ErrorEnvelope;
+    expect(envelope.code).toBe('STALE_CLIENT');
+    expect(envelope.message).toContain('再読み込み');
+  });
+
+  it('is checked BEFORE authentication', async () => {
+    // An old tab whose session also happens to be bad must be told to reload,
+    // not told to sign in -- it would report the second as something the user
+    // cannot act on, and the reload would never happen.
+    const response = await call('getSession', { as: undefined, contractVersion: null });
+    expect(response.status).toBe(426);
+  });
+
+  it('does not gate the health check', async () => {
+    // Cloud Run's liveness probe sends no such header and must never be told to
+    // reload; a gated /healthz would fail every deploy.
+    const response = await app.request('/healthz');
+    expect(response.status).toBe(200);
+  });
+
+  it('lets the current contract through', async () => {
+    const response = await call('getSession', { as: ALICE });
+    expect(response.status).toBe(200);
+  });
+
+  it('stamps every answer with the contract it speaks', async () => {
+    // The other half of the door: a NEW bundle talking to an OLD revision. That
+    // server cannot refuse the request -- it predates this gate -- so the client
+    // has to be able to refuse the ANSWER, and it can only do that if a current
+    // server says so explicitly.
+    const response = await call('getSession', { as: ALICE });
+    expect(response.headers.get(CONTRACT_VERSION_HEADER)).toBe(String(CONTRACT_VERSION));
+  });
+
+  it('stamps errors too, including ones raised before authentication', async () => {
+    // An old server's 401 and a current one's must be distinguishable, or a new
+    // tab reports "sign in again" for what is really a version skew -- and the
+    // user acts on it uselessly.
+    const unauthenticated = await call('getSession', { as: undefined });
+    expect(unauthenticated.status).toBe(401);
+    expect(unauthenticated.headers.get(CONTRACT_VERSION_HEADER)).toBe(String(CONTRACT_VERSION));
+
+    const stale = await call('getSession', { as: ALICE, contractVersion: '1' });
+    expect(stale.headers.get(CONTRACT_VERSION_HEADER)).toBe(String(CONTRACT_VERSION));
+  });
+});
+
 describe('cross-site protection', () => {
   it('rejects a request a browser reports as cross-site', async () => {
     // IAP authenticates with a cookie and injects the assertion itself, so a
@@ -259,6 +378,142 @@ describe('cross-site protection', () => {
 });
 
 describe('argument validation', () => {
+  // -------------------------------------------------------------------------
+  // Recurrence, at the trust boundary.
+  //
+  // The request body is untrusted input, and the recurrence is the one argument
+  // whose validity is not expressible as a field-by-field shape check: which
+  // fields are required depends on `kind`, and a one-off's date has to be a day
+  // that EXISTS. Every case below is rejected here with a VALIDATION the user
+  // can read, rather than reaching the database and coming back as a CONFLICT
+  // naming a constraint.
+  // -------------------------------------------------------------------------
+  it.each([
+    ['an unknown kind', { kind: 'weekly', dayOfWeek: 1 }],
+    ['monthly without a day', { kind: 'monthly' }],
+    ['a day outside 1-31', { kind: 'monthly', dayOfMonth: 32 }],
+    ['yearly without a month', { kind: 'yearly', dayOfMonth: 20 }],
+    ['a month outside 1-12', { kind: 'yearly', month: 13, dayOfMonth: 20 }],
+    ['an interval of 1', { kind: 'interval', everyMonths: 1, anchorMonth: '2026-03', dayOfMonth: 10 }],
+    ['an interval without an anchor', { kind: 'interval', everyMonths: 2, dayOfMonth: 10 }],
+    ['a malformed anchor month', { kind: 'interval', everyMonths: 2, anchorMonth: '2026-3', dayOfMonth: 10 }],
+    ['a one-off without a date', { kind: 'once' }],
+    ['a one-off on a date that does not exist', { kind: 'once', date: '2026-02-31' }],
+    ['a recurrence that is not an object', 'monthly'],
+  ])('rejects %s', async (_label, recurrence) => {
+    const alice = await sessionFor(ALICE);
+    const response = await call('addTemplate', {
+      as: ALICE,
+      ledgerId: sharedLedgerOf(alice),
+      args: [{ name: 't', recurrence, type: 'expense' }],
+    });
+
+    expect(response.status).toBe(400);
+    expect((await envelopeOf(response)).code).toBe('VALIDATION');
+  });
+
+  it('drops fields that do not belong to the recurrence rather than storing them', async () => {
+    // A `monthly` carrying a leftover `month` is not a user error worth
+    // refusing -- it is what an older client or a hand-written request sends --
+    // but storing it would violate entry_templates_recurrence_shape_chk. The
+    // schema narrows before the repository ever sees it.
+    const alice = await sessionFor(ALICE);
+    const response = await call('addTemplate', {
+      as: ALICE,
+      ledgerId: sharedLedgerOf(alice),
+      args: [{ name: 't', recurrence: { kind: 'monthly', dayOfMonth: 5, month: 3, everyMonths: 12 }, type: 'expense' }],
+    });
+
+    expect(response.status).toBe(200);
+    expect((await response.json()) as { recurrence: unknown }).toMatchObject({
+      recurrence: { kind: 'monthly', dayOfMonth: 5 },
+    });
+  });
+
+  it('accepts each of the four shapes', async () => {
+    const alice = await sessionFor(ALICE);
+    const shared = sharedLedgerOf(alice);
+    for (const recurrence of [
+      { kind: 'monthly', dayOfMonth: 25 },
+      { kind: 'yearly', month: 3, dayOfMonth: 20 },
+      { kind: 'interval', everyMonths: 2, anchorMonth: '2026-03', dayOfMonth: 10 },
+      { kind: 'once', date: '2026-11-20' },
+    ]) {
+      const response = await call('addTemplate', {
+        as: ALICE, ledgerId: shared, args: [{ name: 't', recurrence, type: 'expense' }],
+      });
+      expect(response.status).toBe(200);
+      expect((await response.json()) as { recurrence: unknown }).toMatchObject({ recurrence });
+    }
+  });
+
+  it('leaves the recurrence alone when a patch omits it', async () => {
+    // `.partial()` on a schema whose field is a ZodEffects makes the whole effect
+    // optional. That is what a patch needs -- absent means "leave the timing
+    // alone" -- but it is Zod-internal behaviour, so it is pinned here rather
+    // than assumed.
+    const alice = await sessionFor(ALICE);
+    const shared = sharedLedgerOf(alice);
+    const created = await call('addTemplate', {
+      as: ALICE, ledgerId: shared,
+      args: [{ name: 'rent', recurrence: { kind: 'yearly', month: 3, dayOfMonth: 20 }, type: 'expense' }],
+    });
+    const template = (await created.json()) as { id: number };
+
+    const response = await call('updateTemplate', {
+      as: ALICE, ledgerId: shared, args: [template.id, { name: 'renamed' }],
+    });
+    // 204: updateTemplate's contract returns void.
+    expect(response.status).toBe(204);
+
+    const listed = await call('getTemplates', { as: ALICE, ledgerId: shared });
+    const rows = (await listed.json()) as Array<{ id: number; name: string; recurrence: unknown }>;
+    expect(rows.find((row) => row.id === template.id)).toMatchObject({
+      name: 'renamed',
+      recurrence: { kind: 'yearly', month: 3, dayOfMonth: 20 },
+    });
+  });
+
+  it('rejects an explicit null recurrence rather than reading it as "leave alone"', async () => {
+    // null and undefined are different arguments and only one of them means
+    // "unchanged". Accepting null would reach the repository, which would write
+    // five NULL columns and be rejected by the shape CHECK -- a CONFLICT for
+    // what is a validation error.
+    const alice = await sessionFor(ALICE);
+    const shared = sharedLedgerOf(alice);
+    const created = await call('addTemplate', {
+      as: ALICE, ledgerId: shared, args: [{ name: 't', recurrence: monthlyOn(1), type: 'expense' }],
+    });
+    const template = (await created.json()) as { id: number };
+
+    const response = await call('updateTemplate', {
+      as: ALICE, ledgerId: shared, args: [template.id, { recurrence: null }],
+    });
+    expect(response.status).toBe(400);
+    expect((await envelopeOf(response)).code).toBe('VALIDATION');
+  });
+
+  it('changes the recurrence through the API, clearing the previous shape', async () => {
+    const alice = await sessionFor(ALICE);
+    const shared = sharedLedgerOf(alice);
+    const created = await call('addTemplate', {
+      as: ALICE, ledgerId: shared,
+      args: [{ name: 't', recurrence: { kind: 'yearly', month: 3, dayOfMonth: 20 }, type: 'expense' }],
+    });
+    const template = (await created.json()) as { id: number };
+
+    const response = await call('updateTemplate', {
+      as: ALICE, ledgerId: shared, args: [template.id, { recurrence: { kind: 'once', date: '2026-11-20' } }],
+    });
+    expect(response.status).toBe(204);
+
+    const listed = await call('getTemplates', { as: ALICE, ledgerId: shared });
+    const rows = (await listed.json()) as Array<{ id: number; recurrence: unknown }>;
+    expect(rows.find((row) => row.id === template.id)).toMatchObject({
+      recurrence: { kind: 'once', date: '2026-11-20' },
+    });
+  });
+
   it('rejects a malformed year-month', async () => {
     const alice = await sessionFor(ALICE);
     const response = await call('getMonthlyAmounts', {
@@ -274,7 +529,7 @@ describe('argument validation', () => {
     const shared = sharedLedgerOf(alice);
     const created = await call('addTemplate', {
       as: ALICE, ledgerId: shared,
-      args: [{ name: 't', dayOfMonth: 1, type: 'expense' }],
+      args: [{ name: 't', recurrence: monthlyOn(1), type: 'expense' }],
     });
     const template = (await created.json()) as { id: number };
 
@@ -301,6 +556,7 @@ describe('argument validation', () => {
       headers: {
         'x-test-user': ALICE,
         'content-type': 'application/json',
+        [CONTRACT_VERSION_HEADER]: String(CONTRACT_VERSION),
         [LEDGER_HEADER]: String(sharedLedgerOf(alice)),
       },
       body: JSON.stringify({ args: { nope: true } }),
@@ -395,7 +651,7 @@ describe('responses', () => {
 
     const response = await call('addTemplate', {
       as: ALICE, ledgerId: sharedLedgerOf(alice),
-      args: [{ name: 'leaky', dayOfMonth: 1, type: 'expense', categoryId: category.id }],
+      args: [{ name: 'leaky', recurrence: monthlyOn(1), type: 'expense', categoryId: category.id }],
     });
 
     expect(response.status).toBe(409);
@@ -424,14 +680,50 @@ describe('responses', () => {
     // the conflicting row, cannot see it under the USING policy, and raises
     // 42501. That is the isolation layer working, not the server malfunctioning,
     // so it must not surface as a 500.
+    //
+    // RECORDED ACTUALS, deliberately, not planned amounts. setMonthlyAmount now
+    // looks the entry up first (to check the month is one it occurs in), so a
+    // cross-ledger id is refused by THAT guard before RLS is ever consulted --
+    // and this test would then prove the guard rather than the policy. Actuals
+    // carry no such guard, so the write still reaches the database and the
+    // policy is what answers.
     const bob = await sessionFor(BOB);
     const bobLedger = personalLedgerOf(bob);
     const template = (await (
       await call('addTemplate', {
-        as: BOB, ledgerId: bobLedger, args: [{ name: 'bob', dayOfMonth: 1, type: 'expense' }],
+        as: BOB, ledgerId: bobLedger, args: [{ name: 'bob', recurrence: monthlyOn(1), type: 'expense' }],
       })
     ).json()) as { id: number };
-    await call('setMonthlyAmount', { as: BOB, ledgerId: bobLedger, args: [template.id, '2026-01', 111] });
+    await call('setMonthlyActual', { as: BOB, ledgerId: bobLedger, args: [template.id, '2026-01', 111] });
+
+    const alice = await sessionFor(ALICE);
+    const response = await call('setMonthlyActual', {
+      as: ALICE, ledgerId: personalLedgerOf(alice), args: [template.id, '2026-01', 999],
+    });
+
+    expect(response.status).toBe(403);
+    expect((await envelopeOf(response)).code).toBe('FORBIDDEN');
+
+    // Bob's figure is untouched.
+    const actuals = (await (
+      await call('getMonthlyActuals', { as: BOB, ledgerId: bobLedger, args: ['2026-01'] })
+    ).json()) as { actualAmount: number }[];
+    expect(actuals).toEqual([expect.objectContaining({ actualAmount: 111 })]);
+  });
+
+  it('refuses a cross-ledger planned amount before it reaches the database', async () => {
+    // The other half of the pair above: setMonthlyAmount's occurrence guard
+    // looks the entry up first, so a cross-ledger id is refused there. It must
+    // answer FORBIDDEN rather than NOT_FOUND -- distinguishing the two would let
+    // a caller probe which ids exist in someone else's ledger, which is the same
+    // reasoning resolveLedgerId already applies to ledger ids.
+    const bob = await sessionFor(BOB);
+    const bobLedger = personalLedgerOf(bob);
+    const template = (await (
+      await call('addTemplate', {
+        as: BOB, ledgerId: bobLedger, args: [{ name: 'bob', recurrence: monthlyOn(1), type: 'expense' }],
+      })
+    ).json()) as { id: number };
 
     const alice = await sessionFor(ALICE);
     const response = await call('setMonthlyAmount', {
@@ -440,12 +732,33 @@ describe('responses', () => {
 
     expect(response.status).toBe(403);
     expect((await envelopeOf(response)).code).toBe('FORBIDDEN');
+  });
 
-    // Bob's figure is untouched.
-    const amounts = (await (
-      await call('getMonthlyAmounts', { as: BOB, ledgerId: bobLedger, args: ['2026-01'] })
-    ).json()) as { amount: number }[];
-    expect(amounts).toEqual([expect.objectContaining({ amount: 111 })]);
+  it('refuses a planned amount for a month the entry does not occur in', async () => {
+    // The positive rule the guard exists for: an override that does not occur is
+    // invisible on every screen and comes back the day the recurrence changes to
+    // cover that month, silently beating the default.
+    const alice = await sessionFor(ALICE);
+    const ledger = sharedLedgerOf(alice);
+    const template = (await (
+      await call('addTemplate', {
+        as: ALICE, ledgerId: ledger,
+        args: [{ name: '車検', recurrence: { kind: 'yearly', month: 9, dayOfMonth: 20 }, type: 'expense' }],
+      })
+    ).json()) as { id: number };
+
+    const refused = await call('setMonthlyAmount', {
+      as: ALICE, ledgerId: ledger, args: [template.id, '2026-07', 50_000],
+    });
+    expect(refused.status).toBe(400);
+    expect((await envelopeOf(refused)).code).toBe('VALIDATION');
+
+    // September occurs, and is accepted -- a guard that refused everything would
+    // pass the assertion above.
+    const accepted = await call('setMonthlyAmount', {
+      as: ALICE, ledgerId: ledger, args: [template.id, '2026-09', 50_000],
+    });
+    expect(accepted.status).toBe(204);
   });
 
   it('still treats a missing GRANT as a server fault, not a permission answer', async () => {
@@ -479,7 +792,11 @@ describe('responses', () => {
     const session = (await (
       await production.request('/api/getSession', {
         method: 'POST',
-        headers: { 'x-test-user': ALICE, 'content-type': 'application/json' },
+        headers: {
+          'x-test-user': ALICE,
+          'content-type': 'application/json',
+          [CONTRACT_VERSION_HEADER]: String(CONTRACT_VERSION),
+        },
         body: '{}',
       })
     ).json()) as Session;
@@ -492,6 +809,7 @@ describe('responses', () => {
       headers: {
         'x-test-user': ALICE,
         'content-type': 'application/json',
+        [CONTRACT_VERSION_HEADER]: String(CONTRACT_VERSION),
         [LEDGER_HEADER]: String(sharedLedgerOf(session)),
       },
       body: JSON.stringify({ args: ['2026-01-01', 1e30] }),

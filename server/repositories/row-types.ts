@@ -21,7 +21,25 @@ export interface TemplateRow {
   id: number;
   ledger_id: number;
   name: string;
-  day_of_month: number;
+  // --- Recurrence (migration 005) ---
+  //
+  // Five columns, one shape at a time. Which of them are populated is decided by
+  // `recurrence_kind` and enforced by entry_templates_recurrence_shape_chk, so
+  // the combinations these nullable types admit are far wider than the ones the
+  // database will actually store. rowToTemplate is where they become the single
+  // `Recurrence` union the rest of the system sees.
+  /** NULL only for 'once', which carries its day inside `on_date`. */
+  day_of_month: number | null;
+  /** 'monthly' | 'yearly' | 'interval' | 'once' -- narrowed by the mapper. */
+  recurrence_kind: string;
+  /** 1-12, calendar style. Populated for 'yearly' only. */
+  month_of_year: number | null;
+  /** 2-60. Populated for 'interval' only. */
+  interval_months: number | null;
+  /** 'YYYY-MM'. Populated for 'interval' only. */
+  anchor_month: string | null;
+  /** 'YYYY-MM-DD' (DATE, already stringified by the parsers in db/pool.ts). */
+  on_date: string | null;
   type: string;
   /** BOOLEAN in PostgreSQL; the SQLite schema stored 0/1 in an INTEGER. */
   enabled: boolean;

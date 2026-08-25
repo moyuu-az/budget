@@ -170,6 +170,137 @@ END
 > また `現金` という名前の分類が 2 つあった帳簿では、**保有を持つ方**が昇格され、
 > もう一方は普通の分類として残る。
 
+### 005 は全項目の「いつ発生するか」を書き換える
+
+`005_entry_recurrence.sql` は金額を動かさないが、**既存の全ての収支項目の
+タイミングの意味を書き換える**。1 日でもズレれば予測が静かに嘘になるので、
+004 と同じ扱いで確認すること。
+
+- `entry_templates.day_of_month`（毎月 D 日固定）を 4 つの形に置き換える:
+  `monthly` / `yearly` / `interval` / `once`
+- **既存の全行は `monthly` にバックフィルされる**。日付は既に持っていたものが
+  そのまま残る = 意味は変わらない
+- `day_of_month` の NOT NULL は外れる（`once` は `on_date` が日付を持つため）。
+  代わりに `entry_templates_recurrence_shape_chk` が形ごとに必要な列と
+  禁止する列を両方強制する
+
+適用後の確認（**帳簿ごとに `app.current_ledger_id` を設定すること**。理由は
+004 と同じ、FORCE RLS は所有者にも効く）:
+
+```sh
+psql "$DATABASE_URL" -P pager=off -c "
+DO \$\$
+DECLARE led RECORD; total INTEGER; stray INTEGER;
+BEGIN
+  FOR led IN SELECT id, name FROM ledgers ORDER BY id LOOP
+    PERFORM set_config('app.current_ledger_id', led.id::TEXT, true);
+    SELECT count(*) INTO total FROM entry_templates;
+    SELECT count(*) INTO stray FROM entry_templates
+     WHERE recurrence_kind <> 'monthly' OR day_of_month IS NULL;
+    RAISE NOTICE '% (id %) -> % 件、うち monthly でない/日付なし: %',
+      led.name, led.id, total, stray;
+  END LOOP;
+END
+\$\$"
+```
+
+**移行直後は `stray` が全帳簿で 0 でなければならない。** 0 でなければ
+バックフィルが届いていない行があり、その項目は発生しなくなっている。
+（次回以降の確認では、ユーザーが年次や単発を登録していれば 0 でなくなる。
+これは正常。）
+
+### 005 適用後はリビジョンのロールバックが安全でなくなる
+
+**これは 005 に限った話ではなく、契約（`shared/types.ts` の `AppApi`）が
+非互換に変わったときは常にそうなる。** 005 が最初の実例なのでここに書く。
+
+`entry_templates` に `monthly` 以外の行が 1 つでも作られると、旧リビジョンへ
+戻すことは**データの誤読**を意味する:
+
+- 旧コードは `day_of_month` しか読まない。`yearly` / `interval` の行は
+  **毎月の項目として集計される**（年払いの保険料が 12 回計上される）
+- `once` の行は `day_of_month` が NULL なので**予測から消える**
+
+migration 005 自体はロールバックしても壊れない（列が増えているだけ）。危険なのは
+**新しい形のデータが作られた後**。戻す前に必ず確認する:
+
+```sh
+psql "$DATABASE_URL" -P pager=off -c "
+DO \$\$
+DECLARE led RECORD; n INTEGER;
+BEGIN
+  FOR led IN SELECT id, name FROM ledgers ORDER BY id LOOP
+    PERFORM set_config('app.current_ledger_id', led.id::TEXT, true);
+    SELECT count(*) INTO n FROM entry_templates WHERE recurrence_kind <> 'monthly';
+    IF n > 0 THEN RAISE WARNING '% (id %): monthly 以外が % 件。ロールバック不可', led.name, led.id, n; END IF;
+  END LOOP;
+END
+\$\$"
+```
+
+**1 件でも出たらリビジョンをそのままでは戻さない。** ただし「前に進むしかない」
+わけではない。下記の緊急手順で**戻せる状態に変換してから**戻す。
+
+#### 緊急ロールバック手順（本番障害時）
+
+旧コードが誤読するのは **monthly 以外の行**だけ。それらを無効化すれば旧コードに
+とって存在しないのと同じになるので、リビジョンを安全に戻せる。
+
+```sh
+# 1) 何を無効化するかを記録する（復旧時に戻すため。必ず先に取る）
+psql "$DATABASE_URL" -Atc "
+  SELECT id, ledger_id, name, recurrence_kind, day_of_month, month_of_year,
+         interval_months, anchor_month, on_date, enabled
+    FROM entry_templates WHERE recurrence_kind <> 'monthly'
+" > /tmp/non-monthly-backup.tsv
+wc -l /tmp/non-monthly-backup.tsv   # 0 行なら何もせず戻してよい
+
+# 2) 無効化する（migration は所有者ロールで走るが RLS は FORCE なので
+#    帳簿ごとに set_config が要る。004 / 005 と同じ理由）
+psql "$DATABASE_URL" -c "
+DO \$\$
+DECLARE led RECORD;
+BEGIN
+  FOR led IN SELECT id FROM ledgers ORDER BY id LOOP
+    PERFORM set_config('app.current_ledger_id', led.id::TEXT, true);
+    UPDATE entry_templates SET enabled = FALSE, updated_at = now()
+     WHERE recurrence_kind <> 'monthly' AND enabled;
+  END LOOP;
+END
+\$\$"
+
+# 3) リビジョンを戻す
+gcloud run services update-traffic "$SERVICE" --region="$REGION" --to-revisions=<旧リビジョン>=100
+```
+
+**この手順のコスト**: 年次・数ヶ月ごと・単発の項目が予測から消える。世帯は
+「その支出が予測に無い」状態になるので、**戻したことを必ず利用者に伝える**。
+金額データそのものは失われない（`enabled` を戻せば復帰する）。
+
+復旧後は `UPDATE entry_templates SET enabled = TRUE WHERE id IN (...)` を
+`/tmp/non-monthly-backup.tsv` の元の `enabled = t` だった行に対して実行する。
+
+> **feature flag による段階リリースは採らなかった。** 非月次の書き込みを 1
+> リリース止めることは、要望された機能を無効のまま出荷することであり、
+> 「ロールバックの練習のために価値を届けない」判断になる。上の手順は
+> 演習可能で、失うものが明示されていて、可逆である。
+
+### 開いたままのタブは自動的にブロックされる
+
+デプロイはタブが開いたままのブラウザの下でサーバーを差し替える。005 より前の
+変更は全て追加的だったので旧タブは知らないフィールドを無視するだけで済んだが、
+`dayOfMonth` → `recurrence` はそれを終わらせた。**旧ビルドが新レスポンスを読むと
+`dayOfMonth` が無いので予測から全項目が消え、平坦で安心できる残高線を描く。**
+
+そのため全リクエストが `X-Contract-Version` を送り、サーバーが一致しないものを
+**426 Upgrade Required** で拒否する（`shared/contract-version.ts`）。旧タブには
+「アプリが更新されました。再読み込みしてください」が全画面で出る。
+
+- **契約を非互換に変えたら `CONTRACT_VERSION` を上げる**。上げ忘れると旧タブが
+  黙って誤ったデータを読む
+- **追加的な変更では上げない**。上げるとデプロイのたびに全員が再読み込みになる
+- デプロイ後に 426 がログに出るのは正常（開いていた旧タブの分）
+
 ## 5. デプロイ
 
 ```sh

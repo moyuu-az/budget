@@ -8,7 +8,7 @@ import { useTemplateStore } from '../stores/useTemplateStore';
 import { useSnapshotStore } from '../stores/useSnapshotStore';
 import { useMonthlyStore } from '../stores/useMonthlyStore';
 import { useAssetStore } from '../stores/useAssetStore';
-import { makeAsset, makeAssetCategory, makeCashAsset, makeCashCategory } from '../test/factories';
+import { makeAsset, makeAssetCategory, makeCashAsset, makeCashCategory, monthlyOn } from '../test/factories';
 import type { AppApi, Session } from '../types';
 
 const SESSION: Session = {
@@ -39,7 +39,7 @@ function seedStores(): void {
   useTemplateStore.setState({
     templates: [
       {
-        id: 1, name: 'Rent', dayOfMonth: 27, type: 'expense', enabled: true,
+        id: 1, name: 'Rent', recurrence: monthlyOn(27), type: 'expense', enabled: true,
         sortOrder: 0, categoryId: null, defaultAmount: 375_000,
         createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
       },

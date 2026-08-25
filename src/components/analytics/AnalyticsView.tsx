@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useCategoryStore } from '../../stores/useCategoryStore';
@@ -19,6 +19,7 @@ import TimelineChart from './TimelineChart';
 import CategoryTrendChart from './CategoryTrendChart';
 import CompositionChart from './CompositionChart';
 import ComparisonTable from './ComparisonTable';
+import { useMonthRangeLoaded } from '../../hooks/useMonthLoaded';
 
 const periodOptions: Array<{ value: AnalyticsPeriod; label: string }> = [
   { value: '3m', label: '3ヶ月' },
@@ -35,8 +36,6 @@ function AnalyticsView() {
   const categories = useCategoryStore((s) => s.categories);
   const monthlyAmountsMap = useMonthlyStore((s) => s.monthlyAmountsMap);
   const monthlyActualsMap = useMonthlyStore((s) => s.monthlyActualsMap);
-  const fetchMonthlyAmountsRange = useMonthlyStore((s) => s.fetchMonthlyAmountsRange);
-  const fetchActualsRange = useMonthlyStore((s) => s.fetchActualsRange);
   const snapshots = useSnapshotStore((s) => s.snapshots);
 
   const now = useMemo(() => new Date(), []);
@@ -54,11 +53,16 @@ function AnalyticsView() {
     };
   }, [now, period]);
 
-  // Fetch data
-  useEffect(() => {
-    fetchMonthlyAmountsRange(startMonth, endMonth);
-    fetchActualsRange(startMonth, todayYearMonth);
-  }, [fetchMonthlyAmountsRange, fetchActualsRange, startMonth, endMonth, todayYearMonth]);
+  // Loads the span this view plots -- planned figures across the whole range,
+  // recorded actuals only up to today.
+  //
+  // Through the shared hook, which carries the ACTIVE LEDGER in its
+  // dependencies. This view does NOT gate on readiness (see below), so without
+  // it a ledger switch left both maps empty and the charts went on drawing:
+  // planned amounts silently falling back to template defaults and every month
+  // shown as having no actuals at all. A household that records its actuals
+  // would have been told, positively, that it does not.
+  useMonthRangeLoaded(startMonth, endMonth, todayYearMonth);
 
   // Forecast
   const forecastDays = useMemo(() => {
@@ -113,7 +117,8 @@ function AnalyticsView() {
       animate={{ opacity: 1 }}
       transition={{ duration: 0.4 }}
     >
-      <div className="flex items-center justify-between">
+      {/* Wraps: the period selector is four buttons wide. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-2xl font-bold text-white">分析</h1>
         <PeriodSelector
           options={periodOptions}

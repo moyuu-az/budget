@@ -5,7 +5,9 @@ import { setApi } from '../../lib/api';
 import { createMockApi } from '../../test/mock-api';
 import { useAssetStore } from '../../stores/useAssetStore';
 import { useTemplateStore } from '../../stores/useTemplateStore';
-import { makeCashAsset, makeCashCategory } from '../../test/factories';
+import { useSettingsStore } from '../../stores/useSettingsStore';
+import { makeCashAsset, makeCashCategory, monthlyOn } from '../../test/factories';
+import { useMonthlyStore } from '../../stores/useMonthlyStore';
 import type { EntryTemplate } from '../../types';
 
 // ---------------------------------------------------------------------------
@@ -21,7 +23,7 @@ import type { EntryTemplate } from '../../types';
 const rent: EntryTemplate = {
   id: 1,
   name: '家賃',
-  dayOfMonth: 27,
+  recurrence: monthlyOn(27),
   type: 'expense',
   enabled: true,
   sortOrder: 0,
@@ -37,7 +39,18 @@ beforeEach(() => {
   // that produced the false alarm.
   useTemplateStore.setState({ templates: [rent], status: 'ready' });
   useAssetStore.setState({ categories: [], assets: [], status: 'idle' });
+  useSettingsStore.setState({ settings: { minBalanceThreshold: 50_000 }, status: 'ready' });
+  useMonthlyStore.getState().reset();
 });
+
+// The month range is fetched by the hook itself, so every assertion about a
+// rendered figure has to WAIT for it.
+//
+// An earlier version of these tests marked those months ready by hand, and that
+// helper hid a real bug: the view fetched its selected 60-day period while this
+// row waited on 90, so the extra month was fetched by nobody and the KPI row
+// spun forever on the default screen. Going through the real fetch is the only
+// version of this test that could have caught it.
 
 afterEach(() => {
   setApi(null);
@@ -77,7 +90,7 @@ describe('when the fetch failed', () => {
 });
 
 describe('once the balance lands', () => {
-  it('shows the KPIs computed from it', () => {
+  it('shows the KPIs computed from it', async () => {
     useAssetStore.setState({
       categories: [makeCashCategory()],
       assets: [makeCashAsset({ value: 3_000_000 })],
@@ -86,14 +99,105 @@ describe('once the balance lands', () => {
 
     render(<KpiHero />);
 
-    expect(screen.getByText('最小残高(90日)')).toBeInTheDocument();
-    // 3,000,000 against 120,000/month of rent: comfortably safe, and nowhere
-    // near the 残高不足 the same templates produced against an unloaded balance.
-    expect(screen.getByText('安全')).toBeInTheDocument();
+    // Scoped to the card, because 安全 is now a badge on two of them -- 最小残高
+    // and 残高がもつ期間 both say it when there is nothing to warn about.
+    const minCard = (await screen.findByText('最小残高(90日)')).closest('div')!.parentElement!;
+    expect(minCard).toHaveTextContent('安全');
     expect(screen.queryByText('残高不足')).not.toBeInTheDocument();
   });
 
-  it('does raise the warning when the balance really is too low', () => {
+  it('says what is free to spend, and when the next income arrives', async () => {
+    // The figure this row was missing. 「90日後の最小残高」 is true and
+    // unactionable; this is the same projection asked as a question the
+    // household can answer today.
+    useAssetStore.setState({
+      categories: [makeCashCategory()],
+      assets: [makeCashAsset({ value: 3_000_000 })],
+      status: 'ready',
+    });
+    useTemplateStore.setState({
+      templates: [
+        rent,
+        {
+          ...rent, id: 2, name: '給料', type: 'income',
+          recurrence: monthlyOn(25), defaultAmount: 400_000,
+        },
+      ],
+      status: 'ready',
+    });
+
+    render(<KpiHero />);
+
+    expect(await screen.findByText('使っていい額')).toBeInTheDocument();
+    expect(screen.getByText(/給料まであと\d+日/)).toBeInTheDocument();
+  });
+
+  it('reports a SHORTFALL rather than a negative allowance', async () => {
+    // 「-¥12,000 使えます」 is not a sentence.
+    useAssetStore.setState({
+      categories: [makeCashCategory()],
+      assets: [makeCashAsset({ value: 55_000 })],
+      status: 'ready',
+    });
+
+    render(<KpiHero />);
+
+    expect(await screen.findByText('不足額')).toBeInTheDocument();
+    expect(screen.queryByText('使っていい額')).not.toBeInTheDocument();
+  });
+
+  it('measures 安全/注意 against the HOUSEHOLD’s floor, not a constant', async () => {
+    // 50,000 was hard-coded here, which made 「安全」 mean the same thing for
+    // every household -- and nothing on screen said where it came from.
+    useAssetStore.setState({
+      categories: [makeCashCategory()],
+      assets: [makeCashAsset({ value: 3_000_000 })],
+      status: 'ready',
+    });
+    // A household that wants to keep three million on hand is NOT safe at
+    // 3,000,000 minus a month of rent.
+    useSettingsStore.setState({ settings: { minBalanceThreshold: 3_000_000 }, status: 'ready' });
+
+    render(<KpiHero />);
+
+    const minCard = (await screen.findByText('最小残高(90日)')).closest('div')!.parentElement!;
+    expect(minCard).toHaveTextContent('注意');
+  });
+
+  it('says the floor is ALREADY below, rather than 「あと0日」 or 「安全」', async () => {
+    // The pair that used to contradict each other: 使っていい額 correctly
+    // reported a shortfall while 残高がもつ期間 said 「90日以上・安全」, in the
+    // same row. 「あと0日」 would be no better -- it reads as a forecast about
+    // tomorrow rather than a fact about today.
+    useAssetStore.setState({
+      categories: [makeCashCategory()],
+      assets: [makeCashAsset({ value: 10_000 })],
+      status: 'ready',
+    });
+
+    render(<KpiHero />);
+
+    expect(await screen.findByText('すでに下回っています')).toBeInTheDocument();
+    expect(screen.getByText('不足額')).toBeInTheDocument();
+    expect(screen.queryByText('90日以上')).not.toBeInTheDocument();
+    expect(screen.queryByText('あと0日')).not.toBeInTheDocument();
+  });
+
+  it('says 90日以上 rather than claiming the balance never runs out', async () => {
+    // Null from `runway` means "not within the window this KPI looks at". Saying
+    // 「割りません」 would be a claim the projection cannot support.
+    useAssetStore.setState({
+      categories: [makeCashCategory()],
+      assets: [makeCashAsset({ value: 10_000_000 })],
+      status: 'ready',
+    });
+
+    render(<KpiHero />);
+
+    expect(await screen.findByText('90日以上')).toBeInTheDocument();
+  });
+
+  it('does raise the warning when the balance really is too low', async () => {
     // The other half: the guard must not have turned the alarm off.
     useAssetStore.setState({
       categories: [makeCashCategory()],
@@ -103,6 +207,6 @@ describe('once the balance lands', () => {
 
     render(<KpiHero />);
 
-    expect(screen.getByText('残高不足')).toBeInTheDocument();
+    expect(await screen.findByText('残高不足')).toBeInTheDocument();
   });
 });

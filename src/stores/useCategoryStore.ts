@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Category, CategoryInput } from '../types';
 import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
+import { applyIfCurrent, currentGeneration, isCurrent } from '../app/ledger-generation';
 
 interface CategoryState {
   categories: Category[];
@@ -36,23 +37,30 @@ export const useCategoryStore = create<CategoryState>((set, get) => ({
   reset: () => set({ categories: [], loading: false }),
 
   fetchCategories: async () => {
+    // Tagged before the request, checked after: a ledger switch in between makes
+    // this answer belong to a ledger nobody is looking at. See
+    // src/app/ledger-generation.ts.
+    const tag = currentGeneration();
     set({ loading: true });
     try {
       const categories = await getApi().getCategories();
-      set({ categories, loading: false });
+      applyIfCurrent(tag, () => set({ categories, loading: false }));
     } catch (e) {
-      set({ loading: false });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ loading: false });
+        reportError(e);
+      });
     }
   },
 
   addCategory: async (input: CategoryInput) => {
+    // Tagged before the request; see src/app/ledger-generation.ts.
+    const tag = currentGeneration();
     try {
       const category = await getApi().addCategory(input);
-      set({ categories: [...get().categories, category] });
-      return true;
+      return applyIfCurrent(tag, () => set({ categories: [...get().categories, category] }));
     } catch (e) {
-      reportError(e);
+      applyIfCurrent(tag, () => reportError(e));
       return false;
     }
   },
@@ -63,12 +71,18 @@ export const useCategoryStore = create<CategoryState>((set, get) => ({
     set({
       categories: prev.map((c) => (c.id === id ? { ...c, ...input } : c)),
     });
+    const tag = currentGeneration();
     try {
       await getApi().updateCategory(id, input);
-      return true;
+      return isCurrent(tag);
     } catch (e) {
-      set({ categories: prev });
-      reportError(e);
+      // Tagged before the request; see src/app/ledger-generation.ts. Rolling an
+      // optimistic edit back onto an array that a ledger switch has already
+      // replaced would splice the previous household's row into this one's list.
+      applyIfCurrent(tag, () => {
+        set({ categories: prev });
+        reportError(e);
+      });
       return false;
     }
   },
@@ -77,12 +91,18 @@ export const useCategoryStore = create<CategoryState>((set, get) => ({
     const prev = get().categories;
     // optimistic removal
     set({ categories: prev.filter((c) => c.id !== id) });
+    const tag = currentGeneration();
     try {
       await getApi().deleteCategory(id);
-      return true;
+      return isCurrent(tag);
     } catch (e) {
-      set({ categories: prev });
-      reportError(e);
+      // Tagged before the request; see src/app/ledger-generation.ts. Rolling an
+      // optimistic edit back onto an array that a ledger switch has already
+      // replaced would splice the previous household's row into this one's list.
+      applyIfCurrent(tag, () => {
+        set({ categories: prev });
+        reportError(e);
+      });
       return false;
     }
   },

@@ -7,6 +7,11 @@ import { METHODS, type DataMethod } from './http/api';
 import { UnauthorizedError } from './http/errors';
 import type { IdentityVerifier } from './auth/identity';
 import type { Session } from '../shared/types';
+import type { Recurrence } from '../shared/recurrence';
+import { CONTRACT_VERSION, CONTRACT_VERSION_HEADER } from '../shared/contract-version';
+
+/** Shorthand for the shape almost every test template has. */
+const monthlyOn = (dayOfMonth: number): Recurrence => ({ kind: 'monthly', dayOfMonth });
 
 // ---------------------------------------------------------------------------
 // The exhaustive tenant-isolation sweep.
@@ -60,6 +65,10 @@ async function post(method: string, as: string, ledgerId: number, args: unknown[
     headers: {
       'x-test-user': as,
       'content-type': 'application/json',
+      // Every request states which wire contract it was built against; without
+      // it the server refuses the caller as a stale client, and this whole
+      // sweep would pass for the wrong reason.
+      [CONTRACT_VERSION_HEADER]: String(CONTRACT_VERSION),
       [LEDGER_HEADER]: String(ledgerId),
     },
     body: JSON.stringify({ args }),
@@ -69,7 +78,11 @@ async function post(method: string, as: string, ledgerId: number, args: unknown[
 async function signIn(email: string): Promise<Session> {
   const response = await app.request('/api/getSession', {
     method: 'POST',
-    headers: { 'x-test-user': email, 'content-type': 'application/json' },
+    headers: {
+      'x-test-user': email,
+      'content-type': 'application/json',
+      [CONTRACT_VERSION_HEADER]: String(CONTRACT_VERSION),
+    },
     body: '{}',
   });
   return (await response.json()) as Session;
@@ -83,7 +96,7 @@ async function seed(as: string, ledgerId: number, tag: string): Promise<Fixture>
 
   const template = (await (
     await post('addTemplate', as, ledgerId, [
-      { name: `${tag}-tpl`, dayOfMonth: 15, type: 'expense', categoryId: category.id, defaultAmount: 1000 },
+      { name: `${tag}-tpl`, recurrence: monthlyOn(15), type: 'expense', categoryId: category.id, defaultAmount: 1000 },
     ])
   ).json()) as { id: number };
 
@@ -142,6 +155,13 @@ async function snapshotLedger(ledgerId: number): Promise<string> {
  * without deciding how it could be abused here is a compile error.
  */
 const ADVERSARIAL_ARGS: { [M in DataMethod]: (victim: Fixture) => unknown[] } = {
+  // Settings take no id at all: the only thing naming a ledger is the header,
+  // which the sweep already forges. The attack these two have to survive is
+  // therefore "read/write the OTHER ledger's settings by claiming to be in it",
+  // and the sweep supplies that on its own.
+  getLedgerSettings: () => [],
+  updateLedgerSettings: () => [{ minBalanceThreshold: 999_999 }],
+
   // No arguments to subvert -- these are covered by asserting the RESPONSE holds
   // nothing of the other ledger's.
   getCategories: () => [],
@@ -156,7 +176,7 @@ const ADVERSARIAL_ARGS: { [M in DataMethod]: (victim: Fixture) => unknown[] } = 
   // Every one of these names an id from the OTHER ledger.
   updateCategory: (v) => [v.categoryId, { name: 'hijacked', color: '#000000' }],
   deleteCategory: (v) => [v.categoryId],
-  addTemplate: (v) => [{ name: 'intruder', dayOfMonth: 1, type: 'expense', categoryId: v.categoryId }],
+  addTemplate: (v) => [{ name: 'intruder', recurrence: monthlyOn(1), type: 'expense', categoryId: v.categoryId }],
   updateTemplate: (v) => [v.templateId, { name: 'hijacked', defaultAmount: 999 }],
   toggleTemplate: (v) => [v.templateId, false],
   deleteTemplate: (v) => [v.templateId],

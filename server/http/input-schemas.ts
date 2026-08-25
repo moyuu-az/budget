@@ -7,6 +7,8 @@ import {
   MAX_FIELD_TEXT_LENGTH,
   MAX_FIELD_UNIT_LENGTH,
 } from '../../shared/asset-fields';
+import { parseRecurrence, type Recurrence } from '../../shared/recurrence';
+import { MAX_MIN_BALANCE_THRESHOLD } from '../../shared/ledger-settings';
 
 // Input validation at the trust boundary.
 //
@@ -93,14 +95,81 @@ export const categoryInputSchema = categoryFieldsSchema.superRefine((input, ctx)
 // nothing here to compare it against.
 export const categoryPatchSchema = categoryFieldsSchema.partial();
 
+/**
+ * When a planned entry happens.
+ *
+ * Delegated to `parseRecurrence` rather than rebuilt as a Zod discriminated
+ * union, because the rules are not only shape rules: 'once' must carry a date
+ * that EXISTS (2026-02-31 parses as a well-formed string and would then be an
+ * entry that never occurs), and the interval bounds have to match the database
+ * CHECK. Writing those twice is writing them to eventually disagree -- and the
+ * half that disagrees here is the half that turns a readable validation message
+ * into a CONFLICT from the INSERT.
+ *
+ * `transform` returns the NARROWED value, so what reaches the repository has
+ * already had any stray fields dropped -- a `{kind:'monthly'}` carrying a
+ * leftover `month` cannot reach entry_templates_recurrence_shape_chk.
+ *
+ * `z.custom<Recurrence>()` rather than `z.unknown()` for the base: the handler
+ * table in api.ts requires each schema's INPUT type to match the method
+ * signature it validates, so a schema declaring `unknown` in fails to compile
+ * there. The check itself is entirely in the superRefine below -- z.custom with
+ * no validator asserts a type without testing anything, which is exactly what is
+ * wanted when the real test cannot be expressed as a Zod combinator.
+ */
+const recurrenceSchema = z
+  .custom<Recurrence>()
+  .superRefine((value, ctx) => {
+    const parsed = parseRecurrence(value);
+    if (!parsed.ok) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: parsed.error });
+    }
+  })
+  .transform((value): Recurrence => {
+    // Unreachable once superRefine has added an issue -- Zod skips the transform
+    // for a failed refinement. The throw is here so this function is total
+    // rather than relying on a cast to paper over the impossible branch.
+    const parsed = parseRecurrence(value);
+    if (!parsed.ok) throw new Error(parsed.error);
+    return parsed.value;
+  });
+
 export const templateInputSchema = z.object({
   name: nameSchema('テンプレート名'),
-  dayOfMonth: z.number().int().min(1).max(31),
+  recurrence: recurrenceSchema,
   type: typeEnum,
   categoryId: z.number().int().positive().nullable().optional(),
   defaultAmount: z.number().finite().optional(),
 });
+
+// `.partial()` on a schema whose `recurrence` is a ZodEffects makes the whole
+// effect optional, which is what a patch needs: absent means "leave the timing
+// alone", and any value present still goes through the same narrowing.
 export const templatePatchSchema = templateInputSchema.partial();
+
+/**
+ * A patch of this ledger's settings.
+ *
+ * Every field optional: `undefined` means "leave alone", which is what lets a
+ * form save one setting without asserting a value for every other one that will
+ * ever exist. `.strict()` rejects an unknown key rather than dropping it -- a
+ * misspelled setting name that silently does nothing is worse than an error,
+ * because the user sees the form save and the figure not change.
+ *
+ * The bounds mirror shared/ledger-settings.ts, which is also where the reader
+ * clamps. Both exist on purpose: this one gives the user a message, and that one
+ * keeps a value written around this schema from making the dashboard unusable.
+ */
+export const ledgerSettingsPatchSchema = z
+  .object({
+    minBalanceThreshold: z
+      .number()
+      .finite()
+      .min(0, '最低残高は0以上で指定してください')
+      .max(MAX_MIN_BALANCE_THRESHOLD, '最低残高が大きすぎます')
+      .optional(),
+  })
+  .strict();
 
 // ---------------------------------------------------------------------------
 // Assets

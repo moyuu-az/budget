@@ -1,6 +1,7 @@
 import { type ReactElement } from 'react';
 import { useAssetStore } from '../../stores/useAssetStore';
 import { useCashBalance } from '../../hooks/useCashBalance';
+import { STALE_AFTER_DAYS, useCashFreshness } from '../../hooks/useCashFreshness';
 import { findCashCategory } from '../../utils/net-worth';
 import { formatYen } from '../../utils/currency';
 import { LoadGate } from '../ui/LoadGate';
@@ -33,6 +34,7 @@ interface Props {
  */
 function CashBalance({ onEdit }: Props): ReactElement {
   const balance = useCashBalance();
+  const freshness = useCashFreshness();
   const categories = useAssetStore((s) => s.categories);
   const assets = useAssetStore((s) => s.assets);
   const status = useAssetStore((s) => s.status);
@@ -83,6 +85,38 @@ function CashBalance({ onEdit }: Props): ReactElement {
           ? '資産の「現金」に登録すると反映されます'
           : `資産の「${cashCategory?.name}」${holdingCount} 件の合計`}
       </p>
+
+      {/* HOW OLD THE NUMBER IS.
+          
+          This figure is typed in by hand, and every projection, warning and
+          「使っていい額」 on the dashboard is computed from it. The moment
+          somebody forgets to update it, all of them are confidently wrong -- and
+          until this line existed, a stale balance and a current one rendered
+          identically.
+          
+          Nothing here fixes the staleness; nothing can, short of a bank
+          connection. What it does is make it VISIBLE, which turns a silent error
+          into a prompt. */}
+      {freshness.daysSince !== null && (
+        <p
+          className={`mt-0.5 text-xs ${
+            freshness.isStale
+              ? 'text-[var(--color-semantic-warning)]'
+              : 'text-[var(--color-content-muted)]'
+          }`}
+        >
+          {freshness.daysSince === 0 ? '今日更新' : `${freshness.daysSince}日前に更新`}
+          {/* The COUNT, not just "it is old".
+              
+              The figure above is a SUM, and one component left untouched for a
+              year makes the whole total that stale however recently the others
+              were edited -- a ¥1,000,000 bank balance from 300 days ago beside a
+              ¥10,000 wallet updated today. Naming how many are in question is
+              what points at where to look. */}
+          {freshness.isStale &&
+            `・${freshness.staleCount}件が${STALE_AFTER_DAYS}日以上前(最古 ${freshness.oldestDaysSince}日前)`}
+        </p>
+      )}
     </div>
   );
 }

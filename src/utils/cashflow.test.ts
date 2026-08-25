@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { buildCashFlowData } from './cashflow';
 import type { EntryTemplate, Category, MonthlyAmountsMap } from '../types';
+import { monthlyOn, onceOn, yearlyOn } from '../test/factories';
 
 function makeTemplate(overrides: Partial<EntryTemplate> = {}): EntryTemplate {
   return {
     id: 1,
     name: 'Template',
-    dayOfMonth: 1,
+    recurrence: monthlyOn(1),
     type: 'expense',
     enabled: true,
     sortOrder: 0,
@@ -33,6 +34,34 @@ function makeCategory(overrides: Partial<Category> = {}): Category {
 const YM = '2026-06';
 
 describe('buildCashFlowData', () => {
+  // -------------------------------------------------------------------------
+  // Only what happens THIS month flows through the diagram. An entry can be
+  // enabled all year and occur once; drawing it into all twelve would show a
+  // household twelve car inspections, and would put the chart out of step with
+  // the 支出合計 printed directly above it.
+  // -------------------------------------------------------------------------
+  it('excludes a yearly entry from a month it does not fall in', () => {
+    const tpls = [
+      makeTemplate({ id: 1, defaultAmount: 30_000 }),
+      makeTemplate({ id: 2, name: '車検', recurrence: yearlyOn(9, 12), defaultAmount: 120_000 }),
+    ];
+    const data = buildCashFlowData(tpls, new Map(), [], YM)!;
+    expect(data.summary.totalExpenses).toBe(30_000);
+  });
+
+  it('includes it in the month it does fall in', () => {
+    const tpls = [makeTemplate({ id: 2, name: '車検', recurrence: yearlyOn(6, 12), defaultAmount: 120_000 })];
+    const data = buildCashFlowData(tpls, new Map(), [], YM)!;
+    expect(data.summary.totalExpenses).toBe(120_000);
+  });
+
+  it('returns null when nothing at all happens this month', () => {
+    // Distinct from "no templates": the household has entries, none of them is
+    // this month's, and an empty diagram is the honest answer.
+    const tpls = [makeTemplate({ id: 3, recurrence: onceOn('2027-01-05') })];
+    expect(buildCashFlowData(tpls, new Map(), [], YM)).toBeNull();
+  });
+
   it('returns null when there are no enabled templates', () => {
     const tpls = [makeTemplate({ id: 1, enabled: false })];
     expect(buildCashFlowData(tpls, new Map(), [], YM)).toBeNull();

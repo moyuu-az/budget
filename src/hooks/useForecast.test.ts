@@ -5,13 +5,13 @@ import { useDashboardKpis } from './useDashboardKpis';
 import { useTemplateStore } from '../stores/useTemplateStore';
 import { useAssetStore } from '../stores/useAssetStore';
 import { useUIStore } from '../stores/useUIStore';
-import { makeAsset, makeAssetCategory, makeCashAsset, makeCashCategory } from '../test/factories';
+import { makeAsset, makeAssetCategory, makeCashAsset, makeCashCategory, monthlyOn } from '../test/factories';
 import type { Asset, EntryTemplate } from '../types';
 
 const rent: EntryTemplate = {
   id: 1,
   name: '家賃',
-  dayOfMonth: 27,
+  recurrence: monthlyOn(27),
   type: 'expense',
   enabled: true,
   sortOrder: 0,

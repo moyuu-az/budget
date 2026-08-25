@@ -15,6 +15,7 @@ import {
   assetCategoryPatchSchema,
   assetInputSchema,
   assetPatchSchema,
+  ledgerSettingsPatchSchema,
 } from './input-schemas';
 
 /**
@@ -54,6 +55,15 @@ export interface MethodSpec<M extends DataMethod> {
  */
 export const METHODS: { [M in DataMethod]: MethodSpec<M> } = {
   // --- Categories ---
+  getLedgerSettings: {
+    args: z.tuple([]),
+    handle: (repos) => repos.settings.get(),
+  },
+  updateLedgerSettings: {
+    args: z.tuple([ledgerSettingsPatchSchema]),
+    handle: (repos, [patch]) => repos.settings.update(patch),
+  },
+
   getCategories: {
     args: z.tuple([]),
     handle: (repos) => repos.category.getAll(),

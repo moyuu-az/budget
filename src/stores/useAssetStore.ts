@@ -3,6 +3,7 @@ import type { Asset, AssetCategory, AssetCategoryInput, AssetInput } from '../ty
 import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
 import type { LoadStatus } from './load-status';
+import { applyIfCurrent, currentGeneration, isCurrent } from '../app/ledger-generation';
 
 // ---------------------------------------------------------------------------
 // Asset categories and holdings in ONE store.
@@ -68,6 +69,12 @@ export const useAssetStore = create<AssetState>((set, get) => ({
   reset: () => set({ categories: [], assets: [], status: 'idle' }),
 
   fetchAssets: async () => {
+      // Tagged before the request, checked after. A ledger switch in between
+      // makes this answer belong to a ledger nobody is looking at, and writing
+      // it would show the previous household's figures under the new one's name
+      // -- marked 'ready', so nothing would ever correct it.
+      // See src/app/ledger-generation.ts.
+    const tag = currentGeneration();
     set({ status: 'loading' });
     try {
       // One await, not two sequential ones: the views need both before they can
@@ -76,23 +83,30 @@ export const useAssetStore = create<AssetState>((set, get) => ({
         getApi().getAssetCategories(),
         getApi().getAssets(),
       ]);
-      set({ categories, assets, status: 'ready' });
+      applyIfCurrent(tag, () => set({ categories, assets, status: 'ready' }));
     } catch (e) {
       // 'error', not back to 'idle': the balance is unknown either way, but only
       // this distinction lets the dashboard offer to try again instead of
       // pulsing a skeleton at someone who has no idea anything went wrong.
-      set({ status: 'error' });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ status: 'error' });
+        reportError(e);
+      });
     }
   },
 
   addCategory: async (input) => {
+    // Tagged before the request. A ledger switch mid-flight means this answer --
+    // success or failure -- belongs to a ledger nobody is looking at, and
+    // writing it would splice one household's row into the other's list, or roll
+    // an optimistic edit back onto an array that has since been replaced. See
+    // src/app/ledger-generation.ts.
+    const tag = currentGeneration();
     try {
       const category = await getApi().addAssetCategory(input);
-      set({ categories: [...get().categories, category] });
-      return true;
+      return applyIfCurrent(tag, () => set({ categories: [...get().categories, category] }));
     } catch (e) {
-      reportError(e);
+      applyIfCurrent(tag, () => reportError(e));
       return false;
     }
   },
@@ -102,12 +116,15 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     // Optimistic: the row is already on screen, and a field-definition edit is
     // the kind of change a user expects to see land immediately.
     set({ categories: prev.map((c) => (c.id === id ? { ...c, ...input } : c)) });
+    const tag = currentGeneration();
     try {
       await getApi().updateAssetCategory(id, input);
-      return true;
+      return isCurrent(tag);
     } catch (e) {
-      set({ categories: prev });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ categories: prev });
+        reportError(e);
+      });
       return false;
     }
   },
@@ -121,23 +138,26 @@ export const useAssetStore = create<AssetState>((set, get) => ({
       categories: prevCategories.filter((c) => c.id !== id),
       assets: prevAssets.filter((a) => a.categoryId !== id),
     });
+    const tag = currentGeneration();
     try {
       await getApi().deleteAssetCategory(id);
-      return true;
+      return isCurrent(tag);
     } catch (e) {
-      set({ categories: prevCategories, assets: prevAssets });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ categories: prevCategories, assets: prevAssets });
+        reportError(e);
+      });
       return false;
     }
   },
 
   addAsset: async (input) => {
+    const tag = currentGeneration();
     try {
       const asset = await getApi().addAsset(input);
-      set({ assets: [...get().assets, asset] });
-      return true;
+      return applyIfCurrent(tag, () => set({ assets: [...get().assets, asset] }));
     } catch (e) {
-      reportError(e);
+      applyIfCurrent(tag, () => reportError(e));
       return false;
     }
   },
@@ -147,12 +167,16 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     // the category no longer carries, so merging the patch locally could leave a
     // key on screen that was not stored. The server's answer is the truth, and
     // it is one small round trip away.
+    const tag = currentGeneration();
     try {
       await getApi().updateAsset(id, input);
     } catch (e) {
-      reportError(e);
+      applyIfCurrent(tag, () => reportError(e));
       return false;
     }
+    // The WRITE succeeded, but for a ledger nobody is looking at any more. There
+    // is nothing to refetch into and nothing worth saying, so stop here.
+    if (!isCurrent(tag)) return false;
 
     // The write already succeeded, so a failure from here on is a stale LIST,
     // not a lost edit. Reporting it as a failure would send the user back to
@@ -177,7 +201,8 @@ export const useAssetStore = create<AssetState>((set, get) => ({
     // it is visible instead: summarizeHoldings reports it as その他 rather than
     // letting the parts quietly fail to add up.
     try {
-      set({ assets: await getApi().getAssets() });
+      const assets = await getApi().getAssets();
+      applyIfCurrent(tag, () => set({ assets }));
     } catch {
       // Intentionally ignored; see above.
     }
@@ -187,12 +212,15 @@ export const useAssetStore = create<AssetState>((set, get) => ({
   deleteAsset: async (id) => {
     const prev = get().assets;
     set({ assets: prev.filter((a) => a.id !== id) });
+    const tag = currentGeneration();
     try {
       await getApi().deleteAsset(id);
-      return true;
+      return isCurrent(tag);
     } catch (e) {
-      set({ assets: prev });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ assets: prev });
+        reportError(e);
+      });
       return false;
     }
   },

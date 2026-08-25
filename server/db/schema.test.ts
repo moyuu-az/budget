@@ -1,5 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { startTestDb, resetDb, createLedger, raw, type TestDb } from '../test/pg';
+// LEDGER_SCOPED_TABLES comes from the harness rather than being restated here.
+//
+// It already had one: `resetDb()` TRUNCATEs it between tests, and
+// `server/isolation.test.ts` snapshots it to prove the adversarial sweep leaves
+// the victim ledger untouched. A second copy would mean a new ledger-scoped
+// table could satisfy the drift guard below while `pg.ts` was left behind --
+// and then the sweep would stop covering it AND resetDb would stop truncating
+// it, both silently, with "we added a guard" as the reason nobody looked.
+import {
+  startTestDb, resetDb, createLedger, raw, LEDGER_SCOPED_TABLES, type TestDb,
+} from '../test/pg';
 import { withLedgerScope, withoutLedgerScope } from './ledger-scope';
 import { assertIsolationEnforceable } from './assert-isolation';
 
@@ -15,6 +25,29 @@ import { assertIsolationEnforceable } from './assert-isolation';
 let db: TestDb;
 let ledgerA: number;
 let ledgerB: number;
+
+/**
+ * Tables that carry `ledger_id` and are deliberately NOT under RLS, mapped to
+ * the columns they are allowed to hold.
+ *
+ * `ledger_members` answers "may this user open this ledger?", which is decided
+ * BEFORE a ledger is chosen -- a ledger predicate on it would make the
+ * authentication layer unable to read the very rows that pick the ledger
+ * (migration 002, "TABLES DELIBERATELY *NOT* COVERED"). Its protection lives
+ * outside the database: only `server/auth/` reads it, and always filtered by
+ * the authenticated user id.
+ *
+ * WHY A MAP AND NOT A LIST OF NAMES
+ *   A name here removes a table from the guard below, which makes this the one
+ *   place this file can be told a lie. Pairing the name with its columns makes
+ *   "exempt it" and "write down what it is allowed to contain" the same edit --
+ *   there is no way to add the second exemption and leave it unwatched. The
+ *   moment such a table grows a figure or a date, the test below fails, because
+ *   that is domain data and domain data here has no isolation at all.
+ */
+const LEDGER_ID_WITHOUT_RLS: Readonly<Record<string, readonly string[]>> = {
+  ledger_members: ['created_at', 'ledger_id', 'role', 'user_id'],
+};
 
 /** PostgreSQL SQLSTATE of a rejected statement, or undefined if it succeeded. */
 async function sqlstateOf(fn: () => Promise<unknown>): Promise<string | undefined> {
@@ -50,16 +83,134 @@ describe('row-level security', () => {
       `SELECT relname, relrowsecurity, relforcerowsecurity
          FROM pg_class
         WHERE relname = ANY($1::text[])`,
-      [[
-        'settings', 'categories', 'entry_templates',
-        'monthly_amounts', 'monthly_actuals', 'balance_snapshots',
-      ]],
+      [[...LEDGER_SCOPED_TABLES]],
     );
 
-    expect(rows).toHaveLength(6);
+    expect(rows).toHaveLength(LEDGER_SCOPED_TABLES.length);
     for (const row of rows) {
       expect(row.relrowsecurity, `${row.relname} ENABLE`).toBe(true);
       expect(row.relforcerowsecurity, `${row.relname} FORCE`).toBe(true);
+    }
+  });
+
+  it('covers every table that carries a ledger_id, not just a hand-kept list', async () => {
+    // The list above is a fine ASSERTION and a useless GUARD on its own: a
+    // ledger-scoped table added in a later migration would simply not be in it,
+    // and this file would go on passing while that table's rows were readable
+    // from every household. Nothing would fail; the leak would be silent.
+    //
+    // So ask the schema instead of a human. `ledger_id NOT NULL` is what makes
+    // a table ledger-scoped (001, "Ledger-scoped domain tables"), which means
+    // the set of tables that need policies is derivable -- and a new one shows
+    // up here the moment its migration lands, whether or not anyone remembered
+    // this file.
+    // `pg_attribute`, NOT `information_schema.columns`.
+    //
+    // That view filters by privilege (`pg_has_role` / `has_column_privilege`),
+    // so it shows every table only because this query runs as the superuser. A
+    // table the querying role could not see would drop out of `discovered`
+    // silently and the guard would pass -- which is precisely the failure this
+    // branch removed from migration 005: a check that reported success by being
+    // blind. The catalogue is not privilege-filtered.
+    //
+    // `relkind IN ('r', 'p')`: a partitioned parent is 'p', and it is the parent
+    // that carries ENABLE/FORCE for the whole partition tree.
+    const rows = await raw<{ tablename: string; enabled: boolean; forced: boolean }>(
+      db.adminPool,
+      `SELECT c.relname   AS tablename,
+              c.relrowsecurity      AS enabled,
+              c.relforcerowsecurity AS forced
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relkind IN ('r', 'p')
+          AND EXISTS (
+                SELECT 1
+                  FROM pg_attribute a
+                 WHERE a.attrelid = c.oid
+                   AND a.attname  = 'ledger_id'
+                   AND a.attnum > 0
+                   AND NOT a.attisdropped
+              )`,
+    );
+
+    const exempt = (name: string): boolean =>
+      Object.prototype.hasOwnProperty.call(LEDGER_ID_WITHOUT_RLS, name);
+
+    // Sorted in JS on both sides. PostgreSQL's ORDER BY uses the database
+    // collation and Array#sort uses UTF-16 code units; they agree for today's
+    // names and would not have to for tomorrow's, which would make this an
+    // environment-dependent failure rather than a real one.
+    const discovered = rows.map((r) => r.tablename).filter((name) => !exempt(name)).sort();
+
+    // Both directions matter. A table in the schema but not in the list means a
+    // new one arrived unguarded; a name in the list but not in the schema means
+    // the list is describing a table that no longer exists, which makes the
+    // assertion above pass against nothing.
+    expect(discovered).toEqual([...LEDGER_SCOPED_TABLES].sort());
+
+    for (const row of rows) {
+      if (exempt(row.tablename)) continue;
+      expect(row.enabled, `${row.tablename} ENABLE ROW LEVEL SECURITY`).toBe(true);
+      expect(row.forced, `${row.tablename} FORCE ROW LEVEL SECURITY`).toBe(true);
+    }
+  });
+
+  it('gives every covered table the SAME predicate, on read and on write', async () => {
+    // ENABLE and FORCE only say that policies are consulted. They say nothing
+    // about what the policies DECIDE -- and a table with row-level security
+    // switched on and a wrong predicate is the case that actually leaks, while
+    // looking correct in every flag-level check.
+    //
+    // apply_ledger_isolation() emits one policy per table with a fixed shape, so
+    // the expected text is exact. WITH CHECK matters as much as USING: without
+    // it a household could WRITE a row into another ledger, which the USING
+    // clause would then hide from the household it was stolen from.
+    const policies = await raw<{ tablename: string; qual: string; with_check: string }>(
+      db.adminPool,
+      `SELECT tablename, qual, with_check
+         FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = ANY($1::text[])`,
+      [[...LEDGER_SCOPED_TABLES]],
+    );
+
+    // Exactly one policy each: a second one is an OR, and an OR with anything
+    // is a way through.
+    expect(policies.map((p) => p.tablename).sort()).toEqual([...LEDGER_SCOPED_TABLES].sort());
+
+    for (const policy of policies) {
+      expect(policy.qual, `${policy.tablename} USING`).toBe(
+        '(ledger_id = app_current_ledger_id())',
+      );
+      expect(policy.with_check, `${policy.tablename} WITH CHECK`).toBe(
+        '(ledger_id = app_current_ledger_id())',
+      );
+    }
+  });
+
+  it('leaves the exempted auth tables exempt on purpose, not by omission', async () => {
+    // EVERY exemption, not the first one. Written as a loop over the map so a
+    // second entry cannot arrive unwatched: the map makes the columns mandatory
+    // and this makes them checked.
+    //
+    // What it is for: `ledger_members` maps users to ledgers and nothing else.
+    // The moment one of these tables carries a figure, a date, or anything a
+    // household would consider its own, it holds domain data with no isolation
+    // at all -- and this fails before that ships.
+    for (const [table, expected] of Object.entries(LEDGER_ID_WITHOUT_RLS)) {
+      const columns = await raw<{ attname: string }>(
+        db.adminPool,
+        `SELECT a.attname
+           FROM pg_attribute a
+           JOIN pg_class c     ON c.oid = a.attrelid
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'public' AND c.relname = $1
+            AND a.attnum > 0 AND NOT a.attisdropped`,
+        [table],
+      );
+
+      expect(columns.length, `${table} exists`).toBeGreaterThan(0);
+      expect(columns.map((c) => c.attname).sort(), `${table} columns`).toEqual([...expected].sort());
     }
   });
 

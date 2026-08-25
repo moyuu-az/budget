@@ -3,8 +3,12 @@
 // to pull into BOTH the server and the browser bundle.
 
 import type { AssetFieldDef, AssetFieldValues } from './asset-fields';
+import type { Recurrence } from './recurrence';
+import type { LedgerSettings } from './ledger-settings';
 
 export type { AssetFieldDef, AssetFieldType, AssetFieldValue, AssetFieldValues } from './asset-fields';
+export type { Recurrence, RecurrenceKind, YearMonth, IsoDate } from './recurrence';
+export type { LedgerSettings } from './ledger-settings';
 
 // --- Category ---
 
@@ -49,10 +53,25 @@ export interface CategoryInput {
 }
 
 // --- EntryTemplate ---
+//
+// WHEN AN ENTRY HAPPENS IS A `Recurrence`, NOT A DAY NUMBER.
+//
+// This carried `dayOfMonth: number` until migration 005, which made every
+// planned entry implicitly monthly. The expenses a household is actually caught
+// out by are the ones that skip months -- 車検, 固定資産税, a year-paid premium,
+// a trip -- and they had nowhere to live.
+//
+// Replacing the field rather than adding beside it is deliberate. Two ways to
+// say "the 25th" would mean every reader choosing one, and the five places that
+// total a month would drift apart over which. Removing it makes each of those a
+// compile error, which is how they were all found.
+//
+// See shared/recurrence.ts for the variants and for the ONE predicate that
+// answers whether an entry falls in a given month.
 export interface EntryTemplate {
   id: number;
   name: string;
-  dayOfMonth: number;
+  recurrence: Recurrence;
   type: 'income' | 'expense';
   enabled: boolean;
   sortOrder: number;
@@ -64,7 +83,7 @@ export interface EntryTemplate {
 
 export interface EntryTemplateInput {
   name: string;
-  dayOfMonth: number;
+  recurrence: Recurrence;
   type: 'income' | 'expense';
   categoryId?: number | null;
   defaultAmount?: number;
@@ -239,6 +258,24 @@ export interface AppApi {
   // the cash category's holdings (see the Assets note above), so a method
   // returning it would be a second source for a figure that already has one --
   // and a method setting it would have no way to say WHICH holding changed.
+  /**
+   * What this ledger has configured.
+   *
+   * ALWAYS COMPLETE. A ledger that has never opened the settings screen gets the
+   * defaults, so no caller has to decide what a missing value means -- that
+   * decision lives once, in shared/ledger-settings.ts.
+   */
+  getLedgerSettings(): Promise<LedgerSettings>;
+
+  /**
+   * Applies a patch and answers with the FULL settings as STORED.
+   *
+   * Returning the stored value rather than the patch matters: the parser clamps
+   * out-of-range figures, and a form showing what it asked for instead of what
+   * was kept would silently change on the next reload.
+   */
+  updateLedgerSettings(patch: Partial<LedgerSettings>): Promise<LedgerSettings>;
+
   getCategories(): Promise<Category[]>;
   addCategory(category: CategoryInput): Promise<Category>;
   updateCategory(id: number, category: Partial<CategoryInput>): Promise<void>;
@@ -254,6 +291,20 @@ export interface AppApi {
   getMonthlyAmountsRange(startMonth: string, endMonth: string): Promise<MonthlyAmount[]>;
   setMonthlyAmount(templateId: number, yearMonth: string, amount: number): Promise<void>;
   deleteMonthlyAmount(templateId: number, yearMonth: string): Promise<void>;
+  /**
+   * Copies last month's per-month amounts forward.
+   *
+   * Only the entries that occur in the TARGET month are copied, and the server
+   * decides which those are -- an override for a month its entry skips is
+   * invisible on every screen and silently in force the day the recurrence
+   * changes to cover that month.
+   *
+   * An earlier revision took the id list as an argument. That looked like it
+   * kept the occurrence rule in one place, and actually moved the ENFORCEMENT to
+   * the client, where a stale tab or another member's concurrent edit makes the
+   * list wrong. The rule still has one definition (shared/recurrence.ts); the
+   * server imports it. See server/repositories/occurrence-guard.ts.
+   */
   copyMonthlyAmounts(fromMonth: string, toMonth: string): Promise<void>;
 
   getMonthlyActuals(yearMonth: string): Promise<MonthlyActual[]>;

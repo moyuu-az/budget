@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { BalanceSnapshot } from '../types';
 import { getApi } from '../lib/api';
 import { reportError } from '../app/reportError';
+import { applyIfCurrent, currentGeneration } from '../app/ledger-generation';
 
 interface SnapshotState {
   snapshots: BalanceSnapshot[];
@@ -40,17 +41,25 @@ export const useSnapshotStore = create<SnapshotState>((set, get) => ({
   reset: () => set({ snapshots: [], loading: false }),
 
   fetchSnapshots: async () => {
+    // Tagged before the request, checked after: a ledger switch in between makes
+    // this answer belong to a ledger nobody is looking at. See
+    // src/app/ledger-generation.ts.
+    const tag = currentGeneration();
     set({ loading: true });
     try {
       const snapshots = await getApi().getSnapshots();
-      set({ snapshots, loading: false });
+      applyIfCurrent(tag, () => set({ snapshots, loading: false }));
     } catch (e) {
-      set({ loading: false });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ loading: false });
+        reportError(e);
+      });
     }
   },
 
   addSnapshot: async (date: string, balance: number) => {
+    // Tagged before the request; see src/app/ledger-generation.ts.
+    const tag = currentGeneration();
     try {
       const snapshot = await getApi().addSnapshot(date, balance);
       // REPLACE, do not append. The server upserts on (ledger, date), so
@@ -60,10 +69,11 @@ export const useSnapshotStore = create<SnapshotState>((set, get) => ({
       const rest = get().snapshots.filter((s) => s.id !== snapshot.id && s.date !== snapshot.date);
       // Newest first, matching what getSnapshots returns; otherwise the new row
       // lands at the bottom of a descending list until the next fetch.
-      set({ snapshots: [...rest, snapshot].sort((a, b) => b.date.localeCompare(a.date)) });
-      return true;
+      return applyIfCurrent(tag, () =>
+        set({ snapshots: [...rest, snapshot].sort((a, b) => b.date.localeCompare(a.date)) }),
+      );
     } catch (e) {
-      reportError(e);
+      applyIfCurrent(tag, () => reportError(e));
       return false;
     }
   },
@@ -72,11 +82,14 @@ export const useSnapshotStore = create<SnapshotState>((set, get) => ({
     const prev = get().snapshots;
     // optimistic removal
     set({ snapshots: prev.filter((s) => s.id !== id) });
+    const tag = currentGeneration();
     try {
       await getApi().deleteSnapshot(id);
     } catch (e) {
-      set({ snapshots: prev });
-      reportError(e);
+      applyIfCurrent(tag, () => {
+        set({ snapshots: prev });
+        reportError(e);
+      });
     }
   },
 }));

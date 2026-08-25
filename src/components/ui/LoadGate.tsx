@@ -12,6 +12,16 @@ interface Props {
   height: number;
   /** What is being waited for, announced to screen readers and shown on failure. */
   label: string;
+  /**
+   * What 再読み込み should re-run. Defaults to the whole ledger load.
+   *
+   * A panel whose data is NOT part of that load has to say so, or its retry
+   * button re-fetches everything except the thing that failed and leaves the
+   * error on screen -- a button that visibly does nothing. The per-month
+   * amounts and actuals are exactly that case: loadLedgerData deliberately
+   * skips them, because which months are needed depends on the screen.
+   */
+  onRetry?: () => Promise<void>;
   /** Optional so a panel that only needs the placeholder can omit it. */
   children?: ReactNode;
 }
@@ -36,12 +46,16 @@ interface Props {
 // AND FAILURE IS NOT A LONGER WAIT
 //   A failed fetch used to be indistinguishable from a slow one: the skeleton
 //   pulsed forever, no error stayed on screen, and reloading the page was the
-//   only way out -- which nothing told the user. The retry re-runs the whole
-//   ledger load, because these panels share their inputs and repairing one of
-//   them alone would leave the screen half-fresh.
+//   only way out -- which nothing told the user.
+//
+//   The retry re-runs the whole ledger load by default, because these panels
+//   share their inputs and repairing one alone would leave the screen
+//   half-fresh. A panel whose data is outside that load passes `onRetry`;
+//   without it the button would re-fetch everything except what failed, which
+//   looks identical to a button that does not work.
 // ---------------------------------------------------------------------------
 
-export function LoadGate({ status, height, label, children }: Props): ReactElement {
+export function LoadGate({ status, height, label, onRetry, children }: Props): ReactElement {
   if (status === 'ready') return <>{children}</>;
 
   if (status === 'error') {
@@ -62,7 +76,7 @@ export function LoadGate({ status, height, label, children }: Props): ReactEleme
             // Reported, not swallowed. Every store catches its own failure
             // today, so this cannot reject -- but "cannot reject today" is how
             // an unhandled rejection gets introduced later.
-            loadLedgerData().catch(reportError);
+            (onRetry ?? loadLedgerData)().catch(reportError);
           }}
         >
           再読み込み
