@@ -104,7 +104,11 @@ function Layout({ currentView, onNavigate, children }: Props) {
           </div>
         )}
 
-        <nav className="flex-1 px-2 py-2">
+        {/* Labelled even though only one of the two navigations is ever
+            displayed: a landmark without a name is announced as just
+            「ナビゲーション」, and the two are distinguishable in a snapshot or
+            an audit only by their labels. */}
+        <nav aria-label="メインナビゲーション" className="flex-1 px-2 py-2">
           <Navigation currentView={currentView} onNavigate={onNavigate} collapsed={collapsed} />
         </nav>
 

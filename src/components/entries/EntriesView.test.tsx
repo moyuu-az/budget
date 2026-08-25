@@ -411,7 +411,14 @@ describe('recording amounts with the keyboard', () => {
     // 食費 -- the row we just left -- which is what makes the open one 家賃.
     await vi.waitFor(() => expect(plannedCells(container)).toHaveLength(1));
     expect(plannedCells(container)[0].dataset.templateId).toBe(String(FOOD.id));
-    expect(screen.getByLabelText('予定金額を編集')).toBeInTheDocument();
+
+    // FOCUSED, not merely mounted. The move opens the next cell by clicking its
+    // button, and the input that replaces it takes focus from an effect -- so
+    // "an input exists" would pass even if the caret were left nowhere, which is
+    // the state this whole feature exists to avoid.
+    await vi.waitFor(() =>
+      expect(screen.getByLabelText('予定金額を編集')).toHaveFocus(),
+    );
   });
 
   it('goes back UP on Shift+Enter', async () => {

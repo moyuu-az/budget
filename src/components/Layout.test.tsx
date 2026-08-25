@@ -91,8 +91,14 @@ describe('both shells', () => {
       </Layout>,
     );
 
-    const nav = screen.getByRole('navigation', { name: 'メインナビゲーション' });
-    expect(within(nav).getAllByRole('button')).toHaveLength(6);
+    // BOTH navigations carry the name. JSDOM applies no stylesheet, so it sees
+    // both -- in a browser exactly one is `display: none` and therefore absent
+    // from the accessibility tree and the tab order.
+    const navs = screen.getAllByRole('navigation', { name: 'メインナビゲーション' });
+    expect(navs).toHaveLength(2);
+    for (const nav of navs) {
+      expect(within(nav).getAllByRole('button')).toHaveLength(6);
+    }
   });
 });
 
