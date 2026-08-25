@@ -91,27 +91,50 @@ describe('summarizeVariance', () => {
     expect(result.recordedCount).toBe(1);
   });
 
-  it('KEEPS a recorded actual whose entry no longer falls in the month', () => {
-    // A recorded actual is a FACT about a month: the household paid that, then.
-    // Correcting the schedule afterwards does not unmake it.
+  it('KEEPS a recorded actual whose entry no longer falls in the month, WITHOUT a verdict', () => {
+    // Two rules meeting, and both matter.
     //
-    // Filtering by occurrence before checking for an actual made a stored figure
-    // VANISH -- pay an annual premium in August, correct its month to March in
-    // September, and August's card would state 「実績が記録されていません」 about
-    // money the database still holds. analytics.ts already follows this rule for
-    // the same data; one screen quietly losing history is worse than either
-    // rule on its own.
+    // The money is real and stays: filtering by occurrence before checking for
+    // an actual made a stored figure VANISH -- pay a premium in August, correct
+    // its month to March in September, and August's card would state 「実績が
+    // 記録されていません」 about money the database still holds.
+    //
+    // But there is nothing to compare it TO. The schedule change deleted the
+    // per-month override with it, so what was budgeted then is not recorded
+    // anywhere, and the entry's CURRENT default is not that figure. Comparing
+    // against it would report a confident 「+¥400,000 超過」 against a plan
+    // nobody made.
     const premium = makeTemplate({
       id: 3, name: '年払い保険', categoryId: 1, defaultAmount: 120_000, recurrence: yearlyOn(3, 1),
     });
 
     const result = summarizeVariance(
-      [premium], [category()], NO_AMOUNTS, actuals([[3, 118_000]]), YM, 'expense',
+      [premium], [category()], NO_AMOUNTS, actuals([[3, 500_000]]), YM, 'expense',
     );
 
+    expect(result.unplannedCount).toBe(1);
+    expect(result.unplannedTotal).toBe(500_000);
+    // And no fabricated verdict: nothing is compared, so nothing is 超過.
+    expect(result.recordedCount).toBe(0);
+    expect(result.variance).toBe(0);
+  });
+
+  it('DOES compare it when a per-month override survives', () => {
+    // The override IS the record of what was budgeted for that month, and it
+    // outlives a schedule change that no longer covers it only when the change
+    // has not happened yet -- but wherever one exists, it is the truth.
+    const premium = makeTemplate({
+      id: 3, name: '年払い保険', categoryId: 1, defaultAmount: 120_000, recurrence: yearlyOn(3, 1),
+    });
+    const amounts: MonthlyAmountsMap = new Map([[YM, new Map([[3, 500_000]])]]);
+
+    const result = summarizeVariance(
+      [premium], [category()], amounts, actuals([[3, 480_000]]), YM, 'expense',
+    );
+
+    expect(result.unplannedCount).toBe(0);
     expect(result.recordedCount).toBe(1);
-    expect(result.actualTotal).toBe(118_000);
-    expect(result.lines[0].name).toBe('年払い保険');
+    expect(result.variance).toBe(-20_000);
   });
 
   it('does not then count that entry as MISSING in the months it skips', () => {

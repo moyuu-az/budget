@@ -18,11 +18,20 @@ import { findCashCategory } from '../utils/net-worth';
 // value is in the second sentence of the caption: not 「¥1,721,724」 but
 // 「¥1,721,724 · 18日前に更新」.
 //
-// WHY THE NEWEST HOLDING, NOT THE OLDEST
-//   The question is "when did somebody last tell us about this money", and a
-//   household with a 財布 they update weekly and a 定期 they touch once a year
-//   is not stale. Reading the oldest would flag every such household forever,
-//   and a warning that is always on is a warning nobody reads.
+// WHY IT REPORTS BOTH ENDS
+//   The first version read only the NEWEST holding, reasoning that a household
+//   updating its 財布 weekly is not stale. That reasoning answered the wrong
+//   question. What is displayed -- and what the forecast starts from -- is the
+//   SUM, and a sum is only as current as its stalest part.
+//
+//   Concretely: a 銀行口座 of ¥1,000,000 last touched 300 days ago beside a
+//   財布 of ¥10,000 updated today. Reading the newest reports 「今日更新」 for
+//   ¥1,010,000, of which 99% is a year out of date -- and the reassurance is
+//   strongest exactly where the error is largest.
+//
+//   So the caption still names the LATEST edit (that is the honest answer to
+//   "when did anything last change") and staleness is judged on the OLDEST,
+//   with a count so the household knows how much of the total is in question.
 // ---------------------------------------------------------------------------
 
 /**
@@ -44,10 +53,20 @@ export interface CashFreshness {
    * balance comes from no holdings.
    */
   updatedAt: string | null;
-  /** Whole days since that edit, or null when there is nothing to measure. */
+  /** Whole days since that most recent edit, or null when there is nothing to measure. */
   daysSince: number | null;
-  /** True once `daysSince` passes STALE_AFTER_DAYS. False when unknown. */
+  /**
+   * True when ANY cash holding is older than STALE_AFTER_DAYS.
+   *
+   * Judged on the oldest, not the newest, because the figure on screen is the
+   * SUM: one component left untouched for a year makes the total that stale,
+   * however recently the others were edited.
+   */
   isStale: boolean;
+  /** How many holdings are older than STALE_AFTER_DAYS, so the caption can say. */
+  staleCount: number;
+  /** Whole days since the OLDEST edit, or null when there is nothing to measure. */
+  oldestDaysSince: number | null;
 }
 
 /** Whole days between two instants, floored. Negative clamps to 0. */
@@ -65,21 +84,41 @@ export function useCashFreshness(): CashFreshness {
   const assets = useAssetStore((s) => s.assets);
 
   return useMemo(() => {
-    const cash = findCashCategory(categories);
-    if (!cash) return { updatedAt: null, daysSince: null, isStale: false };
+    const nothing: CashFreshness = {
+      updatedAt: null,
+      daysSince: null,
+      isStale: false,
+      staleCount: 0,
+      oldestDaysSince: null,
+    };
 
+    const cash = findCashCategory(categories);
+    if (!cash) return nothing;
+
+    const now = new Date();
     let newest: string | null = null;
+    let oldest: string | null = null;
+    let staleCount = 0;
+
     for (const asset of assets) {
       if (asset.categoryId !== cash.id) continue;
       // String comparison, which is valid for ISO 8601 in a single timezone
       // offset and is what the column produces. Parsing each one to a Date to
       // compare would be the same answer at more cost.
       if (newest === null || asset.updatedAt > newest) newest = asset.updatedAt;
+      if (oldest === null || asset.updatedAt < oldest) oldest = asset.updatedAt;
+      if (daysBetween(new Date(asset.updatedAt), now) >= STALE_AFTER_DAYS) staleCount += 1;
     }
 
-    if (newest === null) return { updatedAt: null, daysSince: null, isStale: false };
+    if (newest === null || oldest === null) return nothing;
 
-    const daysSince = daysBetween(new Date(newest), new Date());
-    return { updatedAt: newest, daysSince, isStale: daysSince >= STALE_AFTER_DAYS };
+    return {
+      updatedAt: newest,
+      daysSince: daysBetween(new Date(newest), now),
+      // The OLDEST decides, because the balance is the sum -- see the note above.
+      isStale: staleCount > 0,
+      staleCount,
+      oldestDaysSince: daysBetween(new Date(oldest), now),
+    };
   }, [categories, assets]);
 }

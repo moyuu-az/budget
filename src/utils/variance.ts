@@ -41,6 +41,21 @@ export interface VarianceLine {
 }
 
 export interface MonthlyVariance {
+  /**
+   * Actuals whose plan cannot be reconstructed, kept OUT of the comparison.
+   *
+   * A schedule change deletes the per-month override it no longer covers (see
+   * occurrence-guard.ts), so for a month the entry no longer falls in there is
+   * no record of what was budgeted. Substituting the entry's CURRENT default
+   * looks like a comparison and is a fabrication: pay ¥500,000 in August against
+   * a ¥500,000 plan, move the schedule to March, and the card would report a
+   * confident 「+¥400,000 超過」 against a ¥100,000 default nobody ever budgeted.
+   *
+   * The money is real, so it is reported -- as its own figure, with no verdict
+   * attached to it.
+   */
+  unplannedTotal: number;
+  unplannedCount: number;
   /** The month compared, 'YYYY-MM'. */
   yearMonth: string;
   /** How many of the month's entries have a recorded actual. */
@@ -96,6 +111,8 @@ export function summarizeVariance(
 
   const lines: VarianceLine[] = [];
   let missingCount = 0;
+  let unplannedTotal = 0;
+  let unplannedCount = 0;
 
   for (const template of templates) {
     if (template.type !== type) continue;
@@ -127,11 +144,24 @@ export function summarizeVariance(
     // This is also the rule analytics.ts already follows for the same data; one
     // of the two screens quietly losing history is worse than either rule.
     //
-    // The planned figure is the CURRENT one. A schedule change deletes the
-    // per-month override it no longer covers (see occurrence-guard.ts), so what
-    // the household actually budgeted back then is not reconstructible -- this
-    // falls back to the entry's default. Approximate, and far better than
-    // dropping the row.
+    // IS THERE A PLAN TO COMPARE AGAINST?
+    //
+    // Yes when a per-month override survives for this month, or when the entry
+    // still falls in it (so its default is what was budgeted). Otherwise the
+    // household's schedule has moved since, the override was deleted with it,
+    // and what was budgeted then is simply not recorded anywhere.
+    //
+    // Substituting the CURRENT default there would look like a comparison and be
+    // a fabrication -- ¥500,000 paid in August against a ¥500,000 plan, schedule
+    // moved to March, and this would report a confident 「+¥400,000 超過」
+    // against a ¥100,000 default nobody ever budgeted.
+    const hasOverride = amountsMap.get(yearMonth)?.has(template.id) ?? false;
+    if (!hasOverride && !occursInMonth(template.recurrence, yearMonth)) {
+      unplannedTotal += actual;
+      unplannedCount += 1;
+      continue;
+    }
+
     const planned = resolveAmount(template.id, yearMonth, amountsMap, templates);
     lines.push({
       templateId: template.id,
@@ -158,6 +188,8 @@ export function summarizeVariance(
     plannedTotal,
     actualTotal,
     variance: actualTotal - plannedTotal,
+    unplannedTotal,
+    unplannedCount,
     lines,
   };
 }

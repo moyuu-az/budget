@@ -43,22 +43,55 @@ describe('when the ledger records cash', () => {
     expect(result.current.isStale).toBe(false);
   });
 
-  it('reads the NEWEST holding, not the oldest', () => {
-    // A household with a 財布 it updates weekly and a 定期 it touches once a year
-    // is not stale. Reading the oldest would flag every such household forever,
-    // and a warning that is always on is a warning nobody reads.
+  it('dates the caption from the NEWEST edit', () => {
+    // 「N日前に更新」 is the honest answer to "when did anything last change".
     useAssetStore.setState({
       categories: [makeCashCategory()],
       assets: [
-        makeCashAsset({ id: 1, name: '定期', updatedAt: daysAgo(300) }),
+        makeCashAsset({ id: 1, name: '銀行', updatedAt: daysAgo(300) }),
         makeCashAsset({ id: 2, name: '財布', updatedAt: daysAgo(1) }),
+      ],
+    });
+
+    expect(renderHook(() => useCashFreshness()).result.current.daysSince).toBe(1);
+  });
+
+  it('judges STALENESS on the oldest, because the balance is a SUM', () => {
+    // The first version read only the newest, and that answered the wrong
+    // question. A ¥1,000,000 bank balance from 300 days ago beside a ¥10,000
+    // wallet updated today would report 「今日更新」 for a total that is 99% a
+    // year out of date -- the reassurance strongest exactly where the error is
+    // largest.
+    useAssetStore.setState({
+      categories: [makeCashCategory()],
+      assets: [
+        makeCashAsset({ id: 1, name: '銀行', value: 1_000_000, updatedAt: daysAgo(300) }),
+        makeCashAsset({ id: 2, name: '財布', value: 10_000, updatedAt: daysAgo(1) }),
       ],
     });
 
     const { result } = renderHook(() => useCashFreshness());
 
+    expect(result.current.isStale).toBe(true);
+    expect(result.current.staleCount).toBe(1);
+    expect(result.current.oldestDaysSince).toBe(300);
+    // And the caption still dates from the latest edit.
     expect(result.current.daysSince).toBe(1);
+  });
+
+  it('is not stale when every holding is recent', () => {
+    useAssetStore.setState({
+      categories: [makeCashCategory()],
+      assets: [
+        makeCashAsset({ id: 1, updatedAt: daysAgo(3) }),
+        makeCashAsset({ id: 2, updatedAt: daysAgo(1) }),
+      ],
+    });
+
+    const { result } = renderHook(() => useCashFreshness());
+
     expect(result.current.isStale).toBe(false);
+    expect(result.current.staleCount).toBe(0);
   });
 
   it('goes stale once the threshold passes, and not before', () => {

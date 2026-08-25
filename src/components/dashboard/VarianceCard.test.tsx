@@ -118,6 +118,53 @@ describe('when actuals have been recorded', () => {
   });
 });
 
+describe('an actual whose plan cannot be reconstructed', () => {
+  it('is reported as real money, with no verdict attached', async () => {
+    // A schedule change deletes the per-month override with it, so what was
+    // budgeted then is not recorded anywhere. Comparing against the entry's
+    // CURRENT default would look like a comparison and be a fabrication:
+    // ¥500,000 paid against a ¥500,000 plan, schedule moved, and the card would
+    // report a confident 「+¥400,000 超過」 against a ¥100,000 default nobody
+    // ever budgeted.
+    useTemplateStore.setState({
+      templates: [
+        makeTemplate({
+          id: 9, name: '年払い保険', categoryId: 1, defaultAmount: 100_000,
+          recurrence: { kind: 'yearly', month: 3, dayOfMonth: 1 },
+        }),
+      ],
+      status: 'ready',
+    });
+    answerWith([[9, 500_000]]);
+    render(<VarianceCard />);
+
+    expect(await screen.findByText(/当時の予定額が不明な実績 1 件/)).toBeInTheDocument();
+    expect(screen.getByText(/¥500,000/)).toBeInTheDocument();
+    // No verdict, and no headline figure: nothing was compared.
+    expect(screen.queryByText('超過')).not.toBeInTheDocument();
+    expect(screen.queryByText('予算内')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('variance-total')).not.toBeInTheDocument();
+  });
+
+  it('does not read as 「実績が記録されていません」', async () => {
+    // The money is in the database; saying it is not there is the older bug.
+    useTemplateStore.setState({
+      templates: [
+        makeTemplate({
+          id: 9, name: '年払い保険', categoryId: 1, defaultAmount: 100_000,
+          recurrence: { kind: 'yearly', month: 3, dayOfMonth: 1 },
+        }),
+      ],
+      status: 'ready',
+    });
+    answerWith([[9, 500_000]]);
+    render(<VarianceCard />);
+
+    await screen.findByText(/当時の予定額が不明な実績/);
+    expect(screen.queryByText(/実績が記録されていません/)).not.toBeInTheDocument();
+  });
+});
+
 describe('when nothing has been recorded', () => {
   it('says so instead of reporting a perfect month', async () => {
     // Counting plans alone would report that every month went exactly as

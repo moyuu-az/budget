@@ -46,6 +46,8 @@ function VarianceCard(): ReactElement {
           <span className="text-xs font-medium text-[var(--color-content-muted)]">
             {month}月の予定と実績
           </span>
+          {/* No verdict without a comparison. `recordedCount` counts only the
+              entries that HAVE a plan to compare against. */}
           {variance.recordedCount > 0 && (
             <Badge tone={overspent ? 'danger' : 'success'}>
               {overspent ? '超過' : '予算内'}
@@ -53,7 +55,7 @@ function VarianceCard(): ReactElement {
           )}
         </div>
 
-        {variance.recordedCount === 0 ? (
+        {variance.recordedCount === 0 && variance.unplannedCount === 0 ? (
           // Not a failure and not an empty chart: a household that has not
           // recorded actuals has nothing to compare, and saying so is the whole
           // answer. Inventing a comparison from plans alone would report that
@@ -67,19 +69,23 @@ function VarianceCard(): ReactElement {
           </p>
         ) : (
           <>
-            {/* Tagged because the same figure can legitimately appear again in
-                the breakdown below -- a month whose only recorded overspend IS
-                the whole gap. A test that matched on text alone would find both
-                and could not say which it meant. */}
-            <p
-              data-testid="variance-total"
-              className="mt-2 text-2xl font-bold tabular-nums text-[var(--color-content-primary)]"
-            >
-              {formatSignedYen(variance.variance)}
-            </p>
-            <p className="mt-1 text-xs text-[var(--color-content-secondary)]">
-              予定 {formatYen(variance.plannedTotal)} → 実績 {formatYen(variance.actualTotal)}
-            </p>
+            {/* The headline appears only when something was actually COMPARED.
+                A month whose every actual has no reconstructible plan has a real
+                total and no verdict, and printing 「±¥0」 over it would read as
+                「予算どおり」. */}
+            {variance.recordedCount > 0 && (
+              <>
+                <p
+                  data-testid="variance-total"
+                  className="mt-2 text-2xl font-bold tabular-nums text-[var(--color-content-primary)]"
+                >
+                  {formatSignedYen(variance.variance)}
+                </p>
+                <p className="mt-1 text-xs text-[var(--color-content-secondary)]">
+                  予定 {formatYen(variance.plannedTotal)} → 実績 {formatYen(variance.actualTotal)}
+                </p>
+              </>
+            )}
 
             <ul className="mt-3 space-y-1">
               {variance.lines.slice(0, VISIBLE_LINES).map((line) => (
@@ -113,6 +119,17 @@ function VarianceCard(): ReactElement {
             {variance.missingCount > 0 && (
               <p className="mt-2 text-xs text-[var(--color-semantic-warning)]">
                 未入力 {variance.missingCount} 件は比較に含まれていません
+              </p>
+            )}
+
+            {/* Real money with no plan behind it. Reported, never compared: a
+                schedule change deletes the per-month override with it, so what
+                was budgeted then is not recorded anywhere -- and comparing
+                against the entry's CURRENT default would invent a verdict. */}
+            {variance.unplannedCount > 0 && (
+              <p className="mt-2 text-xs text-[var(--color-content-muted)]">
+                当時の予定額が不明な実績 {variance.unplannedCount} 件（
+                {formatYen(variance.unplannedTotal)}）は比較に含まれていません
               </p>
             )}
           </>

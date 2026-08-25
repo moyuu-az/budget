@@ -106,7 +106,15 @@ function CashBalance({ onEdit }: Props): ReactElement {
           }`}
         >
           {freshness.daysSince === 0 ? '今日更新' : `${freshness.daysSince}日前に更新`}
-          {freshness.isStale && `・${STALE_AFTER_DAYS}日以上前です`}
+          {/* The COUNT, not just "it is old".
+              
+              The figure above is a SUM, and one component left untouched for a
+              year makes the whole total that stale however recently the others
+              were edited -- a ¥1,000,000 bank balance from 300 days ago beside a
+              ¥10,000 wallet updated today. Naming how many are in question is
+              what points at where to look. */}
+          {freshness.isStale &&
+            `・${freshness.staleCount}件が${STALE_AFTER_DAYS}日以上前(最古 ${freshness.oldestDaysSince}日前)`}
         </p>
       )}
     </div>
