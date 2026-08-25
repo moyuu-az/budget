@@ -1,9 +1,9 @@
 import { useMemo, useRef, useEffect, useState, useCallback, memo } from 'react';
-import { rangeStatusOf, useMonthlyStore } from '../../../stores/useMonthlyStore';
 import { useTemplateStore } from '../../../stores/useTemplateStore';
 import { combineStatus } from '../../../stores/load-status';
 import { toYearMonth } from '../../../utils/forecast';
 import { useCashFlowData } from '../../../hooks/useCashFlowData';
+import { useMonthLoaded } from '../../../hooks/useMonthLoaded';
 import { LoadGate } from '../../ui/LoadGate';
 import { SankeyCanvas } from './SankeyCanvas';
 import { SankeyTooltip, type TooltipState } from './SankeyTooltip';
@@ -17,8 +17,6 @@ function SankeyChart() {
     content: '',
   });
   const [selectedYearMonth, setSelectedYearMonth] = useState(() => toYearMonth(new Date()));
-  const fetchMonthlyAmounts = useMonthlyStore((s) => s.fetchMonthlyAmounts);
-  const monthStatus = useMonthlyStore((s) => s.monthStatus);
   const templatesStatus = useTemplateStore((s) => s.status);
 
   const currentYearMonth = useMemo(() => toYearMonth(new Date()), []);
@@ -39,17 +37,16 @@ function SankeyChart() {
     });
   }, []);
 
-  // Fetch on the month changing. The dedupe that used to live in a ref is now
-  // the store's own: a ref remembers that a month was ASKED FOR, which is the
-  // wrong memory -- a month whose fetch FAILED was asked for, so the retry
-  // button below could never re-run it.
-  const retry = useCallback(async () => {
-    await fetchMonthlyAmounts(selectedYearMonth);
-  }, [selectedYearMonth, fetchMonthlyAmounts]);
-
-  useEffect(() => {
-    void retry();
-  }, [retry]);
+  // Fetch on the month changing -- and on the LEDGER changing, which the shared
+  // hook is what supplies. The dedupe that used to live in a ref is now the
+  // store's own: a ref remembers that a month was ASKED FOR, which is the wrong
+  // memory -- a month whose fetch FAILED was asked for, so the retry button
+  // below could never re-run it.
+  //
+  // 'amounts' only: the flow diagram reads planned figures and never the
+  // recorded actuals, and waiting for actuals nobody fetches here would leave it
+  // loading forever.
+  const { status: monthStatus, retry } = useMonthLoaded(selectedYearMonth, { actuals: false });
 
   // THIS PANEL STATES SOMETHING ABOUT MONEY, SO IT GATES LIKE THE REST.
   //
@@ -59,13 +56,7 @@ function SankeyChart() {
   // selector: the user can page back to a month nothing else on the screen
   // fetched, and the dashboard's status knows nothing about that month.
   //
-  // 'amounts' only: the flow diagram reads planned figures and never the
-  // recorded actuals, and waiting for actuals nobody fetches here would leave it
-  // loading forever.
-  const status = combineStatus(
-    templatesStatus,
-    rangeStatusOf(monthStatus, [selectedYearMonth], 'amounts'),
-  );
+  const status = combineStatus(templatesStatus, monthStatus);
 
   const cashFlowData = useCashFlowData(selectedYearMonth);
 

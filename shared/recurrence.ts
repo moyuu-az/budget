@@ -102,11 +102,28 @@ export function isYearMonth(value: string): boolean {
  * tripping through the constructed Date is what rejects the impossible ones:
  * `new Date(2026, 1, 31)` rolls forward to 3 March and no longer matches.
  *
- * AT NOON, not at midnight. A handful of timezones move their clocks AT
- * midnight (Santiago, Havana, Tehran, São Paulo historically), and on those
- * dates `new Date(y, m-1, d)` lands on the following day -- which would make
- * this reject a date that genuinely exists. Noon is twelve hours from either
- * edge, so no transition can reach it. It costs nothing.
+ * AT NOON, not at midnight -- a twelve-hour margin against the round trip being
+ * knocked off by an offset error of an hour.
+ *
+ * WHAT THIS IS AND IS NOT PROTECTION AGAINST
+ *   NOT the timezones that move their clocks at midnight. Santiago, Havana,
+ *   Tehran and São Paulo were checked date by date across 1970-2035, and V8
+ *   resolves a local midnight that does not exist using the PRE-transition
+ *   offset, landing at 01:00 on the SAME day. Midnight construction is correct
+ *   there, and an earlier version of this comment claimed otherwise -- which
+ *   mattered, because the next person to "verify" it in Santiago would have
+ *   seen nothing happen and removed the noon.
+ *
+ *   It IS protection against V8's DST cache getting the offset wrong. Sweeping
+ *   a whole year of dates in America/Recife (and Noronha, Boa_Vista) makes
+ *   2000-10-09..14 come back with a self-contradictory offset, and midnight
+ *   construction then lands at 23:00 the PREVIOUS day -- rejecting a date that
+ *   exists. Evaluating those dates alone is fine, so this only appears in a
+ *   process that has been running a while, which describes a page left open.
+ *
+ *   A date that genuinely has no local midnight at all (Pacific/Apia
+ *   2011-12-30, Pacific/Kwajalein 1993-08-21 -- days a country skipped) is
+ *   rejected either way, correctly: it is not on that household's calendar.
  */
 export function isIsoDate(value: string): boolean {
   if (!ISO_DATE_PATTERN.test(value)) return false;

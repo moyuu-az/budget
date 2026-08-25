@@ -62,7 +62,11 @@ beforeEach(() => {
   api = createMockApi();
   setApi(api);
   useCategoryStore.setState({ categories: [HOUSING] });
-  useMonthlyStore.setState({ monthlyAmountsMap: new Map(), monthlyActualsMap: new Map() });
+  // reset(), not setState of the two maps. They are only half the store's
+  // per-month state: monthStatus records which months have been fetched, and
+  // leaving that behind makes the next test's fetch be deduplicated away -- the
+  // seeded API answer never arrives and the totals silently show defaults.
+  useMonthlyStore.getState().reset();
   useToastStore.setState({ toasts: [], queue: [] });
 });
 

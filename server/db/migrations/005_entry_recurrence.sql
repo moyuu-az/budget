@@ -170,10 +170,15 @@ ALTER TABLE entry_templates
 -- (ledger_id, sort_order) prefix -- the part that actually serves the
 -- repository's read -- is unaffected.
 --
--- Rebuilding would have cost something real for that cosmetic tidiness: DROP
--- INDEX takes an ACCESS EXCLUSIVE lock on the table, and this migration runs
--- against a live production database immediately before a deploy. Taking a lock
--- to change an index no query's plan depends on is risk with no return.
+-- Leaving it alone buys nothing in LOCKING terms, and it would be wrong to
+-- claim otherwise: the ADD CONSTRAINT statements above already hold ACCESS
+-- EXCLUSIVE on this table for the whole transaction, existing-row validation
+-- included. A DROP INDEX here would take a lock this migration is holding
+-- anyway.
+--
+-- The reason is simpler. No query's plan depends on the third column, so a
+-- rebuild buys nothing at all -- and a migration statement that buys nothing is
+-- one more thing that can fail against a production table.
 --
 -- (The third column does not serve the ORDER BY either way. getAll() orders by
 -- COALESCE(day_of_month, day of on_date), which no plain-column index can

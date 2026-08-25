@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useTemplateStore } from '../stores/useTemplateStore';
 import { useCategoryStore } from '../stores/useCategoryStore';
-import { monthStatusOf, useMonthlyStore } from '../stores/useMonthlyStore';
+import { useMonthlyStore } from '../stores/useMonthlyStore';
 import { combineStatus, type LoadStatus } from '../stores/load-status';
 import { previousMonth, summarizeVariance, type MonthlyVariance } from '../utils/variance';
+import { useMonthLoaded } from './useMonthLoaded';
 
 // ---------------------------------------------------------------------------
 // Did last month go the way it was planned?
@@ -41,22 +42,17 @@ export function useMonthlyVariance(): MonthlyVarianceResult {
   const categories = useCategoryStore((s) => s.categories);
   const amountsMap = useMonthlyStore((s) => s.monthlyAmountsMap);
   const actualsMap = useMonthlyStore((s) => s.monthlyActualsMap);
-  const monthStatus = useMonthlyStore((s) => s.monthStatus);
-  const fetchMonthlyAmounts = useMonthlyStore((s) => s.fetchMonthlyAmounts);
-  const fetchMonthlyActuals = useMonthlyStore((s) => s.fetchMonthlyActuals);
 
   // Read once per render rather than per effect: two reads either side of
   // midnight would disagree about which month "last month" is, and the fetch
   // would then be for a month the summary does not read.
   const yearMonth = useMemo(() => previousMonth(new Date()), []);
 
-  const retry = useCallback(async () => {
-    await Promise.all([fetchMonthlyAmounts(yearMonth), fetchMonthlyActuals(yearMonth)]);
-  }, [yearMonth, fetchMonthlyAmounts, fetchMonthlyActuals]);
-
-  useEffect(() => {
-    void retry();
-  }, [retry]);
+  // The shared hook, not a local effect. Its dependencies include the active
+  // ledger, which a `[yearMonth, <stable actions>]` list does not -- and after a
+  // switch the status map is empty, so a card that never re-fetches gates on a
+  // month nobody asked for and holds its skeleton forever.
+  const { status: monthStatus, retry } = useMonthLoaded(yearMonth);
 
   // READINESS INCLUDES LAST MONTH'S OWN FETCH, and that is the whole reason the
   // store tracks it per month.
@@ -68,7 +64,7 @@ export function useMonthlyVariance(): MonthlyVarianceResult {
   // make that claim during the initial load (briefly false) and after a failed
   // request (false forever, for a household whose actuals exist and simply could
   // not be fetched).
-  const status = combineStatus(templatesStatus, monthStatusOf(monthStatus, yearMonth));
+  const status = combineStatus(templatesStatus, monthStatus);
 
   const variance = useMemo(
     () =>

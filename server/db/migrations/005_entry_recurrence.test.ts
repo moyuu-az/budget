@@ -202,6 +202,65 @@ describe('the shape constraint', () => {
          VALUES (${ledgerId}, 'bad', 'expense', 0, ${values})`,
     );
 
+  it('validates EVERY ledger\'s existing rows, including the ones it cannot see', async () => {
+    // The one substantive claim left in 005 after its verification block was
+    // removed: "ALTER TABLE and a CHECK's existing-row validation both bypass
+    // RLS, which is why the constraints above genuinely do verify every row."
+    //
+    // Nothing else in this file can tell that apart from the alternative -- a
+    // validation that saw no rows and therefore succeeded -- because both look
+    // like a migration that applied cleanly. That is exactly the shape of the
+    // bug this branch deleted, so leaving the replacement claim unproven would
+    // be repeating it in comment form.
+    //
+    // So: hide a violating row in a SECOND ledger, close the scope so a plain
+    // SELECT cannot see it, and demand that ADD CONSTRAINT finds it anyway.
+    const client = await db.ownerPool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows: created } = await client.query<{ id: number }>(
+        "INSERT INTO ledgers (slug, name, kind) VALUES ('other', '別の帳簿', 'personal') RETURNING id",
+      );
+      const otherLedger = created[0].id;
+
+      await client.query(
+        'ALTER TABLE entry_templates DROP CONSTRAINT entry_templates_recurrence_shape_chk',
+      );
+
+      // A scope is needed to WRITE the row: the policy's WITH CHECK applies to
+      // the owner too (FORCE), so even this fixture cannot skip it.
+      await client.query("SELECT set_config('app.current_ledger_id', $1, true)", [
+        String(otherLedger),
+      ]);
+      await client.query(
+        `INSERT INTO entry_templates (ledger_id, name, type, default_amount, recurrence_kind, day_of_month)
+           VALUES ($1, '見えない行', 'expense', 0, 'monthly', NULL)`,
+        [otherLedger],
+      );
+
+      // Scope closed -- the state every migration actually runs in.
+      await client.query("SELECT set_config('app.current_ledger_id', '', true)");
+
+      const { rows: counted } = await client.query<{ count: string }>(
+        'SELECT count(*)::text AS count FROM entry_templates',
+      );
+      // Zero, with a violating row sitting right there. This is what the deleted
+      // DO block was measuring and calling success.
+      expect(counted[0].count).toBe('0');
+
+      await expect(
+        client.query(
+          `ALTER TABLE entry_templates
+             ADD CONSTRAINT entry_templates_recurrence_shape_chk
+             CHECK (recurrence_kind = 'monthly' AND day_of_month IS NOT NULL)`,
+        ),
+      ).rejects.toThrow(/violated by some row/);
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+  });
+
   it('rejects an unknown recurrence kind', async () => {
     await expect(insert("recurrence_kind, day_of_month", "'weekly', 1")).rejects.toThrow();
   });
@@ -218,18 +277,33 @@ describe('the shape constraint', () => {
     // silently, in production.
     //
     // Dropping the kind constraint is how that future is simulated today.
-    await db.adminPool.query(
-      'ALTER TABLE entry_templates DROP CONSTRAINT entry_templates_recurrence_kind_chk',
-    );
+    //
+    // INSIDE A TRANSACTION THAT IS ALWAYS ROLLED BACK, and that is not tidiness.
+    // DDL is transactional in PostgreSQL, so the rollback restores the
+    // constraint -- but the point is what happens when this test FAILS. Without
+    // the transaction the offending 'weekly' row would be committed, the
+    // restoring ADD CONSTRAINT would then be rejected by its own existing-row
+    // validation, and the table would be left without the kind constraint for
+    // every test that follows. One real failure would arrive as a cascade with
+    // its cause buried.
+    const client = await db.adminPool.connect();
     try {
-      await expect(insert("recurrence_kind, day_of_month", "'weekly', 1")).rejects.toThrow();
-    } finally {
-      // Restored even if the assertion fails: every later test in this file
-      // relies on the constraint being there.
-      await db.adminPool.query(
-        `ALTER TABLE entry_templates ADD CONSTRAINT entry_templates_recurrence_kind_chk
-           CHECK (recurrence_kind IN ('monthly', 'yearly', 'interval', 'once'))`,
+      await client.query('BEGIN');
+      await client.query(
+        'ALTER TABLE entry_templates DROP CONSTRAINT entry_templates_recurrence_kind_chk',
       );
+      // Named: `rejects.toThrow()` alone would also be satisfied by a typo in
+      // the INSERT, which would look like proof of a constraint that is not
+      // there.
+      await expect(
+        client.query(
+          `INSERT INTO entry_templates (ledger_id, name, type, default_amount, recurrence_kind, day_of_month)
+             VALUES (${ledgerId}, 'bad', 'expense', 0, 'weekly', 1)`,
+        ),
+      ).rejects.toThrow(/entry_templates_recurrence_shape_chk/);
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
     }
   });
 

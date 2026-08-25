@@ -270,19 +270,18 @@ describe('isIsoDate', () => {
     expect(isIsoDate('2028-02-29')).toBe(true);
   });
 
-  it('accepts a date whose local midnight does not exist', () => {
-    // A handful of timezones move their clocks AT midnight (Santiago, Havana,
-    // Tehran, São Paulo historically). On those dates `new Date(y, m-1, d)`
-    // lands on the FOLLOWING day, and a round-trip check built on it would
-    // reject a date that genuinely exists. Constructing at noon puts twelve
-    // hours between the value and either edge.
-    //
-    // Asserted for an ordinary date because the suite does not control the
-    // host timezone: what this pins is that the check does not depend on
-    // midnight being representable.
-    expect(isIsoDate('2026-09-06')).toBe(true);
-    expect(isIsoDate('2026-10-18')).toBe(true);
-  });
+  // NO TEST FOR THE NOON CONSTRUCTION, deliberately.
+  //
+  // There was one. It asserted `isIsoDate('2026-09-06') === true` and called
+  // itself proof that midnight is not relied upon -- but that is true in every
+  // timezone including the one the suite happens to run in, so deleting the
+  // `, 12` left it green. A test with no power to detect the mistake it is named
+  // after is worse than none: it makes the next person believe the behaviour is
+  // covered.
+  //
+  // Reproducing the real case needs a specific zone (America/Recife) AND a warm
+  // V8 DST cache, which is a test that would pass for reasons no reader could
+  // check. The reasoning lives in the comment on isIsoDate instead.
 
   it('rejects dates that look right but do not exist', () => {
     // A one-off on the 31st of February would sit in the list, enabled, and

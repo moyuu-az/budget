@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import {
   MAX_INTERVAL_MONTHS,
   MIN_INTERVAL_MONTHS,
@@ -88,6 +88,83 @@ function withKind(kind: RecurrenceKind, previous: Recurrence, today: Date): Recu
       return { kind: 'once', date: toIsoDate(new Date(today.getFullYear(), today.getMonth(), Math.min(day, lastDay))) };
     }
   }
+}
+
+/**
+ * A date-shaped field that stays TYPEABLE in browsers without the native picker.
+ *
+ * WHY THE GUARD ALONE WAS NOT ENOUGH
+ *   Rejecting anything that is not a complete, valid value is right -- an
+ *   `anchorMonth` of '2026-3' is a recurrence that occurs in no month, and this
+ *   editor promises never to emit one. But these are CONTROLLED inputs: when the
+ *   change handler does not update state, React restores the DOM value from the
+ *   prop after the event. Every intermediate keystroke is therefore undone.
+ *
+ *   That is invisible where the browser implements the picker, because
+ *   `type="month"` and `type="date"` only ever emit complete values. It is fatal
+ *   where it does not: Safari on the desktop and Firefox fall back to a PLAIN
+ *   TEXT BOX for `type="month"`, so changing 2026-03 to 2026-09 means selecting
+ *   the field and typing -- and the first character, '2', is not a valid month,
+ *   so it is rolled back with the caret. The field cannot be edited at all.
+ *
+ *   Same remedy as BoundedNumberField: the text being typed lives here, and the
+ *   parent is told only when the text is something the domain accepts. On blur
+ *   the text snaps back to what was actually committed, so a half-typed value
+ *   never sits there looking saved.
+ */
+function ValidatedDateField({
+  id,
+  label,
+  type,
+  value,
+  isValid,
+  disabled,
+  placeholder,
+  onCommit,
+  children,
+}: {
+  id: string;
+  label: string;
+  type: 'month' | 'date';
+  value: string;
+  isValid: (candidate: string) => boolean;
+  disabled: boolean;
+  placeholder: string;
+  onCommit: (next: string) => void;
+  children?: ReactNode;
+}) {
+  const [text, setText] = useState(value);
+  const [seen, setSeen] = useState(value);
+
+  // Derive-from-prop during render, as BoundedNumberField does: the parent
+  // rewrites the value when the shape changes, and the text must follow without
+  // a frame showing the previous one.
+  if (value !== seen) {
+    setSeen(value);
+    setText(value);
+  }
+
+  return (
+    <div className="sm:col-span-2">
+      <label className={labelClass} htmlFor={id}>
+        {label}
+      </label>
+      <input
+        id={id}
+        type={type}
+        value={text}
+        disabled={disabled}
+        placeholder={placeholder}
+        onChange={(e) => {
+          setText(e.target.value);
+          if (isValid(e.target.value)) onCommit(e.target.value);
+        }}
+        onBlur={() => setText(value)}
+        className={inputClass}
+      />
+      {children}
+    </div>
+  );
 }
 
 /**
@@ -246,57 +323,43 @@ function RecurrenceEditor({ value, onChange, disabled = false }: Props) {
               onCommit={(everyMonths) => onChange({ ...value, everyMonths })}
             />
             {dayField(value.dayOfMonth, (dayOfMonth) => onChange({ ...value, dayOfMonth }))}
-            <div className="sm:col-span-2">
-              <label className={labelClass} htmlFor={`${id}-anchor`}>
-                起点の月
-              </label>
-              <input
-                id={`${id}-anchor`}
-                type="month"
-                value={value.anchorMonth}
-                disabled={disabled}
-                placeholder="YYYY-MM"
-                // VALIDATED, not merely non-empty.
-                //
-                // Safari on the desktop and Firefox do not implement
-                // `input type="month"` -- they fall back to a plain text box.
-                // A truthiness check there lets 「2026-3」 or anything at all
-                // into `anchorMonth`, and this component's promise that every
-                // interaction emits a COMPLETE, VALID Recurrence stops being
-                // true. The one-off's date field below already goes through
-                // isIsoDate; this was the half that did not.
-                //
-                // It also covers the empty string a date-like input emits while
-                // the user is retyping, which would otherwise produce a
-                // recurrence that occurs in no month at all.
-                onChange={(e) => isYearMonth(e.target.value) && onChange({ ...value, anchorMonth: e.target.value })}
-                className={inputClass}
-              />
+            <ValidatedDateField
+              id={`${id}-anchor`}
+              label="起点の月"
+              type="month"
+              value={value.anchorMonth}
+              // Not merely non-empty. A truthiness check lets 「2026-3」 into
+              // anchorMonth wherever the browser falls back to a text box, and
+              // the type comment on Recurrence says why the anchor is the value
+              // most worth guarding: without a correct one a bimonthly entry
+              // lands in the wrong months entirely.
+              isValid={isYearMonth}
+              disabled={disabled}
+              placeholder="YYYY-MM"
+              onCommit={(anchorMonth) => onChange({ ...value, anchorMonth })}
+            >
               <p className="mt-1 text-xs text-slate-500">
                 この月から数えます。{value.everyMonths}ヶ月ごとに発生します。
               </p>
-            </div>
+            </ValidatedDateField>
           </>
         )}
 
         {value.kind === 'once' && (
-          <div className="sm:col-span-2">
-            <label className={labelClass} htmlFor={`${id}-date`}>
-              日付
-            </label>
-            <input
-              id={`${id}-date`}
-              type="date"
-              value={value.date}
-              disabled={disabled}
-              // isIsoDate rejects both the empty string mid-edit and a date that
-              // does not exist. A one-off on 2026-02-31 would sit in the list,
-              // enabled, and never occur -- the household budgets for something
-              // the forecast does not contain.
-              onChange={(e) => isIsoDate(e.target.value) && onChange({ kind: 'once', date: e.target.value })}
-              className={inputClass}
-            />
-          </div>
+          <ValidatedDateField
+            id={`${id}-date`}
+            label="日付"
+            type="date"
+            value={value.date}
+            // Rejects both the empty string mid-edit and a date that does not
+            // exist. A one-off on 2026-02-31 would sit in the list, enabled, and
+            // never occur -- the household budgets for something the forecast
+            // does not contain.
+            isValid={isIsoDate}
+            disabled={disabled}
+            placeholder="YYYY-MM-DD"
+            onCommit={(date) => onChange({ kind: 'once', date })}
+          />
         )}
       </div>
 

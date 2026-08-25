@@ -4,6 +4,7 @@ import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
 import { useCategoryStore } from '../../stores/useCategoryStore';
 import { useToastStore } from '../../stores/useToastStore';
+import { useMonthLoaded } from '../../hooks/useMonthLoaded';
 import { toYearMonth } from '../../utils/forecast';
 import { occursInMonth } from '../../../shared/recurrence';
 import { summarizeExpenseByCostType } from '../../utils/cost-type';
@@ -25,17 +26,19 @@ function EntriesView() {
   const categories = useCategoryStore((s) => s.categories);
   const monthlyAmountsMap = useMonthlyStore((s) => s.monthlyAmountsMap);
   const fetchMonthlyAmounts = useMonthlyStore((s) => s.fetchMonthlyAmounts);
-  const fetchMonthlyActuals = useMonthlyStore((s) => s.fetchMonthlyActuals);
   const copyMonthlyAmounts = useMonthlyStore((s) => s.copyMonthlyAmounts);
   const deleteMonthlyAmount = useMonthlyStore((s) => s.deleteMonthlyAmount);
   const addToast = useToastStore((s) => s.addToast);
 
-  // Fetch month-specific data when month changes
-  // Base data (templates, categories) is fetched by App.tsx on mount
-  useEffect(() => {
-    fetchMonthlyAmounts(currentYearMonth);
-    fetchMonthlyActuals(currentYearMonth);
-  }, [currentYearMonth, fetchMonthlyAmounts, fetchMonthlyActuals]);
+  // Loads the month on screen. Base data (templates, categories) comes from
+  // App.tsx on mount.
+  //
+  // The shared hook rather than an effect of its own: it carries the active
+  // ledger in its dependencies. Without that, switching ledgers empties the
+  // month cache and nothing here re-fills it, so every row falls back to its
+  // template default -- one household's overrides quietly replaced by defaults
+  // under the other household's name, with no error and no spinner to notice.
+  useMonthLoaded(currentYearMonth);
 
   // WHICH ENTRIES BELONG TO THE MONTH ON SCREEN.
   //
@@ -134,7 +137,10 @@ function EntriesView() {
     // from the server. Re-reading the month is what stops the screen from
     // disagreeing with storage; reportError has already said that something
     // failed, so this only has to say what state things are now in.
-    await fetchMonthlyAmounts(currentYearMonth);
+    // force: the month is still marked 'ready', so a plain fetch would be
+    // deduplicated away -- and the screen would go on showing the values it
+    // optimistically cleared while the database kept some of them.
+    await fetchMonthlyAmounts(currentYearMonth, true);
     addToast('一部の金額をリセットできませんでした', 'error');
   }, [currentYearMonth, monthlyAmountsMap, deleteMonthlyAmount, fetchMonthlyAmounts, addToast]);
 

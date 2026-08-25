@@ -51,7 +51,22 @@ interface MonthlyState {
    */
   forgetAmountsOutside: (templateId: number, recurrence: Recurrence) => void;
   fetchActualsRange: (startMonth: string, endMonth: string) => Promise<void>;
-  fetchMonthlyAmounts: (yearMonth: string) => Promise<void>;
+  /**
+   * Loads one month's planned overrides.
+   *
+   * Skips a month already loaded or in flight unless `force`, for the same
+   * reason the range version does: 今月のサマリー is mounted TWICE (one shell
+   * per breakpoint) and 収支管理 may be asking for the same month beside it, so
+   * an un-deduplicated fetch here sends the identical request three times.
+   *
+   * 'error' is NOT skipped. Two callers use one callback for both the first
+   * load and their retry button (SankeyChart, useMonthlyVariance); skipping a
+   * failed month would make that button a no-op that looks like it worked.
+   *
+   * `force` is for a caller that knows the cached month is stale -- after a
+   * write that partially failed, where 'ready' is true and wrong.
+   */
+  fetchMonthlyAmounts: (yearMonth: string, force?: boolean) => Promise<void>;
   /**
    * Loads planned amounts for a whole range.
    *
@@ -78,7 +93,8 @@ interface MonthlyState {
    * useAssetStore and useTemplateStore.
    */
   copyMonthlyAmounts: (fromMonth: string, toMonth: string) => Promise<boolean>;
-  fetchMonthlyActuals: (yearMonth: string) => Promise<void>;
+  /** See fetchMonthlyAmounts for the deduplication rule; identical. */
+  fetchMonthlyActuals: (yearMonth: string, force?: boolean) => Promise<void>;
   setMonthlyActual: (templateId: number, yearMonth: string, amount: number) => Promise<boolean>;
   deleteMonthlyActual: (templateId: number, yearMonth: string) => Promise<boolean>;
 }
@@ -96,6 +112,23 @@ export interface MonthFetchStatus {
 }
 
 const IDLE_MONTH: MonthFetchStatus = { amounts: 'idle', actuals: 'idle' };
+
+/**
+ * Whether one half of one month has been dealt with -- loaded, or on its way.
+ *
+ * The deduplication predicate, defined once so the single-month fetchers and
+ * the range fetcher cannot drift into disagreeing about what "already asked
+ * for" means. 'error' is deliberately NOT settled: a failed month is one a
+ * retry must be able to ask for again.
+ */
+function isSettled(
+  monthStatus: ReadonlyMap<string, MonthFetchStatus>,
+  yearMonth: string,
+  half: keyof MonthFetchStatus,
+): boolean {
+  const status = (monthStatus.get(yearMonth) ?? IDLE_MONTH)[half];
+  return status === 'ready' || status === 'loading';
+}
 
 /** Records one half's status for one or more months, leaving the rest alone. */
 function setHalf(
@@ -298,7 +331,9 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     }
   },
 
-  fetchMonthlyAmounts: async (yearMonth: string) => {
+  fetchMonthlyAmounts: async (yearMonth: string, force = false) => {
+    if (!force && isSettled(get().monthStatus, yearMonth, 'amounts')) return;
+
     const tag = currentGeneration();
     set({ loading: true, monthStatus: setHalf(get().monthStatus, yearMonth, 'amounts', 'loading') });
     try {
@@ -340,11 +375,7 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     // twice on every load.
     if (!force) {
       const current = get().monthStatus;
-      const settled = months.every((month) => {
-        const status = (current.get(month) ?? IDLE_MONTH).amounts;
-        return status === 'ready' || status === 'loading';
-      });
-      if (settled) return;
+      if (months.every((month) => isSettled(current, month, 'amounts'))) return;
     }
 
     set({ loading: true, monthStatus: setHalf(get().monthStatus, months, 'amounts', 'loading') });
@@ -477,7 +508,9 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     }
   },
 
-  fetchMonthlyActuals: async (yearMonth: string) => {
+  fetchMonthlyActuals: async (yearMonth: string, force = false) => {
+    if (!force && isSettled(get().monthStatus, yearMonth, 'actuals')) return;
+
     const tag = currentGeneration();
     set({ loading: true, monthStatus: setHalf(get().monthStatus, yearMonth, 'actuals', 'loading') });
     try {

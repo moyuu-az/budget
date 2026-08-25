@@ -30,6 +30,19 @@ import type { TemplateRow } from './row-types';
 //   indexed primary key, taken by both writers in ASCENDING ID ORDER (the
 //   multi-row case orders explicitly), so there is no cycle to deadlock on.
 //
+// WHY `FOR NO KEY UPDATE` AND NOT `FOR UPDATE`
+//   The two writers must exclude each other, and NO KEY UPDATE conflicts with
+//   itself, so they still do. What it does NOT conflict with is `FOR KEY SHARE`
+//   -- and that is the lock PostgreSQL takes on this table on behalf of every
+//   monthly_amounts and monthly_actuals row that references it through the
+//   composite foreign key.
+//
+//   With `FOR UPDATE`, locking the ledger's whole template list (which
+//   copyMonth does) blocked every amount and actual write in that ledger for
+//   the duration -- far beyond the two writers this guard is about. Two people
+//   in a household would rarely notice; the reason to fix it is that the
+//   comment above describes a narrow lock, and it was not one.
+//
 // WHY THE RECURRENCE IS RE-READ FROM THE DATABASE
 //   Never from the caller. A client that says which entries occur is a client
 //   that can be wrong -- stale by one edit, or simply another tab. The row under
@@ -48,7 +61,7 @@ export async function lockRecurrence(
   templateId: number,
 ): Promise<Recurrence | null> {
   const { rows } = await client.query<TemplateRow>(
-    'SELECT * FROM entry_templates WHERE id = $1 FOR UPDATE',
+    'SELECT * FROM entry_templates WHERE id = $1 FOR NO KEY UPDATE',
     [templateId],
   );
   return rows.length === 0 ? null : rowToTemplate(rows[0]).recurrence;
@@ -67,7 +80,7 @@ export async function lockOccurringIds(
   yearMonth: string,
 ): Promise<number[]> {
   const { rows } = await client.query<TemplateRow>(
-    'SELECT * FROM entry_templates ORDER BY id FOR UPDATE',
+    'SELECT * FROM entry_templates ORDER BY id FOR NO KEY UPDATE',
   );
   return rows
     .filter((row) => occursInMonth(rowToTemplate(row).recurrence, yearMonth))

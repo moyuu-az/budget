@@ -1,19 +1,19 @@
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useTemplateStore } from '../../stores/useTemplateStore';
-import { monthStatusOf, useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
+import { useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
 import { formatWithCommas } from '../../utils/currency';
 import { toYearMonth } from '../../utils/forecast';
 import { occursInMonth } from '../../../shared/recurrence';
 import { LoadGate } from '../ui/LoadGate';
 import { combineStatus } from '../../stores/load-status';
+import { useMonthLoaded } from '../../hooks/useMonthLoaded';
 
 function MonthlySummary() {
   const { templates } = useTemplateStore();
   const templatesStatus = useTemplateStore((s) => s.status);
-  const { monthlyAmountsMap } = useMonthlyStore();
-  const monthStatus = useMonthlyStore((s) => s.monthStatus);
-  const fetchMonthlyAmounts = useMonthlyStore((s) => s.fetchMonthlyAmounts);
-  const fetchMonthlyActuals = useMonthlyStore((s) => s.fetchMonthlyActuals);
+  // A selector, not the whole store: this panel is mounted in both shells and
+  // subscribing to everything re-renders both on any month's status changing.
+  const monthlyAmountsMap = useMonthlyStore((s) => s.monthlyAmountsMap);
 
   const yearMonth = useMemo(() => toYearMonth(new Date()), []);
 
@@ -25,16 +25,14 @@ function MonthlySummary() {
   // changed the moment the user visited another screen. Two different answers
   // to 「今月の支出」 for the same month, with nothing to explain the jump.
   //
-  // The fetches are deduplicated by the store, so this costs nothing on a screen
-  // that has already asked for the month.
-  useEffect(() => {
-    void fetchMonthlyAmounts(yearMonth);
-    void fetchMonthlyActuals(yearMonth);
-  }, [yearMonth, fetchMonthlyAmounts, fetchMonthlyActuals]);
+  // Through the shared hook rather than a local effect: it is what re-fetches
+  // after a ledger switch (the status map is emptied and loadLedgerData does not
+  // refetch months), and what deduplicates the two mounted copies of this panel.
+  const { status: monthStatus, retry } = useMonthLoaded(yearMonth);
 
   // Ready only once the month's own figures have landed. Showing the defaults
   // in the meantime is the behaviour this fetch exists to end.
-  const status = combineStatus(templatesStatus, monthStatusOf(monthStatus, yearMonth));
+  const status = combineStatus(templatesStatus, monthStatus);
 
   const { totalIncome, totalExpense, net } = useMemo(() => {
     // Enabled AND occurring THIS month. `enabled` alone is not the same question
@@ -73,7 +71,12 @@ function MonthlySummary() {
   // templates yet the sums are 0, and 「収入 +¥0 / 支出 -¥0」 reads as a month
   // with nothing in it rather than as a panel still waiting.
   if (status !== 'ready') {
-    return <LoadGate status={status} height={92} label="今月のサマリー" />;
+    // onRetry is NOT optional here, whatever the default suggests. LoadGate
+    // falls back to loadLedgerData(), which deliberately skips per-month amounts
+    // and actuals -- so the button would refetch everything except the thing
+    // that failed and leave the same error on screen. LoadGate's own header
+    // names this panel's data as exactly that case.
+    return <LoadGate status={status} height={92} label="今月のサマリー" onRetry={retry} />;
   }
 
   return (

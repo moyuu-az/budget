@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import MonthlySummary from './MonthlySummary';
 import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useMonthlyStore } from '../../stores/useMonthlyStore';
+import { useSessionStore } from '../../stores/useSessionStore';
+import { switchLedger } from '../../app/ledger';
 import { setApi } from '../../lib/api';
 import { createMockApi } from '../../test/mock-api';
 import { makeTemplate, monthlyOn, onceOn, yearlyOn } from '../../test/factories';
@@ -27,6 +30,16 @@ beforeEach(() => {
   vi.setSystemTime(FIXED_TODAY);
   setApi(createMockApi());
   useMonthlyStore.getState().reset();
+  useSessionStore.setState({
+    session: {
+      user: { id: 1, email: 'a@example.com', displayName: 'A' },
+      ledgers: [
+        { id: 1, slug: 'household', name: '家計', kind: 'shared' },
+        { id: 2, slug: 'private', name: '個人', kind: 'personal' },
+      ],
+    },
+    activeLedgerId: 1,
+  });
 });
 
 afterEach(() => {
@@ -123,7 +136,7 @@ describe('this month’s summary', () => {
     expect(api.getMonthlyActuals).toHaveBeenCalledWith('2026-06');
   });
 
-  it('waits for that fetch before stating a figure', () => {
+  it('waits for that fetch before stating a figure', async () => {
     // Otherwise the defaults ARE the figure for a moment, which is the very
     // thing the fetch was added to stop.
     const api = createMockApi();
@@ -132,16 +145,101 @@ describe('this month’s summary', () => {
     useTemplateStore.setState({ templates: [RENT], status: 'ready' });
 
     render(<MonthlySummary />);
+    // The actuals half still resolves; letting it land keeps its state update
+    // inside act() rather than leaking into the next test.
+    await act(async () => {});
 
     expect(screen.getByRole('status')).toHaveTextContent('今月のサマリーを読み込み中');
   });
 
-  it('says it is loading rather than showing ¥0 as a figure', () => {
+  it('says it is loading rather than showing ¥0 as a figure', async () => {
     // 「収入 +¥0 / 支出 -¥0」 reads as a month with nothing in it, not as a panel
     // still waiting for its data.
     useTemplateStore.setState({ templates: [], status: 'loading' });
     render(<MonthlySummary />);
+    await act(async () => {});
 
     expect(screen.getByRole('status')).toHaveTextContent('今月のサマリーを読み込み中');
+  });
+});
+
+describe('when something goes wrong', () => {
+  it('offers a retry that re-fetches THIS panel’s month', async () => {
+    // LoadGate's default retry runs loadLedgerData(), which deliberately skips
+    // the per-month data -- so leaving onRetry off gives this panel a button
+    // that re-fetches everything except the thing that failed and leaves the
+    // same error on screen. LoadGate's own header names this data as exactly
+    // that case.
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const api = createMockApi();
+    api.getMonthlyAmounts = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue([{ id: 1, templateId: 1, yearMonth: '2026-06', amount: 88_000, createdAt: '' }]);
+    setApi(api);
+    useTemplateStore.setState({ templates: [RENT], status: 'ready' });
+
+    render(<MonthlySummary />);
+    const retry = await screen.findByRole('button', { name: '再読み込み' });
+
+    await user.click(retry);
+    await settled();
+
+    // The override, not the ¥100,000 default: the retry actually reached the
+    // server rather than being deduplicated away by the failed attempt.
+    expect(figure('支出')).toBe(88_000);
+  });
+});
+
+describe('after switching to another ledger', () => {
+  it('fetches the new ledger’s month instead of holding a skeleton forever', async () => {
+    // switchLedger empties every per-month status, and loadLedgerData does NOT
+    // refetch months -- so a panel whose effect depends only on [yearMonth,
+    // <store actions>] never runs again, and monthStatusOf reports an unknown
+    // month as 'loading'. This panel is in the sidebar of every screen, so that
+    // is a spinner across the whole application until 収支管理 is opened.
+    const api = createMockApi();
+    api.getMonthlyAmounts = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: 1, templateId: 1, yearMonth: '2026-06', amount: 90_000, createdAt: '' }])
+      .mockResolvedValue([{ id: 2, templateId: 1, yearMonth: '2026-06', amount: 40_000, createdAt: '' }]);
+    setApi(api);
+    useTemplateStore.setState({ templates: [RENT], status: 'ready' });
+
+    render(<MonthlySummary />);
+    await settled();
+    expect(figure('支出')).toBe(90_000);
+
+    await act(async () => {
+      await switchLedger(2);
+      // fetchTemplates is what re-fills the store switchLedger just emptied.
+      useTemplateStore.setState({ templates: [RENT], status: 'ready' });
+    });
+    await settled();
+
+    expect(figure('支出')).toBe(40_000);
+  });
+});
+
+describe('the two mounted copies', () => {
+  it('ask for the month once between them', async () => {
+    // Layout renders this panel twice -- one shell per breakpoint, both mounted,
+    // CSS hiding one. Without deduplication in the store that is two identical
+    // requests for amounts and two for actuals on every load, and the comment
+    // claiming otherwise was simply false.
+    const api = createMockApi();
+    setApi(api);
+    useTemplateStore.setState({ templates: [RENT], status: 'ready' });
+
+    render(
+      <>
+        <MonthlySummary />
+        <MonthlySummary />
+      </>,
+    );
+    await screen.findAllByText('今月のサマリー');
+
+    expect(api.getMonthlyAmounts).toHaveBeenCalledTimes(1);
+    expect(api.getMonthlyActuals).toHaveBeenCalledTimes(1);
   });
 });
