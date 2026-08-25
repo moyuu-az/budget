@@ -57,13 +57,14 @@ function EntryRow({ template, yearMonth }: Props) {
     }
   }, [editingActual]);
 
-  const handleToggle = useCallback(async () => {
-    try {
-      await toggleTemplate(template.id, !template.enabled);
-    } catch {
-      addToast('切り替えに失敗しました', 'error');
-    }
-  }, [template.id, template.enabled, toggleTemplate, addToast]);
+  // No toast on success: the switch itself moving IS the feedback, and a toast
+  // for every toggle in a list of twenty is noise. On failure the store has
+  // already rolled the switch back and reportError has raised the message, so
+  // there is nothing left for this to say -- the second toast this used to add
+  // could never fire anyway, since the store swallows the throw.
+  const handleToggle = useCallback(() => {
+    void toggleTemplate(template.id, !template.enabled);
+  }, [template.id, template.enabled, toggleTemplate]);
 
   const startEditPlanned = () => {
     const initial = formatWithCommas(resolvedPlanned);

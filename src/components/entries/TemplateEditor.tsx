@@ -53,45 +53,29 @@ function TemplateEditor({ template, onSave, onCancel }: Props) {
     // an invalid one, and the server re-checks with the SAME predicate
     // (shared/recurrence.ts) rather than a second implementation of the rules.
 
+    // Branching on the store's boolean rather than wrapping the call in
+    // try/catch. The store swallows the throw (reportError has already raised
+    // the toast), so a catch here would never run: the form would close and say
+    // 「更新しました」 beside the error message, for a save that did not happen.
     setSaving(true);
-    try {
-      const defaultAmount = parseCommaNumber(defaultAmountStr);
-      if (template) {
-        await updateTemplate(template.id, {
-          name: name.trim(),
-          recurrence,
-          type,
-          categoryId,
-          defaultAmount,
-        });
-        addToast('テンプレートを更新しました', 'success');
-      } else {
-        await addTemplate({
-          name: name.trim(),
-          recurrence,
-          type,
-          categoryId,
-          defaultAmount,
-        });
-        addToast('テンプレートを追加しました', 'success');
-      }
-      onSave();
-    } catch {
-      addToast('保存に失敗しました', 'error');
-    } finally {
-      setSaving(false);
-    }
+    const defaultAmount = parseCommaNumber(defaultAmountStr);
+    const fields = { name: name.trim(), recurrence, type, categoryId, defaultAmount };
+
+    const saved = template
+      ? await updateTemplate(template.id, fields)
+      : await addTemplate(fields);
+    setSaving(false);
+
+    if (!saved) return;
+    addToast(template ? 'テンプレートを更新しました' : 'テンプレートを追加しました', 'success');
+    onSave();
   };
 
   const handleDelete = async () => {
     if (!template) return;
-    try {
-      await deleteTemplate(template.id);
-      addToast('テンプレートを削除しました', 'success');
-      onSave();
-    } catch {
-      addToast('削除に失敗しました', 'error');
-    }
+    if (!(await deleteTemplate(template.id))) return;
+    addToast('テンプレートを削除しました', 'success');
+    onSave();
   };
 
   return (
