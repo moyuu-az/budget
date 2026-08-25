@@ -46,5 +46,19 @@ export const CONTRACT_VERSION = 2;
  * Lower-cased because Hono's `c.req.header()` matches case-insensitively but the
  * tests read it verbatim; keeping one spelling avoids a mismatch that would only
  * show up as "the gate never fires".
+ *
+ * THE SAME HEADER TRAVELS BOTH WAYS, and both sides check it.
+ *
+ * Checking only the request closes half the door. The other half is a NEW tab
+ * talking to an OLD server -- a revision rollback, or a traffic split during a
+ * staged deploy. That server has no gate at all (it predates this file), so it
+ * happily answers, and the new bundle reads a payload in the previous shape:
+ * `template.recurrence` is `undefined`, and the first predicate to touch
+ * `recurrence.kind` throws.
+ *
+ * So the server stamps every response, and the client refuses a body whose
+ * stamp does not match -- including a body with NO stamp, which is exactly what
+ * an old server sends. Symmetric, for the same reason the request side is: it
+ * is not knowable in advance which side will be the older one.
  */
 export const CONTRACT_VERSION_HEADER = 'x-contract-version';

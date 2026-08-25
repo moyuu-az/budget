@@ -1,5 +1,5 @@
 import type { AppApi } from '../types';
-import { isErrorEnvelope, type ErrorEnvelope } from '../../shared/errors';
+import { isErrorEnvelope, type ErrorCode, type ErrorEnvelope } from '../../shared/errors';
 import { CONTRACT_VERSION, CONTRACT_VERSION_HEADER } from '../../shared/contract-version';
 
 // ---------------------------------------------------------------------------
@@ -30,6 +30,14 @@ export interface HttpApiOptions {
   /** Overridable for tests; defaults to the page's own origin. */
   baseUrl?: string;
   fetchImpl?: typeof fetch;
+}
+
+/** Builds the throwable this client raises for a given code. */
+function envelopeError(code: ErrorCode, message: string): Error {
+  const envelope: ErrorEnvelope = { __appError: true, code, message };
+  const error = new Error(message) as Error & { envelope: ErrorEnvelope };
+  error.envelope = envelope;
+  return error;
 }
 
 /** Turns an error response into something normalizeError can read. */
@@ -73,6 +81,23 @@ export function createHttpApi(options: HttpApiOptions): AppApi {
       // IAP authenticates with a cookie, so it has to be sent.
       credentials: 'same-origin',
     });
+
+    // THE ANSWER IS CHECKED BEFORE IT IS READ.
+    //
+    // The request header catches an old CLIENT. This catches the other
+    // direction: a new bundle talking to an older revision (a rollback, a
+    // traffic split). That server cannot refuse the request -- it predates the
+    // gate -- so it answers in the previous shape, and this build would read
+    // `template.recurrence` as undefined and throw on the first predicate that
+    // touches it. A MISSING header is how an old server identifies itself, so
+    // absent is a mismatch, not a pass.
+    //
+    // Checked ahead of `response.ok` so an old server's 401 or 500 is reported
+    // as the version skew it is, rather than as an auth problem the user would
+    // act on uselessly.
+    if (response.headers.get(CONTRACT_VERSION_HEADER) !== String(CONTRACT_VERSION)) {
+      throw envelopeError('STALE_CLIENT', 'アプリが更新されました。ページを再読み込みしてください');
+    }
 
     if (!response.ok) {
       const body: unknown = await response.json().catch(() => null);

@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import TemplateEditor from './TemplateEditor';
-import { describeRecurrence } from '../../../shared/recurrence';
+import { describeRecurrence, isExpiredOnce } from '../../../shared/recurrence';
 import { formatWithCommas } from '../../utils/currency';
 import type { EntryTemplate } from '../../types';
 
@@ -27,6 +27,15 @@ import type { EntryTemplate } from '../../types';
 //   In a typical month this is a handful of rows nobody needs. Expanded by
 //   default it would push the entries that DO matter below the fold every time.
 //
+// EXPIRED ONE-OFFS ARE SEPARATED, NOT JUST LISTED
+//   A trip taken last November and a trip booked for next November are both
+//   "not this month", and in a list headed with the months they occur in they
+//   read identically. One is money already spent; the other is money to plan
+//   for. Showing them the same way invites a household to budget a spend twice.
+//
+//   They are kept rather than hidden because they are still real rows the user
+//   may want to delete or reuse -- but they sort last and say 終了.
+//
 // NO AMOUNT EDITING HERE, DELIBERATELY
 //   The rows show their default amount, not a per-month figure, and nothing here
 //   writes one. A monthly override belongs to a month the entry occurs in;
@@ -46,14 +55,21 @@ function DormantEntries({ templates, yearMonth }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
 
-  // Enabled first, then by name: a disabled entry is doubly absent from the
-  // month and belongs at the bottom of a list that is already about absence.
+  // Still-to-come first, then enabled, then by name.
+  //
+  // An expired one-off is the least actionable row on the screen -- it is over
+  // -- so it belongs at the bottom of a list that is already about things that
+  // are not happening now.
   const sorted = useMemo(
     () =>
       [...templates].sort(
-        (a, b) => Number(b.enabled) - Number(a.enabled) || a.name.localeCompare(b.name, 'ja'),
+        (a, b) =>
+          Number(isExpiredOnce(a.recurrence, yearMonth)) -
+            Number(isExpiredOnce(b.recurrence, yearMonth)) ||
+          Number(b.enabled) - Number(a.enabled) ||
+          a.name.localeCompare(b.name, 'ja'),
       ),
-    [templates],
+    [templates, yearMonth],
   );
 
   if (templates.length === 0) return null;
@@ -94,10 +110,12 @@ function DormantEntries({ templates, yearMonth }: Props) {
             className="overflow-hidden"
           >
             <p className="px-4 pb-2 text-xs text-slate-500">
-              上の合計には含まれていません。次に発生する時期は各行に表示しています。
+              上の合計には含まれていません。各行に発生する時期を表示しています。
             </p>
             <ul className="px-2 pb-2 space-y-1">
-              {sorted.map((template) => (
+              {sorted.map((template) => {
+                const expired = isExpiredOnce(template.recurrence, yearMonth);
+                return (
                 <li key={template.id}>
                   <div className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-slate-700/20 transition-colors">
                     <span
@@ -113,7 +131,16 @@ function DormantEntries({ templates, yearMonth }: Props) {
                     >
                       {template.name}
                     </span>
-                    <span className="text-xs text-slate-500 shrink-0">
+                    <span className="flex items-center gap-1.5 text-xs text-slate-500 shrink-0">
+                      {/* Expired one-offs say so. Without it 「2025年11月3日」 in a
+                          list of things that are not this month reads as one that
+                          has not happened yet -- and the household plans for a
+                          spend it already made. */}
+                      {expired && (
+                        <span className="rounded px-1.5 py-0.5 text-[10px] bg-slate-700/60 text-slate-400">
+                          終了
+                        </span>
+                      )}
                       {describeRecurrence(template.recurrence)}
                     </span>
                     <span className="w-24 text-right text-xs text-slate-500 tabular-nums shrink-0">
@@ -147,7 +174,8 @@ function DormantEntries({ templates, yearMonth }: Props) {
                     )}
                   </AnimatePresence>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           </motion.div>
         )}

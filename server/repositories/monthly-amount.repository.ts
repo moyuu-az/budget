@@ -8,7 +8,7 @@ export interface MonthlyAmountRepository {
   getForRange(startMonth: string, endMonth: string): Promise<MonthlyAmount[]>;
   set(templateId: number, yearMonth: string, amount: number): Promise<void>;
   remove(templateId: number, yearMonth: string): Promise<void>;
-  copyMonth(fromMonth: string, toMonth: string): Promise<void>;
+  copyMonth(fromMonth: string, toMonth: string, templateIds: readonly number[]): Promise<void>;
 }
 
 export function createMonthlyAmountRepository(
@@ -54,8 +54,16 @@ export function createMonthlyAmountRepository(
     },
 
     /**
-     * Copies every amount from one month into another, leaving existing target
-     * rows alone (DO NOTHING preserves what is already there).
+     * Copies the named entries' amounts from one month into another, leaving
+     * existing target rows alone (DO NOTHING preserves what is already there).
+     *
+     * ONLY the ids the caller names. Since migration 005 an entry can skip a
+     * month, and an override stored for a month its entry does not occur in is
+     * invisible -- no screen shows it, no total reads it -- until someone
+     * changes the recurrence to include that month, at which point it silently
+     * overrides the amount they expected. The caller filters by occurrence
+     * because that predicate lives in TypeScript and must not be re-expressed
+     * here; see the note on AppApi.copyMonthlyAmounts.
      *
      * This is a single INSERT ... SELECT rather than the old read-then-loop.
      * Besides being one round trip instead of N, it means the source rows are
@@ -67,12 +75,20 @@ export function createMonthlyAmountRepository(
      * and the inserted ledger_id is this repository's own -- so a row can only
      * ever be copied within one ledger.
      */
-    async copyMonth(fromMonth, toMonth) {
+    async copyMonth(fromMonth, toMonth, templateIds) {
+      // An empty list copies nothing. Skipping the round trip is not only an
+      // optimisation: `= ANY('{}')` is false for every row, so the statement
+      // would be a no-op anyway, and running it would suggest otherwise to
+      // anyone reading a query log.
+      if (templateIds.length === 0) return;
+
       await client.query(
         `INSERT INTO monthly_amounts (ledger_id, template_id, year_month, amount)
-           SELECT $1, template_id, $3, amount FROM monthly_amounts WHERE year_month = $2
+           SELECT $1, template_id, $3, amount
+             FROM monthly_amounts
+            WHERE year_month = $2 AND template_id = ANY($4::BIGINT[])
          ON CONFLICT (template_id, year_month) DO NOTHING`,
-        [ledgerId, fromMonth, toMonth],
+        [ledgerId, fromMonth, toMonth, templateIds],
       );
     },
   };

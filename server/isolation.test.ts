@@ -189,7 +189,7 @@ const ADVERSARIAL_ARGS: { [M in DataMethod]: (victim: Fixture) => unknown[] } = 
   // The bulk copy: an INSERT ... SELECT whose SELECT carries no ledger predicate,
   // so if row-level security were inert this is where the other ledger's figures
   // would be pulled across.
-  copyMonthlyAmounts: () => ['2026-01', '2026-03'],
+  copyMonthlyAmounts: (v) => ['2026-01', '2026-03', [v.templateId]],
 
   // --- Assets ---
   getAssetCategories: () => [],

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   describeRecurrence,
   describeRecurrenceShort,
+  isExpiredOnce,
   isIrregular,
   isIsoDate,
   isYearMonth,
@@ -179,11 +180,23 @@ describe('describeRecurrence', () => {
     expect(
       describeRecurrence({ kind: 'interval', everyMonths: 3, anchorMonth: '2026-01', dayOfMonth: 5 }),
     ).toBe('3ヶ月ごと 5日');
-    expect(describeRecurrence({ kind: 'once', date: '2026-11-03' })).toBe('11月3日 (1回のみ)');
+    expect(describeRecurrence({ kind: 'once', date: '2026-11-03' })).toBe('2026年11月3日 (1回のみ)');
+  });
+
+  it('keeps the YEAR on a one-off, because that is part of the answer', () => {
+    // 「11月3日 (1回のみ)」 in a list headed 「次に発生する時期」 reads as
+    // upcoming. For a trip taken last November it is the opposite of true, and
+    // the household budgets a spend it has already made.
+    expect(describeRecurrence({ kind: 'once', date: '2025-11-03' })).toBe('2025年11月3日 (1回のみ)');
   });
 
   it('strips the leading zero a one-off date carries', () => {
-    expect(describeRecurrence({ kind: 'once', date: '2026-03-05' })).toBe('3月5日 (1回のみ)');
+    expect(describeRecurrence({ kind: 'once', date: '2026-03-05' })).toBe('2026年3月5日 (1回のみ)');
+  });
+
+  it('carries no year on the variants that genuinely have none', () => {
+    // 「毎年3月20日」 means every March; a year on it would be a lie.
+    expect(describeRecurrence({ kind: 'yearly', month: 3, dayOfMonth: 20 })).not.toContain('年2');
   });
 });
 
@@ -207,6 +220,30 @@ describe('describeRecurrenceShort', () => {
     expect(describeRecurrenceShort({ kind: 'yearly', month: 3, dayOfMonth: 20 }, '2026-04')).toBe(
       '毎年3月20日',
     );
+  });
+});
+
+describe('isExpiredOnce', () => {
+  it('is true for a one-off in a month before the one being viewed', () => {
+    expect(isExpiredOnce({ kind: 'once', date: '2025-11-03' }, '2026-06')).toBe(true);
+    expect(isExpiredOnce({ kind: 'once', date: '2026-05-31' }, '2026-06')).toBe(true);
+  });
+
+  it('is false for one still to come', () => {
+    expect(isExpiredOnce({ kind: 'once', date: '2026-11-03' }, '2026-06')).toBe(false);
+  });
+
+  it('is false inside its own month, which is where it occurs', () => {
+    expect(isExpiredOnce({ kind: 'once', date: '2026-06-01' }, '2026-06')).toBe(false);
+  });
+
+  it('is false for everything that recurs', () => {
+    // Only a one-off can expire. For the rest, "past" is never the whole story.
+    expect(isExpiredOnce({ kind: 'monthly', dayOfMonth: 1 }, '2026-06')).toBe(false);
+    expect(isExpiredOnce({ kind: 'yearly', month: 1, dayOfMonth: 1 }, '2026-06')).toBe(false);
+    expect(
+      isExpiredOnce({ kind: 'interval', everyMonths: 2, anchorMonth: '2020-01', dayOfMonth: 1 }, '2026-06'),
+    ).toBe(false);
   });
 });
 

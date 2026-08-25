@@ -271,7 +271,26 @@ export interface AppApi {
   getMonthlyAmountsRange(startMonth: string, endMonth: string): Promise<MonthlyAmount[]>;
   setMonthlyAmount(templateId: number, yearMonth: string, amount: number): Promise<void>;
   deleteMonthlyAmount(templateId: number, yearMonth: string): Promise<void>;
-  copyMonthlyAmounts(fromMonth: string, toMonth: string): Promise<void>;
+  /**
+   * Copies last month's per-month amounts forward, for the named entries only.
+   *
+   * WHY THE CALLER SUPPLIES THE IDS
+   *   Since migration 005 an entry can skip a month, and an override stored for
+   *   a month its entry does not occur in is invisible: no screen shows it, no
+   *   total reads it -- and it comes back to life the day someone changes the
+   *   recurrence to include that month, silently overriding the amount they
+   *   expected. Copying blindly manufactures exactly those rows.
+   *
+   *   The list is passed in rather than derived server-side because the
+   *   occurrence rule lives in ONE place (shared/recurrence.ts) and it is
+   *   TypeScript. Re-expressing it in SQL would be a second implementation of
+   *   the predicate the whole design exists to keep single -- and the one in SQL
+   *   is the one no test would notice drifting.
+   *
+   *   Passing ids is safe: they are still scoped by row-level security, so an id
+   *   from another ledger copies nothing rather than reaching across.
+   */
+  copyMonthlyAmounts(fromMonth: string, toMonth: string, templateIds: number[]): Promise<void>;
 
   getMonthlyActuals(yearMonth: string): Promise<MonthlyActual[]>;
   setMonthlyActual(templateId: number, yearMonth: string, actualAmount: number): Promise<void>;

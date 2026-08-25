@@ -109,13 +109,18 @@ describe('reportError', () => {
   });
 });
 
+/** A fetch that answers with `body`, stamped with `version` (null = no stamp). */
+function stubFetch(body: string, status = 200, version: string | null = String(CONTRACT_VERSION)) {
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (version !== null) headers[CONTRACT_VERSION_HEADER] = version;
+  return vi.fn().mockResolvedValue(new Response(body, { status, headers }));
+}
+
 describe('the request header', () => {
   it('states which contract this bundle was built against', async () => {
     // Without it the server cannot tell an old tab from a new one, and the whole
     // gate is decoration.
-    const fetchImpl = vi.fn().mockResolvedValue(
-      new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } }),
-    );
+    const fetchImpl = stubFetch('[]');
     const api = createHttpApi({ activeLedgerId: () => 1, fetchImpl: fetchImpl as typeof fetch });
 
     await api.getCategories();
@@ -123,5 +128,56 @@ describe('the request header', () => {
     const init = fetchImpl.mock.calls[0][1] as RequestInit;
     const headers = init.headers as Record<string, string>;
     expect(headers[CONTRACT_VERSION_HEADER]).toBe(String(CONTRACT_VERSION));
+  });
+});
+
+describe('checking the ANSWER', () => {
+  // ---------------------------------------------------------------------------
+  // The other direction: a NEW bundle talking to an OLD revision -- a rollback,
+  // or a traffic split during a staged deploy. That server cannot refuse the
+  // request, because it predates the gate entirely. So it answers in the
+  // previous shape, and this build reads `template.recurrence` as undefined and
+  // throws on the first predicate that touches it.
+  // ---------------------------------------------------------------------------
+  const apiWith = (fetchImpl: ReturnType<typeof stubFetch>) =>
+    createHttpApi({ activeLedgerId: () => 1, fetchImpl: fetchImpl as typeof fetch });
+
+  it('refuses a body from a server that sends no stamp at all', async () => {
+    // Exactly what an old revision looks like. Absent is a mismatch, not a pass.
+    const api = apiWith(stubFetch('[{"id":1,"dayOfMonth":27}]', 200, null));
+
+    await expect(api.getTemplates()).rejects.toMatchObject({
+      envelope: { code: 'STALE_CLIENT' },
+    });
+  });
+
+  it('refuses a body stamped with a different contract', async () => {
+    const api = apiWith(stubFetch('[]', 200, '1'));
+    await expect(api.getCategories()).rejects.toMatchObject({
+      envelope: { code: 'STALE_CLIENT' },
+    });
+  });
+
+  it('reports a version skew even when the status is an error', async () => {
+    // An old server's 401 and a current one's must not read the same, or the
+    // user is told to sign in again for something signing in cannot fix.
+    const api = apiWith(stubFetch('{"__appError":true,"code":"UNAUTHORIZED","message":"x"}', 401, null));
+
+    await expect(api.getCategories()).rejects.toMatchObject({
+      envelope: { code: 'STALE_CLIENT' },
+    });
+  });
+
+  it('accepts a body stamped with the current contract', async () => {
+    const api = apiWith(stubFetch('[]'));
+    await expect(api.getCategories()).resolves.toEqual([]);
+  });
+
+  it('drives the overlay, so a rollback is as visible as an old tab', async () => {
+    const api = apiWith(stubFetch('[]', 200, null));
+
+    await api.getCategories().catch((e: unknown) => reportError(e));
+
+    expect(useStaleClientStore.getState().isStale).toBe(true);
   });
 });

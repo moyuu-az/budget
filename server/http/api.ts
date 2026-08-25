@@ -112,8 +112,11 @@ export const METHODS: { [M in DataMethod]: MethodSpec<M> } = {
     handle: (repos, [templateId, yearMonth]) => repos.monthlyAmount.remove(templateId, yearMonth),
   },
   copyMonthlyAmounts: {
-    args: z.tuple([yearMonthSchema, yearMonthSchema]),
-    handle: (repos, [from, to]) => repos.monthlyAmount.copyMonth(from, to),
+    // The id list is bounded: an unbounded array here would be a body-sized
+    // parameter list handed straight to the database. 1000 is far above any
+    // real household's entry count and far below anything that matters.
+    args: z.tuple([yearMonthSchema, yearMonthSchema, z.array(idSchema).max(1000)]),
+    handle: (repos, [from, to, templateIds]) => repos.monthlyAmount.copyMonth(from, to, templateIds),
   },
 
   // --- Recorded actuals ---

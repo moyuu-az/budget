@@ -93,14 +93,18 @@ function EntriesView() {
     const prevMonth = toYearMonth(prevDate);
     setCopying(true);
     try {
-      await copyMonthlyAmounts(prevMonth, currentYearMonth);
+      // Only the entries that actually fall in THIS month. Copying the rest
+      // would store overrides for months their entries skip -- invisible on
+      // every screen, and silently in force the day someone makes the entry
+      // monthly. `occurring` is the same narrowing the totals above use.
+      await copyMonthlyAmounts(prevMonth, currentYearMonth, occurring.map((t) => t.id));
       addToast('先月の金額をコピーしました', 'success');
     } catch {
       addToast('コピーに失敗しました', 'error');
     } finally {
       setCopying(false);
     }
-  }, [currentYearMonth, copyMonthlyAmounts, addToast]);
+  }, [currentYearMonth, occurring, copyMonthlyAmounts, addToast]);
 
   // Reset to defaults
   const handleResetToDefaults = useCallback(async () => {

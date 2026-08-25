@@ -395,7 +395,7 @@ describe('monthly amount repository', () => {
       return [first.id, second.id];
     });
 
-    await inHousehold((r) => r.monthlyAmount.copyMonth('2026-01', '2026-02'));
+    await inHousehold((r) => r.monthlyAmount.copyMonth('2026-01', '2026-02', [a, b]));
 
     const target = await inHousehold((r) => r.monthlyAmount.getForMonth('2026-02'));
     expect(
@@ -412,12 +412,49 @@ describe('monthly amount repository', () => {
     await inHousehold((r) => r.monthlyAmount.set(mine, '2026-01', 100));
     await inPrivate((r) => r.monthlyAmount.set(theirs, '2026-01', 999));
 
-    await inHousehold((r) => r.monthlyAmount.copyMonth('2026-01', '2026-02'));
+    // `theirs` is named on purpose: an id from another ledger must copy nothing
+    // rather than reach across. Row-level security is what makes that true.
+    await inHousehold((r) => r.monthlyAmount.copyMonth('2026-01', '2026-02', [mine, theirs]));
 
     const copied = await inHousehold((r) => r.monthlyAmount.getForMonth('2026-02'));
     expect(copied).toHaveLength(1);
     expect(copied[0].amount).toBe(100);
     expect(await inPrivate((r) => r.monthlyAmount.getForMonth('2026-02'))).toHaveLength(0);
+  });
+
+  it('copies ONLY the entries it was given', async () => {
+    // Since migration 005 an entry can skip a month, and an override stored for
+    // a month its entry does not occur in is invisible: no screen shows it, no
+    // total reads it -- and it comes back to life the day someone changes the
+    // recurrence to include that month, silently overriding the amount they
+    // expected. The caller filters by occurrence; this proves the filter is
+    // actually applied rather than decorative.
+    const [wanted, skipped] = await inHousehold(async (r) => {
+      const monthly = await r.template.add({ name: 'rent', recurrence: monthlyOn(1), type: 'expense' });
+      const yearly = await r.template.add({
+        name: 'car', recurrence: { kind: 'yearly', month: 1, dayOfMonth: 20 }, type: 'expense',
+      });
+      await r.monthlyAmount.set(monthly.id, '2026-01', 100);
+      await r.monthlyAmount.set(yearly.id, '2026-01', 120_000);
+      return [monthly.id, yearly.id];
+    });
+
+    // February: only the monthly entry occurs.
+    await inHousehold((r) => r.monthlyAmount.copyMonth('2026-01', '2026-02', [wanted]));
+
+    const target = await inHousehold((r) => r.monthlyAmount.getForMonth('2026-02'));
+    expect(target.map((row) => row.templateId)).toEqual([wanted]);
+    expect(target.map((row) => row.amount)).toEqual([100]);
+    void skipped;
+  });
+
+  it('copies nothing, and asks the database nothing, for an empty list', async () => {
+    const templateId = await seedTemplate(inHousehold);
+    await inHousehold((r) => r.monthlyAmount.set(templateId, '2026-01', 100));
+
+    await inHousehold((r) => r.monthlyAmount.copyMonth('2026-01', '2026-02', []));
+
+    expect(await inHousehold((r) => r.monthlyAmount.getForMonth('2026-02'))).toHaveLength(0);
   });
 
   it('removes one template-month pair', async () => {

@@ -17,7 +17,7 @@ interface MonthlyState {
   fetchMonthlyAmountsRange: (startMonth: string, endMonth: string) => Promise<void>;
   setMonthlyAmount: (templateId: number, yearMonth: string, amount: number) => Promise<void>;
   deleteMonthlyAmount: (templateId: number, yearMonth: string) => Promise<void>;
-  copyMonthlyAmounts: (fromMonth: string, toMonth: string) => Promise<void>;
+  copyMonthlyAmounts: (fromMonth: string, toMonth: string, templateIds: number[]) => Promise<void>;
   fetchMonthlyActuals: (yearMonth: string) => Promise<void>;
   setMonthlyActual: (templateId: number, yearMonth: string, amount: number) => Promise<void>;
   deleteMonthlyActual: (templateId: number, yearMonth: string) => Promise<void>;
@@ -149,10 +149,14 @@ export const useMonthlyStore = create<MonthlyState>((set, get) => ({
     }
   },
 
-  copyMonthlyAmounts: async (fromMonth: string, toMonth: string) => {
+  copyMonthlyAmounts: async (fromMonth: string, toMonth: string, templateIds: number[]) => {
     set({ loading: true });
     try {
-      await getApi().copyMonthlyAmounts(fromMonth, toMonth);
+      // `templateIds` is the caller's list of entries that actually occur in the
+      // TARGET month. Copying anything else stores an override no screen can
+      // show and no total reads -- until the recurrence changes to include that
+      // month, at which point it silently wins. See AppApi.copyMonthlyAmounts.
+      await getApi().copyMonthlyAmounts(fromMonth, toMonth, templateIds);
       // Re-fetch the target month to get the copied data
       const amounts = await getApi().getMonthlyAmounts(toMonth);
       const newMap = new Map(get().monthlyAmountsMap);

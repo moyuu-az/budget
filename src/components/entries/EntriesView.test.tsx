@@ -198,11 +198,68 @@ describe('entries that do not fall in this month', () => {
     expect(screen.getByLabelText('月')).toHaveValue('9');
   });
 
+  it('marks a one-off that has already happened as 終了', async () => {
+    // 「2025年11月20日」 in a list of things that are not this month reads as a
+    // spend still to come. Budgeting for money already spent is the mistake.
+    const user = userEvent.setup();
+    useTemplateStore.setState({ templates: [RENT, LAST_YEARS_TRIP] });
+    render(<EntriesView />);
+
+    await user.click(screen.getByRole('button', { name: /6月には発生しない項目/ }));
+
+    expect(screen.getByText('終了')).toBeInTheDocument();
+    // The year is shown, which is what makes 終了 checkable by the reader.
+    expect(screen.getByText('2025年8月10日 (1回のみ)')).toBeInTheDocument();
+  });
+
+  it('does not mark a one-off still to come', async () => {
+    const user = userEvent.setup();
+    const upcoming = makeTemplate({
+      id: 6, name: '旅行', categoryId: 1, defaultAmount: 200_000, recurrence: onceOn('2026-11-20'),
+    });
+    useTemplateStore.setState({ templates: [RENT, upcoming] });
+    render(<EntriesView />);
+
+    await user.click(screen.getByRole('button', { name: /6月には発生しない項目/ }));
+
+    expect(screen.queryByText('終了')).not.toBeInTheDocument();
+    expect(screen.getByText('2026年11月20日 (1回のみ)')).toBeInTheDocument();
+  });
+
   it('are absent entirely when every entry falls in this month', () => {
     useTemplateStore.setState({ templates: [RENT, JUNE_PREMIUM] });
     render(<EntriesView />);
 
     expect(screen.queryByRole('button', { name: /発生しない項目/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('copying last month’s amounts', () => {
+  it('names only the entries that fall in THIS month', async () => {
+    // Copying the rest would store overrides for months their entries skip:
+    // invisible on every screen, read by no total -- and silently in force the
+    // day someone makes the entry monthly.
+    const user = userEvent.setup();
+    api.copyMonthlyAmounts = vi.fn().mockResolvedValue(undefined);
+    api.getMonthlyAmounts = vi.fn().mockResolvedValue([]);
+    useTemplateStore.setState({ templates: [RENT, INSPECTION, WATER, LAST_YEARS_TRIP] });
+    render(<EntriesView />);
+
+    await user.click(screen.getByRole('button', { name: '先月からコピー' }));
+
+    expect(api.copyMonthlyAmounts).toHaveBeenCalledWith('2026-05', '2026-06', [RENT.id]);
+  });
+
+  it('sends an empty list rather than copying everything when nothing occurs', async () => {
+    const user = userEvent.setup();
+    api.copyMonthlyAmounts = vi.fn().mockResolvedValue(undefined);
+    api.getMonthlyAmounts = vi.fn().mockResolvedValue([]);
+    useTemplateStore.setState({ templates: [INSPECTION] });
+    render(<EntriesView />);
+
+    await user.click(screen.getByRole('button', { name: '先月からコピー' }));
+
+    expect(api.copyMonthlyAmounts).toHaveBeenCalledWith('2026-05', '2026-06', []);
   });
 });
 

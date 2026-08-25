@@ -180,6 +180,24 @@ export function createApp(deps: AppDependencies): Hono<{ Variables: Variables }>
     }),
   );
 
+  // Stamps EVERY /api response, successes and errors alike, with the contract
+  // this build speaks.
+  //
+  // The request-side gate only catches an old CLIENT. This catches the other
+  // direction -- a new bundle talking to an older revision after a rollback or
+  // during a traffic split. That server cannot refuse the request (it predates
+  // the gate), so the client has to be able to refuse the ANSWER, and it can
+  // only do that if a current server says so explicitly. A missing stamp is how
+  // an old server identifies itself.
+  //
+  // Registered before the authentication middleware so even a 401 carries it:
+  // an old server's 401 and a current one's must be distinguishable, or a new
+  // tab would report "sign in again" for what is really a version skew.
+  app.use('/api/*', async (c, next) => {
+    await next();
+    c.header(CONTRACT_VERSION_HEADER, String(CONTRACT_VERSION));
+  });
+
   // Everything under /api is authenticated. The session is resolved once per
   // request and reused by the handler.
   app.use('/api/*', async (c, next) => {

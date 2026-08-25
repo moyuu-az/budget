@@ -244,10 +244,35 @@ export function describeRecurrence(recurrence: Recurrence): string {
     case 'interval':
       return `${recurrence.everyMonths}ヶ月ごと ${recurrence.dayOfMonth}日`;
     case 'once': {
-      const [, month, day] = recurrence.date.split('-');
-      return `${Number(month)}月${Number(day)}日 (1回のみ)`;
+      // THE YEAR IS PART OF THE ANSWER for a one-off, and dropping it was a bug.
+      //
+      // 「11月3日 (1回のみ)」 in a list headed 「次に発生する時期」 reads as
+      // upcoming. For a trip that happened last November it is the opposite of
+      // true, and the household reads a spend it has already made as one still
+      // to come -- money budgeted twice.
+      //
+      // Every other variant is genuinely year-agnostic (「毎年3月20日」 means
+      // every March), which is why they carry no year and this one must.
+      const [year, month, day] = recurrence.date.split('-');
+      return `${year}年${Number(month)}月${Number(day)}日 (1回のみ)`;
     }
   }
+}
+
+/**
+ * True for a one-off whose date is already behind `yearMonth`.
+ *
+ * Only 'once' can expire: everything else recurs, so "past" is never the whole
+ * story for it. A caller that lists entries not falling in the current month
+ * needs this to separate 「まだ来ていない」 from 「もう終わった」 -- the two look
+ * identical in a list and mean opposite things for a budget.
+ *
+ * Compared by MONTH, not by day, because the caller's frame of reference is a
+ * month: a one-off earlier this month is not "expired" from the point of view of
+ * a screen showing this month, and it is not shown there anyway (it occurs).
+ */
+export function isExpiredOnce(recurrence: Recurrence, yearMonth: YearMonth): boolean {
+  return recurrence.kind === 'once' && recurrence.date.slice(0, 7) < yearMonth;
 }
 
 /** Short form for a dense row, where the month is already known from context. */

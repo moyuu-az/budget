@@ -323,6 +323,27 @@ describe('the contract version gate', () => {
     const response = await call('getSession', { as: ALICE });
     expect(response.status).toBe(200);
   });
+
+  it('stamps every answer with the contract it speaks', async () => {
+    // The other half of the door: a NEW bundle talking to an OLD revision. That
+    // server cannot refuse the request -- it predates this gate -- so the client
+    // has to be able to refuse the ANSWER, and it can only do that if a current
+    // server says so explicitly.
+    const response = await call('getSession', { as: ALICE });
+    expect(response.headers.get(CONTRACT_VERSION_HEADER)).toBe(String(CONTRACT_VERSION));
+  });
+
+  it('stamps errors too, including ones raised before authentication', async () => {
+    // An old server's 401 and a current one's must be distinguishable, or a new
+    // tab reports "sign in again" for what is really a version skew -- and the
+    // user acts on it uselessly.
+    const unauthenticated = await call('getSession', { as: undefined });
+    expect(unauthenticated.status).toBe(401);
+    expect(unauthenticated.headers.get(CONTRACT_VERSION_HEADER)).toBe(String(CONTRACT_VERSION));
+
+    const stale = await call('getSession', { as: ALICE, contractVersion: '1' });
+    expect(stale.headers.get(CONTRACT_VERSION_HEADER)).toBe(String(CONTRACT_VERSION));
+  });
 });
 
 describe('cross-site protection', () => {
