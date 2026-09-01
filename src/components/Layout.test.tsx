@@ -21,6 +21,11 @@ import { makeCashAsset, makeCashCategory } from '../test/factories';
 //   A control that exists only in the desktop shell is a control a phone user
 //   cannot reach at all. That is the failure this file guards, and it is the one
 //   a "does it look right" check would miss, because on a desktop it looks fine.
+//
+// The navigation items are LINKS, not buttons -- each one changes the address,
+// and being a real `<a href>` is what makes middle-click, cmd-click and "copy
+// link address" work. The queries below say `link` for that reason; see
+// src/components/sidebar/Navigation.tsx.
 // ---------------------------------------------------------------------------
 
 const noop = (): void => {};
@@ -65,7 +70,7 @@ describe('both shells', () => {
     );
 
     for (const label of ['ダッシュボード', '収支管理', '履歴', '分析', '資産', '設定']) {
-      expect(screen.getAllByRole('button', { name: label })).toHaveLength(2);
+      expect(screen.getAllByRole('link', { name: label })).toHaveLength(2);
     }
   });
 
@@ -102,7 +107,7 @@ describe('both shells', () => {
     const navs = screen.getAllByRole('navigation', { name: 'メインナビゲーション' });
     expect(navs).toHaveLength(2);
     for (const nav of navs) {
-      expect(within(nav).getAllByRole('button')).toHaveLength(6);
+      expect(within(nav).getAllByRole('link')).toHaveLength(6);
     }
   });
 });
@@ -118,7 +123,7 @@ describe('the current screen', () => {
     );
 
     const marked = screen
-      .getAllByRole('button', { name: '資産' })
+      .getAllByRole('link', { name: '資産' })
       .filter((b) => b.getAttribute('aria-current') === 'page');
     expect(marked).toHaveLength(2);
   });
@@ -126,7 +131,7 @@ describe('the current screen', () => {
 
 describe('the desktop sidebar', () => {
   it('drops the labels when collapsed, keeping the accessible name', () => {
-    // Collapsed, the buttons are icons. Without the aria-label they would be
+    // Collapsed, the links are icons. Without the aria-label they would be
     // unnamed to a screen reader -- and the phone bar has to keep its labels
     // regardless, which is why `collapsed` is ignored there.
     useUIStore.setState({ sidebarCollapsed: true });
@@ -136,7 +141,7 @@ describe('the desktop sidebar', () => {
       </Layout>,
     );
 
-    expect(screen.getAllByRole('button', { name: '資産' })).toHaveLength(2);
+    expect(screen.getAllByRole('link', { name: '資産' })).toHaveLength(2);
     // The balance panel needs width, so it is the sidebar copy that disappears.
     expect(screen.getAllByText('現在の残高')).toHaveLength(1);
   });

@@ -29,7 +29,17 @@ export interface ForecastPoint {
 export type ViewType = 'dashboard' | 'entries' | 'history' | 'settings' | 'analytics' | 'assets';
 
 // --- Analytics (renderer-computed, never cross IPC) ---
-export type ForecastPeriod = '60d' | '3m' | '6m' | '1y';
+/**
+ * The spans the balance forecast can be drawn over, as VALUES.
+ *
+ * A tuple rather than a bare union because the list is needed at runtime in
+ * three places -- the tab strip, `periodToDays`, and the validator that decides
+ * whether `?period=` in the address is meaningful. Deriving the type from the
+ * tuple keeps those from drifting: a span added here appears in the tabs and is
+ * accepted from the URL, and one removed becomes a compile error at every use.
+ */
+export const FORECAST_PERIODS = ['60d', '3m', '6m', '1y'] as const;
+export type ForecastPeriod = (typeof FORECAST_PERIODS)[number];
 
 export interface MonthSummary {
   yearMonth: string;

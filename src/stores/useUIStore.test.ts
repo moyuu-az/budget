@@ -4,7 +4,6 @@ import { useUIStore } from './useUIStore';
 const resetUIStore = (): void => {
   useUIStore.setState({
     theme: 'dark',
-    selectedYearMonth: '2026-06',
     sidebarCollapsed: false,
     analyticsPeriod: '6m',
   });
@@ -43,44 +42,10 @@ describe('useUIStore', () => {
     });
   });
 
-  describe('shiftMonth', () => {
-    it('moves forward one month within the same year', () => {
-      useUIStore.setState({ selectedYearMonth: '2026-06' });
-      useUIStore.getState().shiftMonth(1);
-      expect(useUIStore.getState().selectedYearMonth).toBe('2026-07');
-    });
-
-    it('moves forward across a year boundary', () => {
-      useUIStore.setState({ selectedYearMonth: '2026-12' });
-      useUIStore.getState().shiftMonth(1);
-      expect(useUIStore.getState().selectedYearMonth).toBe('2027-01');
-    });
-
-    it('moves backward across a year boundary', () => {
-      useUIStore.setState({ selectedYearMonth: '2026-01' });
-      useUIStore.getState().shiftMonth(-1);
-      expect(useUIStore.getState().selectedYearMonth).toBe('2025-12');
-    });
-
-    it('moves backward several months within the same year', () => {
-      useUIStore.setState({ selectedYearMonth: '2026-06' });
-      useUIStore.getState().shiftMonth(-3);
-      expect(useUIStore.getState().selectedYearMonth).toBe('2026-03');
-    });
-
-    it('pads single-digit months with a leading zero', () => {
-      useUIStore.setState({ selectedYearMonth: '2026-12' });
-      useUIStore.getState().shiftMonth(2);
-      expect(useUIStore.getState().selectedYearMonth).toBe('2027-02');
-    });
-  });
-
-  describe('setSelectedYearMonth', () => {
-    it('sets the selected year-month directly', () => {
-      useUIStore.getState().setSelectedYearMonth('2025-09');
-      expect(useUIStore.getState().selectedYearMonth).toBe('2025-09');
-    });
-  });
+  // `shiftMonth` / `setSelectedYearMonth` used to be tested here. The state they
+  // moved was read by nothing, and the month on screen now lives in the address
+  // bar instead (src/app/routes.ts). The arithmetic itself is still covered, in
+  // src/types/ui.test.ts, where shiftYearMonth is.
 
   describe('toggleSidebar', () => {
     it('collapses an expanded sidebar', () => {

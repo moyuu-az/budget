@@ -5,6 +5,8 @@ import { useMonthlyStore, resolveAmount } from '../../stores/useMonthlyStore';
 import { useCategoryStore } from '../../stores/useCategoryStore';
 import { useToastStore } from '../../stores/useToastStore';
 import { useMonthLoaded } from '../../hooks/useMonthLoaded';
+import { useSearchParam } from '../../hooks/useRoute';
+import { SEARCH_PARAMS, parseYearMonthParam } from '../../app/routes';
 import { toYearMonth } from '../../utils/forecast';
 import { occursInMonth } from '../../../shared/recurrence';
 import { summarizeExpenseByCostType } from '../../utils/cost-type';
@@ -17,7 +19,24 @@ import TemplateEditor from './TemplateEditor';
 import ConfirmDialog from '../shared/ConfirmDialog';
 
 function EntriesView() {
-  const [currentYearMonth, setCurrentYearMonth] = useState(() => toYearMonth(new Date()));
+  // THE MONTH ON SCREEN LIVES IN THE URL (`?month=YYYY-MM`).
+  //
+  // It was component state, so a reload -- or following a link back into the
+  // app -- silently snapped back to the current month while the user was
+  // halfway through entering January's figures. It is also the one thing worth
+  // sending to the other member of a shared ledger ("look at our January").
+  //
+  // No parameter means the current month, which is why a plain `/entries` is
+  // still the right address for "this month" and stays right tomorrow.
+  const thisMonth = useMemo(() => toYearMonth(new Date()), []);
+  const [currentYearMonth, setCurrentYearMonth] = useSearchParam({
+    name: SEARCH_PARAMS.entries.month,
+    parse: parseYearMonthParam,
+    fallback: thisMonth,
+    // Always written once the user moves: the address then says exactly which
+    // month is on screen, so pasting it shows the recipient the same one.
+    serialize: (ym: string) => ym,
+  });
   const [showNewTemplate, setShowNewTemplate] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [copying, setCopying] = useState(false);
