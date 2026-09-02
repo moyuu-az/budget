@@ -97,8 +97,15 @@ const navItems: { id: ViewType; label: string; icon: React.ReactNode }[] = [
 /**
  * Whether the browser should be left to handle this click itself.
  *
- * A middle click, or one with a modifier held, means "open this somewhere else"
- * -- the one case where taking the navigation over in JavaScript is wrong.
+ * A click with a modifier held means "open this somewhere else" -- the one case
+ * where taking the navigation over in JavaScript is wrong.
+ *
+ * `e.button !== 0` is a BELT, not the braces. A middle click fires `auxclick`,
+ * not `click`, so this handler is never called for one and the branch is
+ * effectively unreachable in a browser. What actually makes middle-click work
+ * is the `<a href>` itself. Do not read this line as "middle click is handled
+ * here" and conclude the anchor is optional -- removing the anchor removes the
+ * behaviour, and nothing in the UI would look wrong afterwards.
  */
 const isModifiedClick = (e: React.MouseEvent): boolean =>
   e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey;
@@ -125,7 +132,11 @@ function Navigation({
                 onNavigate(item.id);
               }}
               title={collapsed && !horizontal ? item.label : undefined}
-              aria-label={item.label}
+              // Only when the label is not on screen. With the text visible the
+              // attribute merely restates it, and an aria-label that drifts from
+              // the visible text is worse than none -- a voice-control user asks
+              // for what they can read.
+              aria-label={collapsed && !horizontal ? item.label : undefined}
               aria-current={isActive ? 'page' : undefined}
               className={
                 horizontal

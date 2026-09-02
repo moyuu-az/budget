@@ -85,6 +85,17 @@ describe('parseYearMonthParam', () => {
       expect(parseYearMonthParam(raw)).toBeNull();
     }
   });
+
+  it('rejects a year outside 1900-2099', () => {
+    // `0012-05` is four digits and passes a naive check, but month arithmetic
+    // on it hits JavaScript's two-digit-year rule: new Date(12, 4, 1) is 1912.
+    // The screen would show 「0012年5月」 and the 翌月 button would jump to
+    // 1912-06. Verified in node: new Date(12, 4, 1).getFullYear() === 1912.
+    expect(new Date(12, 4, 1).getFullYear()).toBe(1912);
+    for (const raw of ['0012-05', '0050-03', '0000-01', '2100-01', '9999-12']) {
+      expect(parseYearMonthParam(raw)).toBeNull();
+    }
+  });
 });
 
 describe('parseEnumParam', () => {

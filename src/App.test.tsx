@@ -26,6 +26,14 @@ vi.mock('./components/ParticleBackground', () => ({ default: () => null }));
 
 const href = (): string => window.location.pathname + window.location.search;
 
+/**
+ * Every screen below the dashboard is a lazy chunk, and the dashboard itself
+ * draws charts. On a loaded machine (the server tests run real PostgreSQL in
+ * Docker beside these) the default one second is not enough, and the failure
+ * looks like a routing bug rather than a slow render.
+ */
+const SCREEN_TIMEOUT = { timeout: 5_000 };
+
 beforeEach(() => {
   setApi(createMockApi());
   window.history.replaceState(null, '', '/');
@@ -50,7 +58,9 @@ describe('opening an address', () => {
     render(<App />);
 
     // The screens below the dashboard are lazy, so this waits for the chunk.
-    expect(await screen.findByRole('heading', { name: '残高履歴' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: '残高履歴' }, SCREEN_TIMEOUT),
+    ).toBeInTheDocument();
   });
 
   it('rewrites the root to the dashboard, so one screen has one address', async () => {
@@ -65,6 +75,17 @@ describe('opening an address', () => {
     await waitFor(() => expect(href()).toBe('/dashboard'));
   });
 
+  it('drops a filter that belonged to no screen', async () => {
+    // The other half of the rewrite, and the one worth pinning: a stale or
+    // mistyped link's `?month=` is nobody's filter, and carrying it onto the
+    // dashboard would apply a filter the user never chose. Without this test
+    // the branch can be deleted and everything still passes.
+    window.history.replaceState(null, '', '/nope?month=2026-01');
+    render(<App />);
+
+    await waitFor(() => expect(href()).toBe('/dashboard'));
+  });
+
   it('keeps a filter while rewriting the path', async () => {
     // The rewrite is about the PATH. Stripping the query here would throw away
     // the filter on exactly the reload this feature exists to survive.
@@ -74,7 +95,7 @@ describe('opening an address', () => {
     await waitFor(() => expect(href()).toBe('/entries?month=2026-01'));
     // And the month actually reached the screen -- 収支管理 has no heading, its
     // month navigator is what says which month is being edited.
-    expect(await screen.findByText('2026年1月')).toBeInTheDocument();
+    expect(await screen.findByText('2026年1月', undefined, SCREEN_TIMEOUT)).toBeInTheDocument();
   });
 });
 
@@ -87,15 +108,21 @@ describe('switching screens', () => {
     // same control. In JSDOM both are in the tree -- see Layout.test.tsx.
     await userEvent.click(screen.getAllByRole('link', { name: '分析' })[0]);
 
-    expect(await screen.findByRole('heading', { name: '分析' })).toBeInTheDocument();
+    // The address moves synchronously with the click; the screen behind it is a
+    // lazy chunk, so it is awaited separately.
     expect(href()).toBe('/analytics');
+    expect(
+      await screen.findByRole('heading', { name: '分析' }, SCREEN_TIMEOUT),
+    ).toBeInTheDocument();
   });
 
   it('follows the back button', async () => {
     render(<App />);
     await waitFor(() => expect(href()).toBe('/dashboard'));
     await userEvent.click(screen.getAllByRole('link', { name: '資産' })[0]);
-    expect(await screen.findByRole('heading', { name: '資産' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: '資産' }, SCREEN_TIMEOUT),
+    ).toBeInTheDocument();
 
     // happy-dom keeps no real session history, so the browser's half of the
     // back button is performed here; what is under test is that the app follows
@@ -103,8 +130,9 @@ describe('switching screens', () => {
     window.history.replaceState(null, '', '/dashboard');
     window.dispatchEvent(new PopStateEvent('popstate'));
 
-    await waitFor(() =>
-      expect(screen.queryByRole('heading', { name: '資産' })).not.toBeInTheDocument(),
+    await waitFor(
+      () => expect(screen.queryByRole('heading', { name: '資産' })).not.toBeInTheDocument(),
+      SCREEN_TIMEOUT,
     );
   });
 
@@ -113,7 +141,7 @@ describe('switching screens', () => {
     // would drill 分析 into a month the user never picked.
     window.history.replaceState(null, '', '/entries?month=2026-01');
     render(<App />);
-    await screen.findByText('2026年1月');
+    await screen.findByText('2026年1月', undefined, SCREEN_TIMEOUT);
 
     await userEvent.click(screen.getAllByRole('link', { name: '分析' })[0]);
 

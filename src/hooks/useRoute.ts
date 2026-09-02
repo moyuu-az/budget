@@ -67,6 +67,12 @@ export interface SearchParamSpec<T> {
 export function useSearchParam<T>(spec: SearchParamSpec<T>): [T, (value: T) => void] {
   const { search } = useLocation();
 
+  // Written during render, which React documents as something not to do. It is
+  // safe HERE because `set` reads only `name` and `serialize`, and both are
+  // structurally the same in every render of a given call site (the specs are
+  // literals over constants). If `serialize` ever closes over props or state,
+  // this becomes a stale-closure bug on a render React threw away -- move the
+  // assignment into an effect at that point.
   const specRef = useRef(spec);
   specRef.current = spec;
 

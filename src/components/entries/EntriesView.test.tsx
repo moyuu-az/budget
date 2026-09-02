@@ -540,4 +540,39 @@ describe('navigating to another month', () => {
     const dormant = screen.getByRole('button', { name: /7月には発生しない項目/ });
     expect(within(dormant).getByText('1 件')).toBeInTheDocument();
   });
+
+  it('writes the month into the address bar', async () => {
+    // The half of the URL work that nothing else proves: reading a deep link is
+    // covered in src/App.test.tsx, but if this screen kept its month in
+    // `useState` instead, every OTHER test here would still pass -- and the
+    // reload this feature exists to survive would be broken again.
+    const user = userEvent.setup();
+    useTemplateStore.setState({ templates: [RENT] });
+    render(<EntriesView />);
+
+    await user.click(screen.getByRole('button', { name: '翌月' }));
+    expect(window.location.search).toBe('?month=2026-07');
+
+    await user.click(screen.getByRole('button', { name: '前月' }));
+    expect(window.location.search).toBe('?month=2026-06');
+  });
+
+  it('opens on the month the address names', async () => {
+    window.history.replaceState(null, '', '/entries?month=2026-09');
+    useTemplateStore.setState({ templates: [RENT, JUNE_PREMIUM] });
+    render(<EntriesView />);
+
+    // September, not today's June: the annual premium is dormant there.
+    expect(screen.getByText('2026年9月')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /9月には発生しない項目/ })).toBeInTheDocument();
+  });
+
+  it('ignores a month the address cannot mean', async () => {
+    // A hand-edited or truncated link must not reach month arithmetic.
+    window.history.replaceState(null, '', '/entries?month=0012-05');
+    useTemplateStore.setState({ templates: [RENT] });
+    render(<EntriesView />);
+
+    expect(screen.getByText('2026年6月')).toBeInTheDocument();
+  });
 });

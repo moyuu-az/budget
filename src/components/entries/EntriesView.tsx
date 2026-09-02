@@ -7,6 +7,7 @@ import { useToastStore } from '../../stores/useToastStore';
 import { useMonthLoaded } from '../../hooks/useMonthLoaded';
 import { useSearchParam } from '../../hooks/useRoute';
 import { SEARCH_PARAMS, parseYearMonthParam } from '../../app/routes';
+import { shiftYearMonth } from '../../types/ui';
 import { toYearMonth } from '../../utils/forecast';
 import { occursInMonth } from '../../../shared/recurrence';
 import { summarizeExpenseByCostType } from '../../utils/cost-type';
@@ -110,9 +111,10 @@ function EntriesView() {
 
   // Copy from previous month
   const handleCopyFromLastMonth = useCallback(async () => {
-    const [year, month] = currentYearMonth.split('-').map(Number);
-    const prevDate = new Date(year, month - 2, 1);
-    const prevMonth = toYearMonth(prevDate);
+    // shiftYearMonth, not local Date arithmetic: the month is now an address as
+    // well as a value, and "the previous month" has to mean the same thing here
+    // as it does to the ← button beside it.
+    const prevMonth = shiftYearMonth(currentYearMonth, -1);
     setCopying(true);
     // WHICH entries are copied is decided by the server, from the rows under a
     // lock -- a list computed here would be stale the moment the other member of

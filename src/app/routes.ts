@@ -133,7 +133,16 @@ export const SEARCH_PARAMS = {
   settings: {},
 } as const satisfies Record<ViewType, Readonly<Record<string, string>>>;
 
-const YEAR_MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+// The year is bounded, not just four digits.
+//
+// `0012-05` passes a bare `\d{4}` and looks harmless -- until it reaches month
+// arithmetic: `new Date(12, 4, 1)` is JavaScript's two-digit-year legacy rule,
+// which yields **1912**. `/entries?month=0012-05` then renders 「0012年5月」 and
+// the 翌月 button jumps to 1912-06. The defect is in that legacy rule rather
+// than here, but before the month lived in the URL every value came from
+// `toYearMonth(new Date())` and could not be shaped like this. The address bar
+// is what made it reachable, so the address bar is where it is refused.
+const YEAR_MONTH = /^(19|20)\d{2}-(0[1-9]|1[0-2])$/;
 
 /**
  * A `YYYY-MM` query parameter, or null when it is absent or malformed.

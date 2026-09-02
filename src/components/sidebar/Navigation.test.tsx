@@ -55,6 +55,22 @@ describe('the navigation items', () => {
     expect(onNavigate).not.toHaveBeenCalled();
   });
 
+  it('leaves a middle click alone', () => {
+    // Pins the `e.button !== 0` branch. In a browser it is unreachable -- a
+    // middle click fires `auxclick`, not `click` -- so what actually makes
+    // "open in a new tab" work is the href above. This test exists so the
+    // branch cannot be quietly deleted and read as proof of the opposite.
+    const onNavigate = vi.fn();
+    render(<Navigation currentView="dashboard" onNavigate={onNavigate} />);
+    const link = screen.getByRole('link', { name: '履歴' });
+
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 1 });
+    fireEvent(link, event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
   it('marks the current screen for a screen reader', () => {
     render(<Navigation currentView="history" onNavigate={() => {}} />);
 

@@ -53,7 +53,11 @@ function AnalyticsView() {
   const [period, setPeriodParam] = useSearchParam<AnalyticsPeriod>({
     name: SEARCH_PARAMS.analytics.period,
     parse: parsePeriodParam,
-    fallback: preferredPeriod,
+    // The PREFERENCE is validated too, not just the URL. It comes out of
+    // localStorage, which has no schema and no migration (`useUIStore` persists
+    // without a version), so a span retired in a future release would otherwise
+    // come back from a year-old browser as the value of this screen.
+    fallback: parsePeriodParam(preferredPeriod) ?? '6m',
     serialize: (value) => value,
   });
   // null = "no month drilled into", which falls back to today below. Serialising
@@ -118,7 +122,22 @@ function AnalyticsView() {
     [startMonth, endMonth],
   );
 
-  const activeMonth = selectedMonth ?? todayYearMonth;
+  // THE DRILLED-INTO MONTH HAS TO BE INSIDE THE SPAN ON SCREEN.
+  //
+  // It used to arrive only by clicking a bar of the trend chart, so it was in
+  // range by construction. From the URL it can be anything -- and a link stays
+  // valid while the span it named moves: `?period=6m&month=2026-04` shared in
+  // September is out of range by the following January.
+  //
+  // Out of range is not merely empty. `useMonthRangeLoaded` above fetches
+  // startMonth..endMonth and nothing else, so that month's amounts never
+  // arrive, and the two panels below then disagree about the same month:
+  // buildCompositionData falls back to each template's DEFAULT amount and draws
+  // 「支出構成」 from figures the household never entered, while
+  // buildComparisonData finds no row and says there is no data. One screen,
+  // two answers, and the confident one is wrong.
+  const activeMonth =
+    selectedMonth !== null && months.includes(selectedMonth) ? selectedMonth : todayYearMonth;
 
   // Trends resolve each month's amount as actual ?? planned, so past/current months stay
   // populated from planned amounts when no actuals were recorded. Type is filtered inside

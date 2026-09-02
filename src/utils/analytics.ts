@@ -10,6 +10,7 @@ import type {
 } from '../types';
 import { resolveAmount } from '../stores/useMonthlyStore';
 import { occursInMonth } from '../../shared/recurrence';
+import { shiftYearMonth } from '../types/ui';
 
 const OTHER_NAME = 'その他';
 const OTHER_COLOR = '#6b7280';
@@ -144,10 +145,12 @@ export function buildComparisonData(
   const target = trendData.find((t) => t.yearMonth === targetMonth);
   if (!target) return [];
 
-  const [year, month] = targetMonth.split('-').map(Number);
-  const prevMonthDate = new Date(year, month - 2, 1);
-  const prevMonth = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
-  const prevYearMonth = `${year - 1}-${String(month).padStart(2, '0')}`;
+  // Both offsets go through shiftYearMonth. This function used to build the two
+  // strings itself, with its own padStart -- a third implementation of a
+  // conversion this application's date story depends on being single, and one
+  // that agreed with the others right up until it would not.
+  const prevMonth = shiftYearMonth(targetMonth, -1);
+  const prevYearMonth = shiftYearMonth(targetMonth, -12);
 
   const prev = trendData.find((t) => t.yearMonth === prevMonth);
   const prevYear = trendData.find((t) => t.yearMonth === prevYearMonth);
