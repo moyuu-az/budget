@@ -1,4 +1,19 @@
 import { ViewType } from '../../types';
+import { pathForView } from '../../app/routes';
+
+// ---------------------------------------------------------------------------
+// THE NAVIGATION IS MADE OF LINKS, NOT BUTTONS.
+//
+// Every item here changes the address, so it is a link, and being a real
+// `<a href>` is what buys the behaviours a button silently withholds:
+// middle-click and cmd-click to open a screen in another tab, "copy link
+// address" to send 収支管理 to the other member of the household, and a status
+// bar that shows where the item goes before it is pressed.
+//
+// The click handler still navigates in-page (no reload, no refetch), but it
+// stands aside for a MODIFIED click -- calling preventDefault on cmd-click is
+// how a hand-rolled router breaks "open in new tab" without anyone noticing.
+// ---------------------------------------------------------------------------
 
 interface Props {
   currentView: ViewType;
@@ -79,6 +94,22 @@ const navItems: { id: ViewType; label: string; icon: React.ReactNode }[] = [
   },
 ];
 
+/**
+ * Whether the browser should be left to handle this click itself.
+ *
+ * A click with a modifier held means "open this somewhere else" -- the one case
+ * where taking the navigation over in JavaScript is wrong.
+ *
+ * `e.button !== 0` is a BELT, not the braces. A middle click fires `auxclick`,
+ * not `click`, so this handler is never called for one and the branch is
+ * effectively unreachable in a browser. What actually makes middle-click work
+ * is the `<a href>` itself. Do not read this line as "middle click is handled
+ * here" and conclude the anchor is optional -- removing the anchor removes the
+ * behaviour, and nothing in the UI would look wrong afterwards.
+ */
+const isModifiedClick = (e: React.MouseEvent): boolean =>
+  e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey;
+
 function Navigation({
   currentView,
   onNavigate,
@@ -93,10 +124,19 @@ function Navigation({
         const isActive = currentView === item.id;
         return (
           <li key={item.id} className={horizontal ? 'flex-1' : undefined}>
-            <button
-              onClick={() => onNavigate(item.id)}
+            <a
+              href={pathForView(item.id)}
+              onClick={(e) => {
+                if (isModifiedClick(e)) return;
+                e.preventDefault();
+                onNavigate(item.id);
+              }}
               title={collapsed && !horizontal ? item.label : undefined}
-              aria-label={item.label}
+              // Only when the label is not on screen. With the text visible the
+              // attribute merely restates it, and an aria-label that drifts from
+              // the visible text is worse than none -- a voice-control user asks
+              // for what they can read.
+              aria-label={collapsed && !horizontal ? item.label : undefined}
               aria-current={isActive ? 'page' : undefined}
               className={
                 horizontal
@@ -130,7 +170,7 @@ function Navigation({
               ) : (
                 !collapsed && <span className="text-sm font-medium">{item.label}</span>
               )}
-            </button>
+            </a>
           </li>
         );
       })}

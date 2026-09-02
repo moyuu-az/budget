@@ -327,6 +327,47 @@ gcloud run deploy "$SERVICE" \
 postgres://app_user:PASSWORD@/DB_NAME?host=/cloudsql/PROJECT:REGION:INSTANCE
 ```
 
+### イメージの世代管理 (Artifact Registry)
+
+`--source .` のデプロイは**リリースのたびに新しいイメージを 1 つ積む**。Cloud Run の
+実行課金はリクエスト処理時間で決まるのでリリース回数では増えないが、Artifact
+Registry のストレージだけは積み上がる (無料枠 0.5 GB、超過分は $0.10/GB/月)。
+
+**最新 5 世代だけ残すクリーンアップポリシーを設定済み** (2026-08-25 適用)。
+リポジトリを作り直したときは以下を再実行する。
+
+```sh
+cat > /tmp/cleanup-policy.json <<'EOF'
+[
+  { "name": "keep-recent-5", "action": { "type": "Keep" },
+    "mostRecentVersions": { "keepCount": 5 } },
+  { "name": "delete-rest", "action": { "type": "Delete" },
+    "condition": { "tagState": "ANY" } }
+]
+EOF
+
+gcloud artifacts repositories set-cleanup-policies cloud-run-source-deploy \
+  --location="$REGION" --policy=/tmp/cleanup-policy.json --no-dry-run
+```
+
+**Keep ルールは Delete ルールより優先される。** そのため「全部消す」+「直近 5 個は
+残す」の 2 本で「直近 5 個だけ残る」になる。`--no-dry-run` を省くと削除は行われず
+Cloud Logging に候補が出るだけなので、ポリシーを変えるときは先に dry-run で確かめる。
+
+評価は Artifact Registry 側の非同期ジョブで、設定直後には消えない (最大 1 日程度)。
+現在の状態は次で確認する。
+
+```sh
+gcloud artifacts docker images list \
+  "$REGION-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy" --format=json | jq length
+```
+
+> **消えたイメージのリビジョンにはロールバックできない。** Cloud Run のリビジョンは
+> 削除されずに残るが、参照先のイメージが無くなるので `gcloud run services
+> update-traffic --to-revisions=...` で戻そうとしても起動しない。**6 世代以上前へ
+> 戻す手段は「その時点のコミットを再デプロイする」だけ**であり、それで足りるという
+> 判断でこの世代数にしている。戻したい古いリビジョンがあるうちは keepCount を上げる。
+
 ## 6. OAuth 同意画面とカスタムクライアント (ブラウザ操作。ここだけ CLI で完結しない)
 
 **組織 (Organization) の外にあるプロジェクトでは、カスタム OAuth クライアントが必須。**
@@ -514,4 +555,6 @@ gcloud billing budgets create \
   効かない (Google の subject id で照合しているため、アドレス変更で締め出されないのが
   優先されている)
 - 更新は `gcloud run deploy --source .` のみ。Web ではデプロイが更新
+- イメージは最新 5 世代で自動削除される (5 章「イメージの世代管理」)。それより古い
+  リビジョンへは戻せないので、戻すときはコミットを再デプロイする
 - スキーマ変更は手順 4 を再実行する。適用済みのファイルは編集せず、番号付きで追加する

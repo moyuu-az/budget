@@ -1,4 +1,4 @@
-import { toYearMonth } from '../../../shared/recurrence';
+import { shiftYearMonth } from '../../types/ui';
 
 interface MonthNavigatorProps {
   yearMonth: string;
@@ -18,15 +18,17 @@ function parseYearMonth(ym: string): [number, number] {
 function MonthNavigator({ yearMonth, onChange }: MonthNavigatorProps) {
   const [year, month] = parseYearMonth(yearMonth);
 
-  // toYearMonth from shared/recurrence.ts, not a local copy.
+  // shiftYearMonth, not local arithmetic.
   //
-  // This module used to format the string itself. The result was identical, and
+  // This module used to build the string itself. The result was identical, and
   // that is the problem: this application's whole date story rests on "local
   // time throughout, deliberately", and two implementations of the same
   // conversion are two places for that to stop being true -- silently, since
-  // both would keep agreeing in JST.
-  const goPrev = () => onChange(toYearMonth(new Date(year, month - 1, 1)));
-  const goNext = () => onChange(toYearMonth(new Date(year, month + 1, 1)));
+  // both would keep agreeing in JST. The month is now also written into the
+  // address bar, so the two selectors stepping months differently would put
+  // different answers in the URL.
+  const goPrev = () => onChange(shiftYearMonth(yearMonth, -1));
+  const goNext = () => onChange(shiftYearMonth(yearMonth, 1));
 
   return (
     <div className="flex items-center gap-3">

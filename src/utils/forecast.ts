@@ -1,4 +1,4 @@
-import type { EntryTemplate, MonthlyAmountsMap, MonthSummary, ForecastPoint, ForecastEventDetail } from '../types';
+import type { EntryTemplate, ForecastPeriod, MonthlyAmountsMap, MonthSummary, ForecastPoint, ForecastEventDetail } from '../types';
 import { resolveAmount } from '../stores/useMonthlyStore';
 import { occursOn, toIsoDate, toYearMonth } from '../../shared/recurrence';
 
@@ -132,7 +132,7 @@ export function summarizeForecastByMonth(points: ForecastPoint[]): MonthSummary[
   return summaries;
 }
 
-export function periodToDays(period: '60d' | '3m' | '6m' | '1y'): number {
+export function periodToDays(period: ForecastPeriod): number {
   switch (period) {
     case '60d': return 60;
     case '3m': return 90;
@@ -141,7 +141,7 @@ export function periodToDays(period: '60d' | '3m' | '6m' | '1y'): number {
   }
 }
 
-export function periodToMonths(period: '60d' | '3m' | '6m' | '1y'): number {
+export function periodToMonths(period: ForecastPeriod): number {
   switch (period) {
     case '60d': return 2;
     case '3m': return 3;

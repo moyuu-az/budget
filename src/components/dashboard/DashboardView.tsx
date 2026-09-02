@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import type { ForecastPeriod, ViewType } from '../../types';
+import { FORECAST_PERIODS, type ForecastPeriod, type ViewType } from '../../types';
+import { useSearchParam } from '../../hooks/useRoute';
+import { SEARCH_PARAMS, parseEnumParam } from '../../app/routes';
 import { useDashboardReadiness } from '../../hooks/useDashboardReadiness';
 import { periodToDays } from '../../utils/forecast';
 import { LoadGate } from '../ui/LoadGate';
@@ -16,8 +18,23 @@ interface DashboardViewProps {
   onNavigate?: (view: ViewType) => void;
 }
 
+// Accepts only a span the forecast can actually be sized for; anything else in
+// the address falls back to the default below rather than reaching
+// `periodToDays` and asking the server for NaN days of data.
+const parsePeriodParam = parseEnumParam(FORECAST_PERIODS);
+
 function DashboardView({ onNavigate }: DashboardViewProps) {
-  const [forecastPeriod, setForecastPeriod] = useState<ForecastPeriod>('60d');
+  // The span is in the address (`?period=`), so a reload keeps the chart the
+  // user was reading and a link to 「1年先の予測」 opens on the year.
+  //
+  // 60 days is the default because that is the horizon the minimum-balance
+  // warning is about -- the next two paydays.
+  const [forecastPeriod, setForecastPeriod] = useSearchParam<ForecastPeriod>({
+    name: SEARCH_PARAMS.dashboard.period,
+    parse: parsePeriodParam,
+    fallback: '60d',
+    serialize: (value) => value,
+  });
 
   // The month range is fetched by useDashboardReadiness, not here.
   //

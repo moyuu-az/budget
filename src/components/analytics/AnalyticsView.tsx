@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useTemplateStore } from '../../stores/useTemplateStore';
 import { useCategoryStore } from '../../stores/useCategoryStore';
@@ -6,6 +6,8 @@ import { useMonthlyStore } from '../../stores/useMonthlyStore';
 import { useSnapshotStore } from '../../stores/useSnapshotStore';
 import { useUIStore } from '../../stores/useUIStore';
 import type { AnalyticsPeriod } from '../../types/ui';
+import { useSearchParam } from '../../hooks/useRoute';
+import { SEARCH_PARAMS, parseEnumParam, parseYearMonthParam } from '../../app/routes';
 import { toYearMonth } from '../../utils/forecast';
 import { useForecast } from '../../hooks/useForecast';
 import {
@@ -27,10 +29,45 @@ const periodOptions: Array<{ value: AnalyticsPeriod; label: string }> = [
   { value: '1y', label: '1年' },
 ];
 
+// Built from the option list rather than written out again: a period added to
+// the selector but not to the parser would be rejected as invalid the moment it
+// came back from the address bar, and the screen would quietly show a different
+// span from the one highlighted.
+const parsePeriodParam = parseEnumParam(periodOptions.map((o) => o.value));
+
 function AnalyticsView() {
-  const period = useUIStore((s) => s.analyticsPeriod);
+  // THE SPAN AND THE DRILLED-INTO MONTH ARE BOTH IN THE URL.
+  //
+  // WHY THE STORE IS STILL HERE
+  //   `analyticsPeriod` is a persisted PREFERENCE -- "I usually look at six
+  //   months" -- and it supplies the value when the address says nothing. The
+  //   address wins whenever it says anything, so a link to `?period=1y` shows a
+  //   year to the person who opens it without overwriting their own habit until
+  //   they change the selector themselves.
+  //
+  //   Both are written on a change, deliberately: the URL so that what is on
+  //   screen is what gets shared, the store so that arriving at a bare
+  //   /analytics next week restores the span this household actually uses.
+  const preferredPeriod = useUIStore((s) => s.analyticsPeriod);
   const setAnalyticsPeriod = useUIStore((s) => s.setAnalyticsPeriod);
-  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  const [period, setPeriodParam] = useSearchParam<AnalyticsPeriod>({
+    name: SEARCH_PARAMS.analytics.period,
+    parse: parsePeriodParam,
+    // The PREFERENCE is validated too, not just the URL. It comes out of
+    // localStorage, which has no schema and no migration (`useUIStore` persists
+    // without a version), so a span retired in a future release would otherwise
+    // come back from a year-old browser as the value of this screen.
+    fallback: parsePeriodParam(preferredPeriod) ?? '6m',
+    serialize: (value) => value,
+  });
+  // null = "no month drilled into", which falls back to today below. Serialising
+  // null REMOVES the parameter rather than leaving `?month=` behind.
+  const [selectedMonth, setSelectedMonth] = useSearchParam<string | null>({
+    name: SEARCH_PARAMS.analytics.month,
+    parse: parseYearMonthParam,
+    fallback: null,
+    serialize: (value) => value,
+  });
 
   const templates = useTemplateStore((s) => s.templates);
   const categories = useCategoryStore((s) => s.categories);
@@ -85,7 +122,22 @@ function AnalyticsView() {
     [startMonth, endMonth],
   );
 
-  const activeMonth = selectedMonth ?? todayYearMonth;
+  // THE DRILLED-INTO MONTH HAS TO BE INSIDE THE SPAN ON SCREEN.
+  //
+  // It used to arrive only by clicking a bar of the trend chart, so it was in
+  // range by construction. From the URL it can be anything -- and a link stays
+  // valid while the span it named moves: `?period=6m&month=2026-04` shared in
+  // September is out of range by the following January.
+  //
+  // Out of range is not merely empty. `useMonthRangeLoaded` above fetches
+  // startMonth..endMonth and nothing else, so that month's amounts never
+  // arrive, and the two panels below then disagree about the same month:
+  // buildCompositionData falls back to each template's DEFAULT amount and draws
+  // 「支出構成」 from figures the household never entered, while
+  // buildComparisonData finds no row and says there is no data. One screen,
+  // two answers, and the confident one is wrong.
+  const activeMonth =
+    selectedMonth !== null && months.includes(selectedMonth) ? selectedMonth : todayYearMonth;
 
   // Trends resolve each month's amount as actual ?? planned, so past/current months stay
   // populated from planned amounts when no actuals were recorded. Type is filtered inside
@@ -123,7 +175,15 @@ function AnalyticsView() {
         <PeriodSelector
           options={periodOptions}
           selected={period}
-          onChange={(v) => { setAnalyticsPeriod(v); setSelectedMonth(null); }}
+          onChange={(v) => {
+            // Order matters only in that both run: the month is cleared because
+            // a month drilled into from a 6-month trend need not exist in a
+            // 3-month one. Two writes to the query in a row compose correctly --
+            // each reads the address the previous one just left.
+            setAnalyticsPeriod(v);
+            setPeriodParam(v);
+            setSelectedMonth(null);
+          }}
         />
       </div>
 
