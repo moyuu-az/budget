@@ -1,8 +1,10 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import type { ViewType } from './types';
 import { loadLedgerData } from './app/ledger';
+import { navigate, navigateToView } from './app/navigation';
+import { pathForView } from './app/routes';
 import { reportError } from './app/reportError';
+import { useRoute } from './hooks/useRoute';
 import Layout from './components/Layout';
 import DashboardView from './components/dashboard/DashboardView';
 import { Skeleton } from './components/ui/Skeleton';
@@ -43,7 +45,14 @@ const pageTransition = {
 
 function App() {
   useThemeEffect();
-  const [currentView, setCurrentView] = useState<ViewType>('dashboard');
+  // WHICH SCREEN IS ON is read from the address bar, not held in state.
+  //
+  // It used to be `useState('dashboard')`, and a reload -- which a phone does on
+  // its own the moment the browser reclaims the tab -- silently threw the screen
+  // away along with the month or period being looked at. Deriving it from the
+  // URL means reload, the back button and a pasted link cannot disagree with
+  // what is rendered, because there is only one thing to read.
+  const { view: currentView, canonical, matched } = useRoute();
   const [helpOpen, setHelpOpen] = useState(false);
   // The initial load of whichever ledger bootstrap selected. Subsequent
   // switches go through switchLedger, which clears before it reloads -- so this
@@ -53,15 +62,37 @@ function App() {
     loadLedgerData().catch(reportError);
   }, []);
 
+  // ONE SCREEN, ONE ADDRESS.
+  //
+  // `/`, a trailing slash and anything unrecognised all render the dashboard
+  // (see matchView). Rewriting the address to the canonical one keeps `/` and
+  // `/dashboard` from being two URLs for the same screen -- which would make a
+  // shared link a coin toss between them and any later `?`-parameter handling
+  // depend on which of the two the user happened to have.
+  //
+  // `replace`, so the address that was never really a screen does not become a
+  // history entry the back button has to step over.
+  //
+  // THE QUERY SURVIVES when the path named a real screen (`/entries/` with a
+  // trailing slash, say): stripping it here would throw the filter away on
+  // exactly the reload this whole change exists to survive. It does NOT survive
+  // an address that named no screen -- a stale link's `?month=` belongs to
+  // nothing, and carrying it onto the dashboard would be a filter nobody chose.
+  useEffect(() => {
+    if (canonical) return;
+    const query = matched ? window.location.search : '';
+    navigate(`${pathForView(currentView)}${query}`, { replace: true });
+  }, [canonical, matched, currentView]);
+
   useKeyboardShortcuts({
-    onNavigate: setCurrentView,
+    onNavigate: navigateToView,
     onShowHelp: () => setHelpOpen(true),
   });
 
   return (
     <>
       <ParticleBackground />
-      <Layout currentView={currentView} onNavigate={setCurrentView}>
+      <Layout currentView={currentView} onNavigate={navigateToView}>
         <Suspense
           fallback={
             <div role="status" aria-label="画面を読み込み中">
@@ -73,7 +104,7 @@ function App() {
         <AnimatePresence mode="wait">
           {currentView === 'dashboard' && (
             <motion.div key="dashboard" {...pageTransition}>
-              <DashboardView onNavigate={setCurrentView} />
+              <DashboardView onNavigate={navigateToView} />
             </motion.div>
           )}
           {currentView === 'entries' && (
@@ -98,7 +129,7 @@ function App() {
           )}
           {currentView === 'settings' && (
             <motion.div key="settings" {...pageTransition}>
-              <SettingsView onNavigate={setCurrentView} />
+              <SettingsView onNavigate={navigateToView} />
             </motion.div>
           )}
         </AnimatePresence>

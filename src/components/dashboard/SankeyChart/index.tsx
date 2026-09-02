@@ -4,6 +4,9 @@ import { combineStatus } from '../../../stores/load-status';
 import { toYearMonth } from '../../../utils/forecast';
 import { useCashFlowData } from '../../../hooks/useCashFlowData';
 import { useMonthLoaded } from '../../../hooks/useMonthLoaded';
+import { useSearchParam } from '../../../hooks/useRoute';
+import { SEARCH_PARAMS, parseYearMonthParam } from '../../../app/routes';
+import { shiftYearMonth } from '../../../types/ui';
 import { LoadGate } from '../../ui/LoadGate';
 import { SankeyCanvas } from './SankeyCanvas';
 import { SankeyTooltip, type TooltipState } from './SankeyTooltip';
@@ -16,26 +19,37 @@ function SankeyChart() {
     y: 0,
     content: '',
   });
-  const [selectedYearMonth, setSelectedYearMonth] = useState(() => toYearMonth(new Date()));
   const templatesStatus = useTemplateStore((s) => s.status);
 
   const currentYearMonth = useMemo(() => toYearMonth(new Date()), []);
 
+  // This panel has its OWN month, separate from the forecast span beside it, so
+  // it gets its own parameter (`?flow=`) rather than sharing `?month=` with
+  // anything else on the dashboard. Without it, paging back to compare last
+  // month's flow and then reloading -- or sending the address to the other
+  // member of the household -- silently snapped back to the current month.
+  const [selectedYearMonth, setSelectedYearMonth] = useSearchParam<string>({
+    name: SEARCH_PARAMS.dashboard.flow,
+    parse: parseYearMonthParam,
+    fallback: currentYearMonth,
+    serialize: (value) => value,
+  });
+
+  // Stepping is computed from the CURRENT value rather than from a state
+  // updater: the value now lives in the URL, which has no functional-update
+  // form. `useCallback` keyed on it, because the value changes far less often
+  // than this component renders.
+  //
+  // shiftYearMonth rather than local Date arithmetic -- the same helper 収支管理
+  // steps with, so both selectors put the same string in the address for the
+  // same month.
   const goPrevMonth = useCallback(() => {
-    setSelectedYearMonth((prev) => {
-      const [y, m] = prev.split('-').map(Number);
-      const d = new Date(y, m - 2, 1);
-      return toYearMonth(d);
-    });
-  }, []);
+    setSelectedYearMonth(shiftYearMonth(selectedYearMonth, -1));
+  }, [selectedYearMonth, setSelectedYearMonth]);
 
   const goNextMonth = useCallback(() => {
-    setSelectedYearMonth((prev) => {
-      const [y, m] = prev.split('-').map(Number);
-      const d = new Date(y, m, 1);
-      return toYearMonth(d);
-    });
-  }, []);
+    setSelectedYearMonth(shiftYearMonth(selectedYearMonth, 1));
+  }, [selectedYearMonth, setSelectedYearMonth]);
 
   // Fetch on the month changing -- and on the LEDGER changing, which the shared
   // hook is what supplies. The dedupe that used to live in a ref is now the

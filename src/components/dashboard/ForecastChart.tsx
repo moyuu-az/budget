@@ -11,7 +11,7 @@ import {
   ReferenceDot,
   ReferenceLine,
 } from 'recharts';
-import type { ForecastPoint, ForecastPeriod } from '../../types';
+import { FORECAST_PERIODS, type ForecastPoint, type ForecastPeriod } from '../../types';
 import { formatYAxisTick, formatXAxis } from '../../utils/forecast';
 import { Tabs, type TabItem } from '../ui/Tabs';
 import { useMinBalanceThreshold } from '../../stores/useSettingsStore';
@@ -62,12 +62,20 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<
   );
 }
 
-const periodTabs: TabItem<ForecastPeriod>[] = [
-  { value: '60d', label: '60日' },
-  { value: '3m', label: '3ヶ月' },
-  { value: '6m', label: '6ヶ月' },
-  { value: '1y', label: '1年' },
-];
+// Labels for every span, built from the tuple that defines the type. A span
+// added to FORECAST_PERIODS without a label here is a compile error, so the tab
+// strip cannot silently fall behind what the URL and the forecast accept.
+const PERIOD_LABELS: Record<ForecastPeriod, string> = {
+  '60d': '60日',
+  '3m': '3ヶ月',
+  '6m': '6ヶ月',
+  '1y': '1年',
+};
+
+const periodTabs: TabItem<ForecastPeriod>[] = FORECAST_PERIODS.map((value) => ({
+  value,
+  label: PERIOD_LABELS[value],
+}));
 
 function getXAxisInterval(period: ForecastPeriod): number {
   switch (period) {

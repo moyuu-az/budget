@@ -68,7 +68,24 @@ async function main(): Promise<void> {
     app.use('/*', serveStatic({ root: path.relative(process.cwd(), staticRoot) }));
     // Single-page app fallback: any unmatched GET renders the shell and lets the
     // client router take over.
-    app.get('*', (c) => c.html(fs.readFileSync(indexHtml, 'utf8')));
+    //
+    // `no-store`, because there are now SIX html addresses rather than one
+    // (/dashboard, /entries, ... -- see src/app/routes.ts). A response with
+    // neither Cache-Control nor ETag is cached heuristically, and a cached
+    // shell is a cached <script src> -- i.e. an old bundle. CONTRACT_VERSION and
+    // StaleClientOverlay would catch the consequences, but only after showing
+    // the user a full-screen "reload" they need not have seen.
+    //
+    // ORDER: static files are registered FIRST, so an entry in the build output
+    // whose name matches a screen would shadow that screen. `/assets` (資産) and
+    // Vite's `dist/client/assets/` are exactly that pair; it works today only
+    // because serveStatic falls through for a directory with no index.html in
+    // it. Do not add a `public/<screen name>/` directory, and if the build ever
+    // emits `assets/index.html`, reloading 資産 breaks silently.
+    app.get('*', (c) => {
+      c.header('Cache-Control', 'no-store');
+      return c.html(fs.readFileSync(indexHtml, 'utf8'));
+    });
   } else {
     console.warn(`no client build at ${staticRoot} -- serving the API only`);
   }

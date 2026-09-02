@@ -154,3 +154,50 @@ describe('once everything has arrived', () => {
     expect(screen.queryByText('使っていい額')).not.toBeInTheDocument();
   });
 });
+
+describe('the forecast span', () => {
+  beforeEach(() => {
+    // Everything ready, so the chart and its tabs are actually rendered rather
+    // than replaced by a load gate.
+    useAssetStore.setState({
+      categories: [makeCashCategory()],
+      assets: [makeCashAsset({ value: 500_000 })],
+      status: 'ready',
+    });
+  });
+
+  it('is read from the address', async () => {
+    window.history.replaceState(null, '', '/dashboard?period=1y');
+    render(<DashboardView />);
+
+    expect(await screen.findByRole('tab', { name: '1年' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('is written to the address', async () => {
+    // Without this, the span could go back to `useState` and every other test
+    // on this screen would still pass -- while a reload silently reset the
+    // chart the user was reading.
+    const user = userEvent.setup();
+    window.history.replaceState(null, '', '/dashboard');
+    render(<DashboardView />);
+
+    await user.click(await screen.findByRole('tab', { name: '6ヶ月' }));
+
+    expect(window.location.search).toBe('?period=6m');
+  });
+
+  it('ignores a span the forecast cannot be sized for', async () => {
+    // `?period=42y` would otherwise reach periodToDays, which knows only the
+    // four spans, and the screen would ask for a range nothing can produce.
+    window.history.replaceState(null, '', '/dashboard?period=42y');
+    render(<DashboardView />);
+
+    expect(await screen.findByRole('tab', { name: '60日' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+});
