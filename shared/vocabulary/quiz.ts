@@ -171,14 +171,15 @@ function shuffled<T>(items: readonly T[], rng: () => number): T[] {
  * returned 0 for two entries would fall back to whatever order the CALLER
  * happened to hand over -- and by the time this runs the caller's order is a
  * SHUFFLE. 「No.順」 whose ties land differently on every run is not an order the
- * reader can predict. The id tie-break makes the result a function of the words
- * alone; the test hands the same Day in forwards and reversed and requires one
- * sequence out.
+ * reader can predict.
  *
- * The numbers are unique today, so the tie-break is unreachable. It is here
- * because that is a property of the transcription rather than of this code, and
- * the failure it would cause -- an order that quietly stops being an order --
- * is not one anybody would notice on screen.
+ * The numbers are unique today (`words.test.ts` pins 481-560 gapless, and `id`
+ * is derived from `number`), so the second term is unreachable through the book.
+ * It is here because that is a property of the transcription rather than of this
+ * code, and because the failure it would cause is invisible on screen. It is
+ * exercised directly instead, with two synthetic entries sharing a number --
+ * see 「breaks a tie on the id」 in quiz.test.ts. A defence nothing exercises is
+ * a defence nobody can tell has stopped working.
  */
 const byBookNumber = (a: VocabWord, b: VocabWord): number =>
   a.number - b.number || a.id.localeCompare(b.id);

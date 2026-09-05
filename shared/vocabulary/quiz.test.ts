@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { VOCAB_WORDS } from './words';
 import { wordById, wordsForDay } from './index';
-import { QUIZ_DIRECTIONS } from './types';
+import { QUIZ_DIRECTIONS, type VocabWord } from './types';
 import { answerTextFor, buildQuiz, isEquallyCorrect, promptTextFor } from './quiz';
 
 // ---------------------------------------------------------------------------
@@ -212,7 +212,35 @@ describe('出題順', () => {
     // its words ranked by how often each is missed. 「No.順」 that came out
     // differently depending on which range was chosen would not be an order the
     // reader could predict.
+    //
+    // What holds this today is the No. being unique, NOT the tie-break -- with
+    // distinct numbers the first term of the comparator already decides. The
+    // tie-break has its own test below, because a defence nothing exercises is
+    // a defence nobody can tell has stopped working.
     expect(askedIds({ words: [...DAY].reverse(), order: 'number' })).toEqual(BOOK_ORDER);
+  });
+
+  it('breaks a tie on the id, so equal numbers still come out in one order', () => {
+    // UNREACHABLE WITH THE BOOK AS PRINTED, and asserted anyway.
+    //
+    // `words.test.ts` pins 481-560 as a gapless ascending run and pins `id` as
+    // `et-<number>`, so two entries cannot share a number today. That is a
+    // property of the transcription, not of the comparator -- and the failure it
+    // would cause is invisible on screen: `Array.prototype.sort` is stable, so a
+    // comparator that returned 0 would hand the CALLER's order through, and the
+    // caller's order at that point is a SHUFFLE. 「No.順」 would silently come
+    // out differently on every run.
+    //
+    // The two calls below get the same permutation from the same seed, so
+    // without the tie-break they land on opposite orders and one of them fails.
+    const twin = (id: string): VocabWord => ({ ...wordById('et-481')!, id, number: 999 });
+    const a = twin('et-999a');
+    const b = twin('et-999b');
+    const order = (words: readonly VocabWord[]) =>
+      askedIds({ words, distractorPool: words, order: 'number', seed: 3 });
+
+    expect(order([a, b])).toEqual(['et-999a', 'et-999b']);
+    expect(order([b, a])).toEqual(['et-999a', 'et-999b']);
   });
 
   it('defaults to random, which is what every caller had before the option existed', () => {
@@ -227,10 +255,16 @@ describe('出題順', () => {
   });
 
   it('asks the same questions either way, and only changes the order', () => {
-    // The shuffle runs for BOTH settings, which is what makes this true. If
-    // 'number' skipped it the generator would sit at a different position and a
-    // capped run would quietly select a different set of words.
-    expect(new Set(askedIds({ order: 'number' }))).toEqual(new Set(askedIds({ order: 'random' })));
+    // THE LIMIT IS THE WHOLE TEST. Uncapped, both settings ask about every word
+    // handed over and the assertion is just 「buildQuiz drops nothing」 -- which
+    // another test already covers, and which no ordering mutation can break.
+    //
+    // Capped, the two must agree on WHICH five, and that only holds because the
+    // shuffle runs for both settings. Skip it for 'number' and the generator
+    // sits at a different position, so the cap selects a different five.
+    expect(new Set(askedIds({ order: 'number', limit: 5 }))).toEqual(
+      new Set(askedIds({ order: 'random', limit: 5 })),
+    );
   });
 
   it('still samples when limited, rather than always asking the first five of the book', () => {
@@ -261,6 +295,12 @@ describe('出題順', () => {
     // `words` is `readonly`, but a sort in place would still mutate the array
     // behind it -- and the array the screen hands over is memoised from
     // `wordsForDay`, i.e. the module-level book itself.
+    //
+    // WHAT ACTUALLY HOLDS THIS is `shuffled()` copying its input; the
+    // `capped.slice()` in front of the sort is a second, currently unreachable
+    // guard (`capped` is always a fresh array by then). Removing that `.slice()`
+    // does NOT fail this test, and the comment used to imply it would. Removing
+    // the copy inside `shuffled()` does.
     const before = DAY.map((w) => w.id);
     buildQuiz({ words: DAY, distractorPool: DAY, direction: 'ja_to_en', order: 'number', seed: 1 });
     expect(DAY.map((w) => w.id)).toEqual(before);

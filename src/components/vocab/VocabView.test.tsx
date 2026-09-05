@@ -95,11 +95,38 @@ describe('英単語 の設定', () => {
     expect(await screen.findByText(/Day 31・すべて・手入力・ランダム・16問/)).toBeInTheDocument();
   });
 
-  it('reads the 出題順 from the address', async () => {
+  it('reads the 出題順 from the address, and the tab says so', async () => {
     goTo('?day=31&order=number');
     render(<VocabView />);
 
     expect(await screen.findByText(/Day 31・すべて・手入力・No\.順・16問/)).toBeInTheDocument();
+    // The selected state is asserted separately from the summary line because
+    // they are two different lies a control can tell. Pinning `value={order}`
+    // to a constant leaves the summary correct and highlights the wrong tab --
+    // a reader who arrived on `?order=number` would see 「ランダム」 selected and
+    // switch it, turning No.順 off.
+    const orders = screen.getByRole('tablist', { name: '出題順' });
+    expect(within(orders).getByRole('tab', { name: 'No.順' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('never greys out 出題順, whatever the 出題範囲 selected', async () => {
+    // 「苦手」 ranks its ten words by how often each is missed, which makes it
+    // tempting to grey this out. The ranking chose WHICH ten; it never reached
+    // the screen (buildQuiz has always shuffled what it was handed), so No.順
+    // here is the only statement about the order the reader actually sees.
+    // The comment in VocabView says exactly that -- this is what stops it from
+    // being a comment somebody can quietly contradict.
+    useVocabStore.setState({ progress: [at('et-481', false)], status: 'ready' });
+    goTo('?day=31&scope=weak');
+    render(<VocabView />);
+
+    const orders = await screen.findByRole('tablist', { name: '出題順' });
+    for (const label of ['ランダム', 'No.順']) {
+      expect(within(orders).getByRole('tab', { name: label })).toBeEnabled();
+    }
   });
 
   it('defaults to ランダム, so a bookmark made before the option keeps its behaviour', async () => {
@@ -123,6 +150,22 @@ describe('英単語 の設定', () => {
     expect(await screen.findByText(/・No\.順・/)).toBeInTheDocument();
   });
 
+  /**
+   * What the first question of the running quiz is showing.
+   *
+   * Located through the direction line rather than by matching the word's own
+   * text: the book prints the SAME Japanese for different English (541/542,
+   * 553/560, 557/559), so `findByText(word.ja)` is one twin arriving at the top
+   * of a Day away from failing with 「複数マッチ」 for a reason that has nothing
+   * to do with the order being tested.
+   */
+  const currentPrompt = async (): Promise<Element> => {
+    const direction = await screen.findByText('日本語 → 英語');
+    const prompt = direction.nextElementSibling;
+    if (prompt === null) throw new Error('the question shows no prompt beside its direction');
+    return prompt;
+  };
+
   // END TO END, because the wiring is what breaks: the setting is read from the
   // address, carried into buildQuiz, and only then decides what the reader is
   // shown. A unit test of buildQuiz passes happily while the screen forgets to
@@ -139,7 +182,61 @@ describe('英単語 の設定', () => {
 
     await user.click(await screen.findByRole('button', { name: 'クイズを始める' }));
 
-    expect(await screen.findByText(wordsForDay(day)[0].ja)).toBeInTheDocument();
+    expect(await currentPrompt()).toHaveTextContent(wordsForDay(day)[0].ja);
+  });
+
+  // --- CHOOSING ON THE CONTROL, NOT IN THE ADDRESS -------------------------
+  //
+  // Every test above puts the setting in the URL before the first render, so
+  // the closure `start` captures is already correct and the dependency list is
+  // never exercised. The reader does not arrive that way: they open /vocab,
+  // press a tab, then press 「クイズを始める」. Drop a setting from `start`'s
+  // dependencies and THAT path silently runs the previous setting while the
+  // screen shows the new one -- and nothing above notices.
+  //
+  // Day is covered alongside 出題順 because the hole is the dependency list
+  // itself, not this PR's setting: `dayId` could be dropped just as quietly.
+
+  it('starts with the 出題順 picked on the control, not the one it opened with', async () => {
+    const user = userEvent.setup();
+    goTo('?day=31&input=choice');
+    render(<VocabView />);
+
+    const orders = await screen.findByRole('tablist', { name: '出題順' });
+    await user.click(within(orders).getByRole('tab', { name: 'No.順' }));
+    await user.click(screen.getByRole('button', { name: 'クイズを始める' }));
+
+    expect(await currentPrompt()).toHaveTextContent(wordsForDay(31)[0].ja);
+  });
+
+  it('starts on the Day picked on the cards, not the one it opened with', async () => {
+    const user = userEvent.setup();
+    goTo('?day=31&order=number&input=choice');
+    render(<VocabView />);
+
+    await user.click(await screen.findByRole('button', { name: /Day 35/ }));
+    await user.click(screen.getByRole('button', { name: 'クイズを始める' }));
+
+    expect(await currentPrompt()).toHaveTextContent(wordsForDay(35)[0].ja);
+
+    // AND THE CHOICES, which is where a stale `dayId` actually shows.
+    //
+    // The words to ask are passed in as an argument, so they follow the cards
+    // even from a stale closure -- the prompt above would look right. What is
+    // read from the closure is `distractorPool: wordsForDay(dayId)`, so a stale
+    // Day quietly draws the wrong options: choices from another grammatical
+    // pattern can be told apart by their shape, and the question stops being
+    // about the meaning.
+    // Counted through accessible names rather than textContent: each option
+    // carries a keyboard-shortcut badge that is `aria-hidden`, so the raw text
+    // reads 「1be filled with」 while the name a reader hears is the phrase.
+    const choiceCount = screen.getAllByRole('listitem').length;
+    const fromDay35 = wordsForDay(35).filter(
+      (word) => screen.queryByRole('button', { name: word.en }) !== null,
+    ).length;
+
+    expect(choiceCount).toBe(4);
+    expect(fromDay35).toBe(4);
   });
 
   it('writes the chosen Day back to the address so the screen can be shared', async () => {
@@ -333,7 +430,9 @@ describe('英単語 の設定', () => {
     await user.click(within(orders).getByRole('tab', { name: 'No.順' }));
 
     expect(await screen.findByText(/本の No\. 順に出します/)).toBeInTheDocument();
-    expect(screen.getByText(/順番ごと覚えてしまう/)).toBeInTheDocument();
+    // And the ランダム line is gone -- the two are one element, not two stacked
+    // ones, so a reader is never told both things at once.
+    expect(screen.queryByText(/毎回ちがう順番で出します/)).not.toBeInTheDocument();
   });
 
   it('says what each 出題範囲 selects, in words the reader can tell apart', async () => {
