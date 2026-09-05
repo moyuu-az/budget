@@ -172,6 +172,106 @@ describe('英単語 の設定', () => {
     expect(screen.getByText(/通算正答率 50%/)).toBeInTheDocument();
   });
 
+  it('offers 「苦手」 when everything has been revised and 「間違えた問題だけ」 is empty', async () => {
+    // THE STATE THIS MODE WAS ADDED FOR. The reader missed things, went back and
+    // fixed them all, and 「間違えた問題だけ」 correctly has nothing left -- while
+    // they can still name the phrases that keep catching them out.
+    const user = userEvent.setup();
+    useVocabStore.setState({
+      progress: [
+        // Missed twice, answered correctly last time.
+        {
+          wordId: 'et-481',
+          byDirection: {
+            en_to_ja: NEVER_ANSWERED,
+            ja_to_en: {
+              attempts: 3,
+              correct: 1,
+              lastCorrect: true,
+              lastAnsweredAt: '2026-09-05T00:00:00.000Z',
+            },
+          },
+        },
+        // Never missed: must NOT be asked.
+        at('et-482', true),
+      ],
+      status: 'ready',
+    });
+    goTo('?day=31');
+    render(<VocabView />);
+
+    const scopes = await screen.findByRole('tablist', { name: '出題範囲' });
+    expect(within(scopes).getByRole('tab', { name: '間違えた問題だけ' })).toBeDisabled();
+
+    const weak = within(scopes).getByRole('tab', { name: '苦手' });
+    expect(weak).toBeEnabled();
+    await user.click(weak);
+
+    expect(await screen.findByText(/Day 31・苦手・手入力・1問/)).toBeInTheDocument();
+  });
+
+  it('refuses 「苦手」 on a Day where nothing has ever been missed', async () => {
+    // Unlike 「間違えた問題だけ」 this does not empty when the reader revises, so
+    // the only way it is empty is that there is no history to draw on.
+    useVocabStore.setState({ progress: [at('et-481', true)], status: 'ready' });
+    goTo('?day=31');
+    render(<VocabView />);
+
+    const scopes = await screen.findByRole('tablist', { name: '出題範囲' });
+    expect(within(scopes).getByRole('tab', { name: '苦手' })).toBeDisabled();
+  });
+
+  it('points at 「苦手」 rather than saying there is nothing to do', async () => {
+    // The note under the tabs used to end at 「次に間違えたときに選べます」, which
+    // on a fully-revised Day is 「今日はやることがありません」 -- true of one
+    // control and false of the screen.
+    useVocabStore.setState({
+      progress: [
+        {
+          wordId: 'et-481',
+          byDirection: {
+            en_to_ja: NEVER_ANSWERED,
+            ja_to_en: {
+              attempts: 3,
+              correct: 1,
+              lastCorrect: true,
+              lastAnsweredAt: '2026-09-05T00:00:00.000Z',
+            },
+          },
+        },
+      ],
+      status: 'ready',
+    });
+    goTo('?day=31');
+    render(<VocabView />);
+
+    expect(await screen.findByText(/「苦手」を選んでください/)).toBeInTheDocument();
+  });
+
+  it('reads 「苦手」 from the address, so the mode survives a reload', async () => {
+    useVocabStore.setState({
+      progress: [
+        {
+          wordId: 'et-481',
+          byDirection: {
+            en_to_ja: NEVER_ANSWERED,
+            ja_to_en: {
+              attempts: 2,
+              correct: 1,
+              lastCorrect: true,
+              lastAnsweredAt: '2026-09-05T00:00:00.000Z',
+            },
+          },
+        },
+      ],
+      status: 'ready',
+    });
+    goTo('?day=31&scope=weak');
+    render(<VocabView />);
+
+    expect(await screen.findByText(/Day 31・苦手・手入力・1問/)).toBeInTheDocument();
+  });
+
   it('offers 「間違えた問題だけ」 once something has been failed, and asks only those', async () => {
     const user = userEvent.setup();
     useVocabStore.setState({

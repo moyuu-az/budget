@@ -153,7 +153,7 @@ export const matchView = (pathname: string): RouteMatch => {
  *  - analytics.period … the analysis span (AnalyticsPeriod)
  *  - analytics.month  … the month drilled into from a trend chart
  *  - vocab.day        … the Day section being studied
- *  - vocab.scope      … 全部 or 間違えた問題だけ (QuizScope)
+ *  - vocab.scope      … すべて / 間違えた問題だけ / 苦手 (QuizScope)
  *  - vocab.input      … 手入力 or 選択肢 で始めるか (QuizInputMode)
  *
  * 英単語 puts its three SETTINGS in the query and its PROGRESS nowhere. Which

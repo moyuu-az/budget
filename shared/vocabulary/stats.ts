@@ -27,13 +27,39 @@ export const EMPTY_DIRECTION_STAT: VocabDirectionStat = {
  * Which words a quiz should ask about, as VALUES.
  *
  *  - 'all'   … every word of the chosen Day
- *  - 'wrong' … only the ones whose most recent answer was wrong
+ *  - 'wrong' … only the ones whose MOST RECENT answer was wrong
+ *  - 'weak'  … the ones missed most often, however they were answered last
+ *
+ * 'wrong' AND 'weak' ARE NOT THE SAME QUESTION, and the difference is the
+ * reason 'weak' exists. 'wrong' empties the moment the reader revises: a word
+ * missed four times and answered correctly just now leaves the set, which is
+ * right for 「今なおできていないもの」 but wrong for 「いつも引っかかるもの」.
+ * A reader who has revised everything has an empty 'wrong' set and can still
+ * name the six phrases that keep catching them out. That is 'weak'.
  *
  * A tuple because the list is needed at runtime by the picker and by the
  * validator for `?scope=`.
  */
-export const QUIZ_SCOPES = ['all', 'wrong'] as const;
+export const QUIZ_SCOPES = ['all', 'wrong', 'weak'] as const;
 export type QuizScope = (typeof QUIZ_SCOPES)[number];
+
+/**
+ * How many questions the 'weak' scope asks at most.
+ *
+ * WHY THERE IS A CAP AT ALL
+ *   Without one the mode degrades into 「一度でも間違えた問題ぜんぶ」 and the
+ *   ranking does nothing -- every qualifying word is asked, so "most missed"
+ *   describes no observable behaviour. The cap is what makes the mode mean
+ *   「よく間違えるものから」 rather than 「間違えたことがあるもの」.
+ *
+ * WHY TEN
+ *   A Day is sixteen words, so this is a session that is visibly shorter than
+ *   'all' -- which is the point of opening a targeted mode rather than the whole
+ *   Day. Ten is also about as many as anyone finishes in one sitting on a phone.
+ *   The number is a judgement, not a measurement; what is NOT a judgement is
+ *   that it must be smaller than a Day, or the mode has no reason to exist.
+ */
+export const WEAK_QUIZ_LIMIT = 10;
 
 /** A lookup over a progress list. Built once per render that needs it. */
 export function indexProgress(progress: VocabProgress): ReadonlyMap<string, VocabWordStat> {
@@ -74,7 +100,53 @@ export function isWrong(
   return directionsOf(setting).some((d) => statFor(index, wordId, d).lastCorrect === false);
 }
 
-/** The words a quiz should ask about, given the scope the reader picked. */
+/**
+ * How many times this word has been answered WRONG, across the directions being
+ * practised.
+ *
+ * `attempts - correct` rather than a stored counter: the server ships totals per
+ * (word, direction) and the difference is exact. A second counter would be a
+ * copy that can drift from the rows it summarises.
+ */
+export function missesFor(
+  index: ReadonlyMap<string, VocabWordStat>,
+  wordId: string,
+  setting: QuizDirectionSetting,
+): number {
+  return directionsOf(setting).reduce((total, direction) => {
+    const stat = statFor(index, wordId, direction);
+    return total + (stat.attempts - stat.correct);
+  }, 0);
+}
+
+/**
+ * Whether this word has ever been missed, in the directions being practised.
+ *
+ * Unlike `isWrong` this does NOT forget: revising a word correctly empties the
+ * 'wrong' set but leaves the word here, because the history is the whole point.
+ */
+export function isWeak(
+  index: ReadonlyMap<string, VocabWordStat>,
+  wordId: string,
+  setting: QuizDirectionSetting,
+): boolean {
+  return missesFor(index, wordId, setting) > 0;
+}
+
+/**
+ * The words a quiz should ask about, given the scope the reader picked.
+ *
+ * 'weak' RANKS AND CAPS HERE, not through `buildQuiz`'s `limit`. That option
+ * shuffles before it slices -- deliberately, so a capped quiz is a random sample
+ * rather than always the same first N (see buildQuiz) -- which would hand back
+ * ten arbitrary words out of the qualifying set and quietly discard the ranking
+ * this mode is named after. Choosing WHICH words belongs to the scope; choosing
+ * what order to ask them in belongs to the quiz builder.
+ *
+ * The tie-break on id is not cosmetic: without it two words with the same miss
+ * count could swap places between renders of the same record, and the reader
+ * would see the question count stay at ten while the words behind it changed.
+ */
 export function selectWords(
   words: readonly VocabWord[],
   progress: VocabProgress,
@@ -83,7 +155,14 @@ export function selectWords(
 ): readonly VocabWord[] {
   if (scope === 'all') return words;
   const index = indexProgress(progress);
-  return words.filter((word) => isWrong(index, word.id, setting));
+  if (scope === 'wrong') return words.filter((word) => isWrong(index, word.id, setting));
+
+  return words
+    .map((word) => ({ word, misses: missesFor(index, word.id, setting) }))
+    .filter((entry) => entry.misses > 0)
+    .sort((a, b) => b.misses - a.misses || a.word.id.localeCompare(b.word.id))
+    .slice(0, WEAK_QUIZ_LIMIT)
+    .map((entry) => entry.word);
 }
 
 export interface VocabSummary {
@@ -113,6 +192,16 @@ export interface VocabSummary {
   accuracy: number | null;
   /** Words whose most recent answer was wrong, in any covered direction. */
   wrong: number;
+  /**
+   * Words missed at least once, ever, in any covered direction.
+   *
+   * The size of the pool the 'weak' scope draws from -- NOT the number of
+   * questions it asks, which is capped at WEAK_QUIZ_LIMIT. The screen needs this
+   * to know whether the mode has anything to offer at all; it must not present
+   * it as a question count, because a reader told 「苦手 12語」 and then given a
+   * ten-question quiz has been given two different facts under one name.
+   */
+  weak: number;
   /**
    * Words answered at least once whose most recent answer was RIGHT.
    *
@@ -179,6 +268,7 @@ export function summarize(
     // ONE phrase to revise, and counting it twice would make 「残り」 disagree
     // with the number of questions the 'wrong' scope actually produces.
     wrong: words.filter((word) => isWrong(index, word.id, setting)).length,
+    weak: words.filter((word) => isWeak(index, word.id, setting)).length,
     mastered,
     retention: answered === 0 ? null : mastered / answered,
     unseen: words.filter((word) =>
