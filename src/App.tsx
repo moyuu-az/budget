@@ -1,5 +1,6 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState, type ReactElement } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import type { ViewType } from './types';
 import { loadLedgerData } from './app/ledger';
 import { navigate, navigateToView } from './app/navigation';
 import { pathForView } from './app/routes';
@@ -7,6 +8,7 @@ import { reportError } from './app/reportError';
 import { useRoute } from './hooks/useRoute';
 import Layout from './components/Layout';
 import DashboardView from './components/dashboard/DashboardView';
+import { ScreenBoundary } from './components/layout/ScreenBoundary';
 import { Skeleton } from './components/ui/Skeleton';
 
 // ---------------------------------------------------------------------------
@@ -19,10 +21,6 @@ import { Skeleton } from './components/ui/Skeleton';
 //
 // The DASHBOARD stays eager: it is what loads on open, so deferring it would
 // only add a round trip to the one screen everybody sees.
-//
-// Suspense fallback is a skeleton rather than a spinner, for the same reason
-// LoadGate uses one -- it holds the height, so the page does not jump when the
-// screen arrives.
 // ---------------------------------------------------------------------------
 const EntriesView = lazy(() => import('./components/entries/EntriesView'));
 const HistoryView = lazy(() => import('./components/history/HistoryView'));
@@ -40,12 +38,56 @@ import { Toast } from './components/ui/Toast';
 import { useThemeEffect } from './hooks/useTheme';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 
+// ---------------------------------------------------------------------------
+// THE SCREEN THAT IS RENDERED IS A LOOKUP, NOT A LADDER OF COMPARISONS.
+//
+// This used to be seven `currentView === 'x' && <motion.div key="x">…` lines.
+// Two things were wrong with that:
+//
+//   - A NEW SCREEN could be added to ViewType, to VIEW_SEGMENT and to the
+//     navigation, and still render nothing here, because a missing line is not
+//     a type error. The address bar would say `/whatever`, the tab would be
+//     highlighted, and the page would be blank.
+//   - It described the same fact -- the set of screens -- for the third time,
+//     after `ViewType` and `VIEW_SEGMENT`. `satisfies Record<ViewType, …>`
+//     turns the third copy into a compile-time check of the other two.
+//
+// The value is a function rather than an element so that nothing but the screen
+// being shown is ever constructed. (Constructing an element would not fetch a
+// chunk either -- `lazy()` fetches on first RENDER -- so this is about not
+// building six elements per render, not about the network.)
+// ---------------------------------------------------------------------------
+const SCREENS = {
+  dashboard: () => <DashboardView onNavigate={navigateToView} />,
+  entries: () => <EntriesView />,
+  history: () => <HistoryView />,
+  analytics: () => <AnalyticsView />,
+  assets: () => <AssetsView />,
+  vocab: () => <VocabView />,
+  settings: () => <SettingsView onNavigate={navigateToView} />,
+} as const satisfies Record<ViewType, () => ReactElement>;
+
 const pageTransition = {
   initial: { opacity: 0, y: 20 },
   animate: { opacity: 1, y: 0 },
   exit: { opacity: 0, y: -20 },
   transition: { duration: 0.3, ease: 'easeOut' },
 } as const;
+
+/**
+ * Held while a screen's chunk is in flight.
+ *
+ * A skeleton rather than a spinner, for the same reason LoadGate uses one: it
+ * holds the height, so the page does not jump when the screen arrives.
+ */
+function ScreenFallback(): ReactElement {
+  return (
+    <div role="status" aria-label="画面を読み込み中">
+      <span className="sr-only">画面を読み込み中</span>
+      <Skeleton height={320} className="w-full" />
+    </div>
+  );
+}
 
 function App() {
   useThemeEffect();
@@ -93,56 +135,56 @@ function App() {
     onShowHelp: () => setHelpOpen(true),
   });
 
+  const renderScreen = SCREENS[currentView];
+
   return (
     <>
       <ParticleBackground />
       <Layout currentView={currentView} onNavigate={navigateToView}>
-        <Suspense
-          fallback={
-            <div role="status" aria-label="画面を読み込み中">
-              <span className="sr-only">画面を読み込み中</span>
-              <Skeleton height={320} className="w-full" />
-            </div>
-          }
-        >
+        {/* --- THE SUSPENSE BOUNDARY IS INSIDE THE ANIMATED WRAPPER, AND THERE
+            IS ONE PER SCREEN. THIS IS LOAD-BEARING.
+
+            It used to be a single boundary around AnimatePresence, and that
+            combination could leave the app rendering one screen while the
+            address bar named another -- permanently, not for a frame:
+
+              1. 英単語 is opened. Its chunk has not arrived, so it suspends.
+              2. A boundary ABOVE AnimatePresence hides everything inside it and
+                 shows the fallback.
+              3. The user presses 分析, or the back button. AnimatePresence is
+                 told to swap, and `mode="wait"` will not bring the new screen in
+                 until the outgoing one has finished ANIMATING OUT.
+              4. The outgoing one is the suspended 英単語. It is not mounted, it
+                 cannot animate, and its exit therefore never completes.
+              5. When the chunk finally lands, 英単語 is what appears -- at
+                 `/analytics`, under a highlighted 分析 tab.
+
+            Reproduced as `src/App.transition.test.tsx`. Moving the boundary
+            inside means the thing AnimatePresence is animating is always a real
+            mounted `<div>` holding a skeleton, so an exit always completes and
+            the swap always finishes.
+
+            The key is the screen, so the boundary (and the ScreenBoundary below
+            it) belong to that screen and are cleared by leaving it.
+
+            ONE WINDOW REMAINS, AND IT IS HARMLESS ONLY BECAUSE OF A RULE:
+            a chunk that lands DURING the 300ms exit of its abandoned screen is
+            rendered inside the wrapper that is fading out -- the wrapper is
+            still mounted, so React resolves the Suspense in place -- and its
+            mount effects run, at an address that now names a different screen.
+            It fades away with the wrapper and the swap still completes (also in
+            App.transition.test.tsx). What makes that safe is that NO SCREEN
+            WRITES TO THE ADDRESS ON MOUNT: every setSearchParams call in this
+            app is behind a user action. A screen that "normalised" a missing
+            `?day=` in an effect would, in this window, write 英単語's filter
+            onto `/analytics`. Keep it that way. --- */}
         <AnimatePresence mode="wait">
-          {currentView === 'dashboard' && (
-            <motion.div key="dashboard" {...pageTransition}>
-              <DashboardView onNavigate={navigateToView} />
-            </motion.div>
-          )}
-          {currentView === 'entries' && (
-            <motion.div key="entries" {...pageTransition}>
-              <EntriesView />
-            </motion.div>
-          )}
-          {currentView === 'history' && (
-            <motion.div key="history" {...pageTransition}>
-              <HistoryView />
-            </motion.div>
-          )}
-          {currentView === 'analytics' && (
-            <motion.div key="analytics" {...pageTransition}>
-              <AnalyticsView />
-            </motion.div>
-          )}
-          {currentView === 'assets' && (
-            <motion.div key="assets" {...pageTransition}>
-              <AssetsView />
-            </motion.div>
-          )}
-          {currentView === 'vocab' && (
-            <motion.div key="vocab" {...pageTransition}>
-              <VocabView />
-            </motion.div>
-          )}
-          {currentView === 'settings' && (
-            <motion.div key="settings" {...pageTransition}>
-              <SettingsView onNavigate={navigateToView} />
-            </motion.div>
-          )}
+          <motion.div key={currentView} {...pageTransition}>
+            <ScreenBoundary>
+              <Suspense fallback={<ScreenFallback />}>{renderScreen()}</Suspense>
+            </ScreenBoundary>
+          </motion.div>
         </AnimatePresence>
-        </Suspense>
       </Layout>
       <ShortcutHelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
       {/* Renders nothing until the server refuses this bundle as out of date.
