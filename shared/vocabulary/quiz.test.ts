@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { VOCAB_WORDS } from './words';
 import { wordById, wordsForDay } from './index';
-import { QUIZ_DIRECTIONS } from './types';
+import { QUIZ_DIRECTIONS, type VocabWord } from './types';
 import { answerTextFor, buildQuiz, isEquallyCorrect, promptTextFor } from './quiz';
 
 // ---------------------------------------------------------------------------
@@ -187,5 +187,128 @@ describe('buildQuiz', () => {
     expect(buildQuiz({ words: [], distractorPool: ALL, direction: 'en_to_ja', seed: 1 })).toEqual(
       [],
     );
+  });
+});
+
+describe('出題順', () => {
+  const DAY = wordsForDay(32);
+  const BOOK_ORDER = [...DAY].sort((a, b) => a.number - b.number).map((w) => w.id);
+
+  const askedIds = (options: Partial<Parameters<typeof buildQuiz>[0]> = {}) =>
+    buildQuiz({
+      words: DAY,
+      distractorPool: DAY,
+      direction: 'ja_to_en',
+      seed: 7,
+      ...options,
+    }).map((q) => q.wordId);
+
+  it("asks in the book's No. order when told to", () => {
+    expect(askedIds({ order: 'number' })).toEqual(BOOK_ORDER);
+  });
+
+  it('does not depend on the order the caller happened to hand the words over', () => {
+    // The caller IS a scope selector with an order of its own: 'weak' hands over
+    // its words ranked by how often each is missed. 「No.順」 that came out
+    // differently depending on which range was chosen would not be an order the
+    // reader could predict.
+    //
+    // What holds this today is the No. being unique, NOT the tie-break -- with
+    // distinct numbers the first term of the comparator already decides. The
+    // tie-break has its own test below, because a defence nothing exercises is
+    // a defence nobody can tell has stopped working.
+    expect(askedIds({ words: [...DAY].reverse(), order: 'number' })).toEqual(BOOK_ORDER);
+  });
+
+  it('breaks a tie on the id, so equal numbers still come out in one order', () => {
+    // UNREACHABLE WITH THE BOOK AS PRINTED, and asserted anyway.
+    //
+    // `words.test.ts` pins 481-560 as a gapless ascending run and pins `id` as
+    // `et-<number>`, so two entries cannot share a number today. That is a
+    // property of the transcription, not of the comparator -- and the failure it
+    // would cause is invisible on screen: `Array.prototype.sort` is stable, so a
+    // comparator that returned 0 would hand the CALLER's order through, and the
+    // caller's order at that point is a SHUFFLE. 「No.順」 would silently come
+    // out differently on every run.
+    //
+    // The two calls below get the same permutation from the same seed, so
+    // without the tie-break they land on opposite orders and one of them fails.
+    const twin = (id: string): VocabWord => ({ ...wordById('et-481')!, id, number: 999 });
+    const a = twin('et-999a');
+    const b = twin('et-999b');
+    const order = (words: readonly VocabWord[]) =>
+      askedIds({ words, distractorPool: words, order: 'number', seed: 3 });
+
+    expect(order([a, b])).toEqual(['et-999a', 'et-999b']);
+    expect(order([b, a])).toEqual(['et-999a', 'et-999b']);
+  });
+
+  it('defaults to random, which is what every caller had before the option existed', () => {
+    const of = (options: Parameters<typeof askedIds>[0]) => askedIds(options).join(',');
+    expect(of({})).toBe(of({ order: 'random' }));
+    // And random is genuinely not the book's order. Sixteen words shuffled land
+    // on the printed sequence once in 16!, so a single seed is enough; several
+    // are used so the assertion does not rest on one draw.
+    for (const seed of [1, 2, 3, 4, 5]) {
+      expect(askedIds({ seed })).not.toEqual(BOOK_ORDER);
+    }
+  });
+
+  it('asks the same questions either way, and only changes the order', () => {
+    // THE LIMIT IS THE WHOLE TEST. Uncapped, both settings ask about every word
+    // handed over and the assertion is just 「buildQuiz drops nothing」 -- which
+    // another test already covers, and which no ordering mutation can break.
+    //
+    // Capped, the two must agree on WHICH five, and that only holds because the
+    // shuffle runs for both settings. Skip it for 'number' and the generator
+    // sits at a different position, so the cap selects a different five.
+    expect(new Set(askedIds({ order: 'number', limit: 5 }))).toEqual(
+      new Set(askedIds({ order: 'random', limit: 5 })),
+    );
+  });
+
+  it('still samples when limited, rather than always asking the first five of the book', () => {
+    // THE TRAP THIS PINS. Sorting the words and slicing THAT would make 「No.順」
+    // mean 「常に No.481〜485」, and the reader would end up knowing five words
+    // and believing they knew sixteen -- the exact defect buildQuiz shuffles
+    // before it slices to avoid.
+    const runs = [1, 2, 3, 4, 5].map((seed) =>
+      buildQuiz({
+        words: DAY,
+        distractorPool: DAY,
+        direction: 'ja_to_en',
+        order: 'number',
+        limit: 5,
+        seed,
+      }).map((q) => wordById(q.wordId)!.number),
+    );
+
+    expect(new Set(runs.map((numbers) => numbers.join(','))).size).toBeGreaterThan(1);
+    for (const numbers of runs) {
+      expect(numbers).toHaveLength(5);
+      // Each run is still ASKED in ascending No., which is what was chosen.
+      expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
+    }
+  });
+
+  it('leaves the words it was given alone', () => {
+    // `words` is `readonly`, but a sort in place would still mutate the array
+    // behind it -- and the array the screen hands over is memoised from
+    // `wordsForDay`, i.e. the module-level book itself.
+    //
+    // WHAT ACTUALLY HOLDS THIS is `shuffled()` copying its input; the
+    // `capped.slice()` in front of the sort is a second, currently unreachable
+    // guard (`capped` is always a fresh array by then). Removing that `.slice()`
+    // does NOT fail this test, and the comment used to imply it would. Removing
+    // the copy inside `shuffled()` does.
+    const before = DAY.map((w) => w.id);
+    buildQuiz({ words: DAY, distractorPool: DAY, direction: 'ja_to_en', order: 'number', seed: 1 });
+    expect(DAY.map((w) => w.id)).toEqual(before);
+  });
+
+  it('asks nothing when there is nothing to ask', () => {
+    expect(
+      buildQuiz({ words: [], distractorPool: DAY, direction: 'ja_to_en', order: 'number', seed: 1 }),
+    ).toEqual([]);
   });
 });

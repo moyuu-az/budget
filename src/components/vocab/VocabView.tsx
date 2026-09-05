@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement } from 're
 import type { VocabAttemptInput } from '../../types';
 import {
   QUIZ_INPUT_MODES,
+  QUIZ_ORDERS,
   QUIZ_SCOPES,
   VOCAB_DAYS,
   WEAK_QUIZ_LIMIT,
@@ -13,6 +14,7 @@ import {
   wordsForDay,
   type QuizDirectionSetting,
   type QuizInputMode,
+  type QuizOrder,
   type QuizQuestion,
   type QuizScope,
 } from '../../../shared/vocabulary';
@@ -33,9 +35,9 @@ import { QuizRunner } from './QuizRunner';
 // 英単語 -- the one screen in this app that is not about money.
 //
 // WHAT IS IN THE URL AND WHAT IS NOT
-//   The three SETTINGS (Day, direction, scope) live in the query, because they
-//   answer "what is on screen" and survive the reload a phone performs on its
-//   own whenever the browser reclaims the tab.
+//   The SETTINGS (Day, scope, input mode, order) live in the query, because
+//   they answer "what is on screen" and survive the reload a phone performs on
+//   its own whenever the browser reclaims the tab.
 //
 //   The RUN does not. "You are on question 4 of 12 and have 3 right" is the
 //   middle of an action, not a filter: putting it in the address would let the
@@ -86,7 +88,11 @@ const SCOPE_LABEL: Record<QuizScope, string> = {
 const SCOPE_HINT: Record<QuizScope, string> = {
   all: 'この Day の全問題です。',
   wrong: '最後に解いたとき間違えた問題だけを出します。復習して正解すると外れます。',
-  weak: `間違えやすい問題から最大 ${WEAK_QUIZ_LIMIT}問。復習して正解しても消えず、少しずつ順番が下がります。`,
+  // 「順番」ではなく「優先度」。このカードには 出題順 のヒントも出るので、
+  // 「順番」という語が 1 画面で 2 つの別物 -- 選抜プールの中の優先度と、問題が
+  // 出てくる順序 -- を指してしまう。読者が導く結論は「苦手の順位で順番が決まる
+  // のか、ランダムなのか」で、しかも正しい答えは「ランキングは画面に届かない」。
+  weak: `間違えやすい問題から最大 ${WEAK_QUIZ_LIMIT}問。復習して正解しても消えず、少しずつ優先度が下がります。`,
 };
 
 /**
@@ -118,6 +124,44 @@ const SCOPE_EMPTY_REASON: Record<QuizScope, string> = {
 const INPUT_MODE_LABEL: Record<QuizInputMode, string> = {
   typed: '手入力',
   choice: '選択肢',
+};
+
+/**
+ * In what ORDER the questions come.
+ *
+ * 'No.順' rather than '本の順' because the number is what is printed beside each
+ * entry and what the header of this screen already names (No.481〜560): the
+ * reader matching the app against the open book is looking at that number, not
+ * at a page.
+ *
+ * ランダム stays the default. A fixed order gets memorised AS an order --
+ * 「3番目はいつも `be full of`」 -- and that reads as knowledge until the phrase
+ * turns up anywhere else. No.順 exists for the reader working through the
+ * printed book alongside the app, where the two not lining up is the friction
+ * that ends the habit.
+ */
+const ORDER_LABEL: Record<QuizOrder, string> = {
+  random: 'ランダム',
+  number: 'No.順',
+};
+
+/**
+ * What each 出題順 actually does, in one line, under the tabs -- the same shape
+ * as SCOPE_HINT and for the same reason: two settings whose names describe the
+ * ORDER cannot say, from their names, what that order costs.
+ *
+ * A `Record<QuizOrder, string>` so that a third order added to QUIZ_ORDERS has
+ * to answer this here rather than inherit a line written about a different one.
+ */
+const ORDER_HINT: Record<QuizOrder, string> = {
+  random: '毎回ちがう順番で出します。順番ごと覚えてしまわないので、ふだんはこちらです。',
+  // THE COST STAYS ON THIS LINE, and shortening it away was a mistake worth
+  // recording. `<p>{ORDER_HINT[order]}</p>` renders exactly one of these, so the
+  // two were never duplicated for a READER -- only in the source. Deleting the
+  // shared sentence from this branch does not remove a repetition, it removes
+  // the warning from the only branch that needs it: the reader who leaves No.順
+  // on is the one who ends up learning the sequence.
+  number: '本の No. 順に出します。本を開きながら進めるとき用です。同じ順番で繰り返すと順番ごと覚えてしまいます。',
 };
 
 interface Run {
@@ -167,6 +211,13 @@ function VocabView(): ReactElement {
     serialize: (value) => value,
   });
 
+  const [order, setOrder] = useSearchParam<QuizOrder>({
+    name: SEARCH_PARAMS.vocab.order,
+    parse: parseEnumParam(QUIZ_ORDERS),
+    fallback: 'random',
+    serialize: (value) => value,
+  });
+
   const [run, setRun] = useState<Run | null>(null);
   // 「記録を消す」 asks first. It is one click, it cannot be undone, and what it
   // destroys is the input to 「間違えた問題だけ」 -- a reader who wipes a Day by
@@ -201,13 +252,14 @@ function VocabView(): ReactElement {
           // by elimination without knowing any of them.
           distractorPool: wordsForDay(dayId),
           direction,
+          order,
           seed: Date.now(),
         }),
         attempts: null,
         saved: false,
       });
     },
-    [dayId, direction],
+    [dayId, direction, order],
   );
 
   const finish = useCallback(
@@ -404,11 +456,32 @@ function VocabView(): ReactElement {
                 }))}
               />
             </div>
+            <div>
+              <p className="mb-1 text-[11px] text-[var(--color-content-muted)]">出題順</p>
+              {/* NOT disabled for any 出題範囲.
+
+                  It is tempting to grey this out for 「苦手」, whose selection is
+                  already ranked by how often each word is missed -- but the
+                  ranking chose WHICH ten words, and it never survived to the
+                  screen anyway: buildQuiz has always shuffled what it was
+                  handed. So No.順 here is a real, and the only, statement about
+                  the order the reader actually sees. */}
+              <Tabs
+                ariaLabel="出題順"
+                size="sm"
+                value={order}
+                onChange={setOrder}
+                items={QUIZ_ORDERS.map((value) => ({
+                  value,
+                  label: ORDER_LABEL[value],
+                }))}
+              />
+            </div>
           </div>
 
           <p className="text-xs text-[var(--color-content-secondary)]">
             日本語 → 英語・Day {dayId}・{SCOPE_LABEL[scope]}・{INPUT_MODE_LABEL[inputMode]}・
-            {selected.length}問
+            {ORDER_LABEL[order]}・{selected.length}問
             {scope === 'wrong' && daySummary.wrong === 0 && (
               <span className="ml-1 text-[var(--color-semantic-success)]">
                 （間違えた問題はありません）
@@ -422,6 +495,16 @@ function VocabView(): ReactElement {
               「苦手」 are the pair a reader is most likely to assume are the same
               thing. */}
           <p className="text-[11px] text-[var(--color-content-muted)]">{SCOPE_HINT[scope]}</p>
+
+          {/* AND WHAT THE CHOSEN 出題順 DOES, always -- not only for No.順.
+
+              The two orders are not equally good for learning and the screen
+              should not pretend otherwise: a fixed sequence is memorised as a
+              sequence, and the reader finds out it was the sequence they learned
+              only when they meet the phrase somewhere else. Shown for both, so
+              the line is a description of the setting rather than a warning that
+              appears when the reader picks the "wrong" one. */}
+          <p className="text-[11px] text-[var(--color-content-muted)]">{ORDER_HINT[order]}</p>
 
           {/* AND WHY IT SELECTED NOTHING, when it did.
 

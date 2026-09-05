@@ -155,13 +155,14 @@ export const matchView = (pathname: string): RouteMatch => {
  *  - vocab.day        … the Day section being studied
  *  - vocab.scope      … すべて / 間違えた問題だけ / 苦手 (QuizScope)
  *  - vocab.input      … 手入力 or 選択肢 で始めるか (QuizInputMode)
+ *  - vocab.order      … No.順 に出すか ランダムに出すか (QuizOrder)
  *
- * 英単語 puts its three SETTINGS in the query and its PROGRESS nowhere. Which
- * Day, which direction, which scope answer "what is on screen" and are worth
- * sending to somebody; "you are on question 4 of 12 and got 3 right" is not a
- * filter, it is the middle of an action -- putting it in the address would make
- * the back button rewind a quiz into a state whose answers were already
- * recorded.
+ * 英単語 puts its SETTINGS in the query and its PROGRESS nowhere. Which Day,
+ * which scope, which input mode and which order answer "what is on screen" and
+ * are worth sending to somebody; "you are on question 4 of 12 and got 3 right"
+ * is not a filter, it is the middle of an action -- putting it in the address
+ * would make the back button rewind a quiz into a state whose answers were
+ * already recorded.
  */
 export const SEARCH_PARAMS = {
   dashboard: { period: 'period', flow: 'flow' },
@@ -169,7 +170,7 @@ export const SEARCH_PARAMS = {
   history: {},
   analytics: { period: 'period', month: 'month' },
   assets: {},
-  vocab: { day: 'day', scope: 'scope', input: 'input' },
+  vocab: { day: 'day', scope: 'scope', input: 'input', order: 'order' },
   settings: {},
 } as const satisfies Record<ViewType, Readonly<Record<string, string>>>;
 
