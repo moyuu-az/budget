@@ -923,19 +923,29 @@ describe('user-level row security', () => {
     const { createVocabRepository } = await import('../repositories/vocab.repository');
     const client = await db.adminPool.connect();
     try {
+      // BOTH branches, because the repository's header claims both name the
+      // user. Only the `null` one was covered before, so dropping the predicate
+      // from the word-list DELETE left it protected by the policy alone -- the
+      // single layer this test exists to double up.
+      //
       // No withUserScope: the GUC is unset AND the role bypasses the policy, so
-      // the only thing standing between Bob's row and this DELETE is the
+      // the only thing standing between Bob's row and these DELETEs is the
       // predicate in the SQL itself.
+      await createVocabRepository(client, bob).reset(['et-481']);
       await createVocabRepository(client, bob).reset(null);
     } finally {
       client.release();
     }
 
-    const rows = await raw<{ user_id: string }>(
+    // `user_id` is BIGINT, and server/db/pool.ts parses INT8 into a number --
+    // so it arrives as one. Typing it as `string` here and calling Number() on
+    // it would be the same claim-the-driver-does-not-make that this PR removed
+    // from vocab.repository.ts.
+    const rows = await raw<{ user_id: number }>(
       db.adminPool,
       'SELECT user_id FROM vocab_attempts',
     );
-    expect(rows.map((r) => Number(r.user_id))).toEqual([alice]);
+    expect(rows.map((r) => r.user_id)).toEqual([alice]);
   });
 
   it('fails closed when no user scope was opened', async () => {

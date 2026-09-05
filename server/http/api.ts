@@ -247,6 +247,25 @@ export const USER_METHODS: { [M in UserMethod]: MethodSpec<M, UserScopedReposito
 };
 
 /**
+ * The two scopes must not share a method name.
+ *
+ * `AppApi extends LedgerScopedApi, UserScopedApi` does NOT catch a collision
+ * when both declare the same name with the same signature -- TypeScript merges
+ * them silently. The spread below would then let the user table's spec win in
+ * `METHODS`, and `isUserMethod` would answer true for a HOUSEHOLD method, which
+ * the dispatcher would run against user-scoped repositories with no ledger
+ * resolved. The mapped types cannot see it (each table is still exhaustive over
+ * its own half), and the sweep's key comparison cannot either (the merged object
+ * is simply one key short).
+ *
+ * `never` on the right of the conditional makes any overlap a compile error at
+ * the declaration below.
+ */
+type ScopesAreDisjoint = Extract<LedgerMethod, UserMethod> extends never ? true : never;
+const SCOPES_ARE_DISJOINT: ScopesAreDisjoint = true;
+void SCOPES_ARE_DISJOINT;
+
+/**
  * Both tables, for the callers that legitimately need the whole surface: the
  * 404 test below, and the exhaustive isolation sweep.
  *
