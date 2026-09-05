@@ -8,6 +8,7 @@ import MonthlySummary from './sidebar/MonthlySummary';
 import ThemeToggle from './layout/ThemeToggle';
 import { IconButton } from './ui/IconButton';
 import { useUIStore } from '../stores/useUIStore';
+import { VIEW_SHOWS_LEDGER_FIGURES } from '../app/routes';
 
 // ---------------------------------------------------------------------------
 // THE SHELL, ON A PHONE AS WELL AS A DESKTOP.
@@ -127,13 +128,21 @@ function Layout({ currentView, onNavigate, children }: Props) {
       <main className="flex-1 overflow-y-auto p-4 pb-20 md:p-6 md:pb-6">
         {/* The balance and this month's summary live in the sidebar on a
             desktop, which does not exist here. They lead the page instead of
-            being lost at the bottom of it. */}
-        <div className="md:hidden mb-4 space-y-4 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-overlay)] p-4">
-          <CashBalance onEdit={() => onNavigate('assets')} />
-          <div className="border-t border-[var(--color-border-subtle)] pt-3">
-            <MonthlySummary />
+            being lost at the bottom of it.
+
+            NOT ON EVERY SCREEN, THOUGH. These are the household's figures, and
+            on a screen that shows none of the ledger's data they push the actual
+            content below the fold of a phone for nothing. See
+            VIEW_SHOWS_LEDGER_FIGURES -- a table rather than a comparison, so a
+            new screen has to say which it is. */}
+        {VIEW_SHOWS_LEDGER_FIGURES[currentView] && (
+          <div className="md:hidden mb-4 space-y-4 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-overlay)] p-4">
+            <CashBalance onEdit={() => onNavigate('assets')} />
+            <div className="border-t border-[var(--color-border-subtle)] pt-3">
+              <MonthlySummary />
+            </div>
           </div>
-        </div>
+        )}
 
         {children}
       </main>

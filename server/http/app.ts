@@ -3,8 +3,15 @@ import { bodyLimit } from 'hono/body-limit';
 import type { Pool } from '../db/pool';
 import type { IdentityVerifier } from '../auth/identity';
 import type { SessionService } from '../auth/session';
-import { withLedgerRepositories } from '../repositories';
-import { METHODS, isDataMethod, type DataMethod } from './api';
+import { withLedgerRepositories, withUserRepositories } from '../repositories';
+import {
+  LEDGER_METHODS,
+  USER_METHODS,
+  isDataMethod,
+  isUserMethod,
+  type LedgerMethod,
+  type UserMethod,
+} from './api';
 import {
   AppError,
   ForbiddenError,
@@ -227,20 +234,45 @@ export function createApp(deps: AppDependencies): Hono<{ Variables: Variables }>
     }
 
     const session = c.get('session');
-    const ledgerId = resolveLedgerId(session, c.req.header(LEDGER_HEADER));
     const rawArgs = await readArgs(c.req.raw);
 
     // The spec's schema and handler are both derived from AppApi, so this cast
     // only re-associates the two halves that the lookup by string erased.
-    const spec = METHODS[name as DataMethod] as {
+    type ErasedSpec = {
       args: { parse(value: unknown): unknown[] };
       handle(repos: never, args: never): Promise<unknown>;
     };
-    const args = spec.args.parse(rawArgs);
 
-    const result = await withLedgerRepositories(deps.pool, ledgerId, (repos) =>
-      spec.handle(repos as never, args as never),
-    );
+    // WHICH TENANT THIS REQUEST IS ABOUT IS DECIDED BY WHICH TABLE HOLDS IT.
+    //
+    // Not by a flag on the request, and not by the shape of the name. A method
+    // in USER_METHODS is answered from the signed-in person's own scope; one in
+    // LEDGER_METHODS needs a household chosen first, and `resolveLedgerId`
+    // refuses the request when the header names one this session may not open.
+    //
+    // THE LEDGER HEADER IS IGNORED FOR USER-SCOPED METHODS, on purpose. The
+    // browser client sets it on every request once a ledger is active (it is one
+    // header for the whole client, not per call), so requiring it here would
+    // couple the study record to a ledger having been picked -- and honouring it
+    // would suggest the record differs per household, which is precisely what
+    // this scope exists to deny.
+    let result: unknown;
+    if (isUserMethod(name)) {
+      const spec = USER_METHODS[name as UserMethod] as unknown as ErasedSpec;
+      const args = spec.args.parse(rawArgs);
+      // The user id comes from the SESSION -- resolved from the IAP assertion
+      // before this handler ran -- never from anything the caller sent.
+      result = await withUserRepositories(deps.pool, session.user.id, (repos) =>
+        spec.handle(repos as never, args as never),
+      );
+    } else {
+      const ledgerId = resolveLedgerId(session, c.req.header(LEDGER_HEADER));
+      const spec = LEDGER_METHODS[name as LedgerMethod] as unknown as ErasedSpec;
+      const args = spec.args.parse(rawArgs);
+      result = await withLedgerRepositories(deps.pool, ledgerId, (repos) =>
+        spec.handle(repos as never, args as never),
+      );
+    }
 
     // Repository methods that return void produce no body rather than `null`,
     // which keeps the client's `Promise<void>` honest.

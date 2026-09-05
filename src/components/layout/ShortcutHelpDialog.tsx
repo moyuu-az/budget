@@ -17,6 +17,7 @@ const shortcuts: Shortcut[] = [
   { keys: ['G', 'H'], label: '履歴へ移動' },
   { keys: ['G', 'A'], label: '分析へ移動' },
   { keys: ['G', 'W'], label: '資産へ移動' },
+  { keys: ['G', 'V'], label: '英単語へ移動' },
   { keys: ['G', 'S'], label: '設定へ移動' },
   { keys: ['⌘/Ctrl', '\\'], label: 'サイドバーの開閉' },
   { keys: ['?'], label: 'このヘルプを表示' },

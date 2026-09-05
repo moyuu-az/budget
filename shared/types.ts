@@ -5,10 +5,18 @@
 import type { AssetFieldDef, AssetFieldValues } from './asset-fields';
 import type { Recurrence } from './recurrence';
 import type { LedgerSettings } from './ledger-settings';
+import type { VocabAttemptInput, VocabProgress } from './vocabulary/progress';
 
 export type { AssetFieldDef, AssetFieldType, AssetFieldValue, AssetFieldValues } from './asset-fields';
 export type { Recurrence, RecurrenceKind, YearMonth, IsoDate } from './recurrence';
 export type { LedgerSettings } from './ledger-settings';
+export type {
+  VocabAttemptInput,
+  VocabProgress,
+  VocabWordStat,
+  VocabDirectionStat,
+} from './vocabulary/progress';
+export type { QuizDirection } from './vocabulary/types';
 
 // --- Category ---
 
@@ -237,23 +245,25 @@ export interface Session {
 // from this interface, so a method added here fails to compile until both sides
 // implement it.
 //
-// EVERY METHOD EXCEPT getSession IS LEDGER-SCOPED, yet none of them takes a
-// ledger argument. Which ledger a call applies to travels in the request context
-// (an X-Ledger-Id header) rather than in the signature.
+// IT IS SPLIT BY SCOPE, AND THE SPLIT IS LOAD-BEARING.
 //
-// That is a deliberate choice. Threading a ledgerId through 25 signatures would
-// push it into every store and every component that calls one, for a value none
-// of them has any business deciding. Keeping it in the context means switching
-// ledgers is one piece of client state, and this contract stays about data.
-export interface AppApi {
-  /**
-   * Who is signed in and which ledgers they may open.
-   *
-   * The only method that is not ledger-scoped -- it is what tells the client
-   * which ledgers exist in the first place.
-   */
-  getSession(): Promise<Session>;
-
+//   LedgerScopedApi … one household's data. Which household travels in the
+//                     request context (an X-Ledger-Id header), never in the
+//                     signature: threading a ledgerId through 25 signatures
+//                     would push it into every store and component that calls
+//                     one, for a value none of them has any business deciding.
+//
+//   UserScopedApi   … one PERSON's data, the same whichever ledger is open.
+//                     Study records belong here: 「間違えた問題だけ」 has to mean
+//                     the questions *you* got wrong, and a record that changed
+//                     when the ledger switcher moved would be nonsense.
+//
+// The server does not decide which is which by reading a name. Each half has
+// its own handler table (server/http/api.ts) whose handlers receive a DIFFERENT
+// repository bundle, so a study-record handler cannot be handed ledger-scoped
+// repositories and a household handler cannot be run without a ledger. The
+// scope is a type, not a convention.
+export interface LedgerScopedApi {
   // There is deliberately no getBalance/setBalance. The balance is the sum of
   // the cash category's holdings (see the Assets note above), so a method
   // returning it would be a second source for a figure that already has one --
@@ -343,4 +353,60 @@ export interface AppApi {
   addAsset(input: AssetInput): Promise<Asset>;
   updateAsset(id: number, input: Partial<AssetInput>): Promise<void>;
   deleteAsset(id: number): Promise<void>;
+}
+
+/**
+ * The signed-in person's own data, independent of any ledger.
+ *
+ * There is exactly one member so far -- the English study record -- and the
+ * shape of every method here follows one rule:
+ *
+ *   A MUTATION ANSWERS WITH THE WHOLE PROGRESS, AS STORED.
+ *
+ * Not with the rows it wrote. The client never folds attempts into counts of
+ * its own, so there is one implementation of "how many did I get right" (the
+ * SQL behind `getVocabProgress`) rather than one on each side that eventually
+ * disagree -- and a reader watching their accuracy is exactly the person who
+ * would notice, and have no way to tell which figure was the wrong one.
+ */
+export interface UserScopedApi {
+  /** Every word this person has answered, folded to counts. Empty at first. */
+  getVocabProgress(): Promise<VocabProgress>;
+
+  /**
+   * Records a finished quiz and answers with the updated progress.
+   *
+   * TAKES THE WHOLE RUN AT ONCE rather than one answer per request. A quiz is
+   * ten to sixteen questions answered in a couple of minutes on a phone, and
+   * per-answer requests would mean the record depends on the connection holding
+   * for all of them -- a walk into a lift loses the middle of a session and
+   * leaves 「間違えた問題だけ」 quietly wrong about which words those were.
+   *
+   * ORDER IS SIGNIFICANT within the list: it is the order the questions were
+   * answered, and it decides which outcome is "the most recent" when the same
+   * word appears twice. The server stores them in the order given.
+   */
+  recordVocabAttempts(attempts: readonly VocabAttemptInput[]): Promise<VocabProgress>;
+
+  /**
+   * Deletes this person's answers -- for one Day, or for everything when `day`
+   * is null -- and answers with what is left.
+   *
+   * `null` rather than an overload, for the same reason a patch distinguishes
+   * null from undefined elsewhere in this file: "all of it" is a real choice the
+   * caller makes, not the absence of one.
+   */
+  resetVocabProgress(day: number | null): Promise<VocabProgress>;
+}
+
+/**
+ * The whole request surface: both scopes, plus the one method that belongs to
+ * neither.
+ *
+ * `getSession` cannot be ledger-scoped -- it is what tells the client which
+ * ledgers exist -- and it is not user-scoped data either; it IS the identity the
+ * user scope is derived from.
+ */
+export interface AppApi extends LedgerScopedApi, UserScopedApi {
+  getSession(): Promise<Session>;
 }

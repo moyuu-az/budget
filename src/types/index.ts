@@ -26,7 +26,18 @@ export interface ForecastPoint {
 }
 
 // --- View ---
-export type ViewType = 'dashboard' | 'entries' | 'history' | 'settings' | 'analytics' | 'assets';
+// 'vocab' is the odd one out and deliberately so: every other screen shows the
+// HOUSEHOLD's data and changes when the ledger switcher moves, while 英単語 shows
+// the signed-in person's own study record and does not. It is a screen of this
+// app rather than of this ledger. See shared/types.ts (UserScopedApi).
+export type ViewType =
+  | 'dashboard'
+  | 'entries'
+  | 'history'
+  | 'settings'
+  | 'analytics'
+  | 'assets'
+  | 'vocab';
 
 // --- Analytics (renderer-computed, never cross IPC) ---
 /**

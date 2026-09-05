@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from '../db/pool';
 import { withLedgerScope } from '../db/ledger-scope';
+import { withUserScope } from '../db/user-scope';
 import { createCategoryRepository, type CategoryRepository } from './category.repository';
 import { createTemplateRepository, type TemplateRepository } from './template.repository';
 import {
@@ -17,6 +18,7 @@ import {
   type AssetCategoryRepository,
 } from './asset-category.repository';
 import { createAssetRepository, type AssetRepository } from './asset.repository';
+import { createVocabRepository, type VocabRepository } from './vocab.repository';
 
 export interface Repositories {
   settings: SettingsRepository;
@@ -89,4 +91,69 @@ export async function withLedgerRepositories<T>(
   fn: (repos: Repositories) => Promise<T>,
 ): Promise<T> {
   return withLedgerScope(pool, ledgerId, (client) => fn(createRepositories(client, ledgerId)));
+}
+
+
+// ---------------------------------------------------------------------------
+// THE OTHER TENANT: THE PERSON.
+//
+// Everything above belongs to a HOUSEHOLD. What follows belongs to whoever is
+// signed in, whichever ledger they happen to have open -- today, the English
+// study record (migration 006).
+//
+// The two bundles are separate TYPES, not one bundle with a flag, and that is
+// the whole point of the split. A handler is written against one or the other
+// (server/http/api.ts), so:
+//
+//   - a study-record handler cannot reach a ledger-scoped repository, and
+//   - a household handler cannot run without a ledger having been chosen.
+//
+// Neither is a rule anyone has to remember; both are compile errors. The
+// alternative -- one bundle carrying both, scoped by whichever `with...` the
+// route happened to call -- would make "which tenant is this request about?"
+// answerable only by reading the call site.
+// ---------------------------------------------------------------------------
+
+export interface UserScopedRepositories {
+  vocab: VocabRepository;
+}
+
+/**
+ * Builds the user-scoped bundle over an ALREADY user-scoped client.
+ *
+ * Prefer withUserRepositories. Calling this directly is only correct inside a
+ * transaction that has had its user set, and nothing here can verify that -- the
+ * reads would simply come back empty, which reads as "you have not started".
+ */
+export function createUserScopedRepositories(
+  client: PoolClient,
+  userId: number,
+): UserScopedRepositories {
+  return {
+    vocab: createVocabRepository(client, userId),
+  };
+}
+
+/**
+ * The seam a user-scoped request goes through: open a transaction stamped with
+ * one user, hand the caller repositories bound to that same user.
+ *
+ * One `userId` argument sets the row-level security scope AND supplies the value
+ * repositories write into `user_id`, so the read scope and the write scope are
+ * the same by construction rather than by discipline -- the same reasoning as
+ * withLedgerRepositories.
+ *
+ * THE USER ID COMES FROM THE SESSION, NEVER FROM THE REQUEST. There is no
+ * X-User-Id header and there must never be one: the ledger header is safe only
+ * because it is checked against a membership list the server built, and a user
+ * id has no equivalent list to check against -- it IS the identity.
+ */
+export async function withUserRepositories<T>(
+  pool: Pool,
+  userId: number,
+  fn: (repos: UserScopedRepositories) => Promise<T>,
+): Promise<T> {
+  return withUserScope(pool, userId, (client) =>
+    fn(createUserScopedRepositories(client, userId)),
+  );
 }

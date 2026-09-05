@@ -5,6 +5,7 @@ import {
   VIEW_SEGMENT,
   matchView,
   parseEnumParam,
+  parseIntParam,
   parseYearMonthParam,
   pathForView,
 } from './routes';
@@ -120,5 +121,39 @@ describe('the query-parameter table', () => {
       const names = Object.values(SEARCH_PARAMS[view] as Record<string, string>);
       expect(new Set(names).size).toBe(names.length);
     }
+  });
+});
+
+
+describe('parseIntParam', () => {
+  const day = parseIntParam((value) => value >= 31 && value <= 35);
+
+  it('accepts a plain integer the caller recognises', () => {
+    expect(day('33')).toBe(33);
+  });
+
+  it('refuses a value outside what the caller recognises', () => {
+    // `?day=99` is not "out of range" -- it is a Day that does not exist, and
+    // the screen has to fall back rather than open an empty quiz under a
+    // heading nobody wrote.
+    expect(day('99')).toBeNull();
+  });
+
+  it.each([' 33', '33 ', '33.0', '0x21', '+33', '-33', '', 'thirty-three'])(
+    'refuses %o, which Number() would otherwise accept',
+    (raw) => {
+      // Number(' 33'), Number('33.0') and Number('0x21') are all 33. Each would
+      // let a hand-edited address reach the Day lookup through a spelling
+      // nobody wrote, and the address bar would then disagree with the screen.
+      expect(day(raw)).toBeNull();
+    },
+  );
+
+  it('refuses an absent parameter', () => {
+    expect(day(null)).toBeNull();
+  });
+
+  it('refuses a number too long to be anything real', () => {
+    expect(day('3333333333')).toBeNull();
   });
 });
