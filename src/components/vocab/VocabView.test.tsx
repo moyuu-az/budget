@@ -109,6 +109,69 @@ describe('英単語 の設定', () => {
     expect(within(scopes).getByRole('tab', { name: '間違えた問題だけ' })).toBeDisabled();
   });
 
+  it('says why 「間違えた問題だけ」 is unavailable once the Day has been answered', async () => {
+    // THE BUG THIS PINS. A greyed-out control beside a percentage below 100
+    // reads as broken, and the reader was right to think something did not add
+    // up -- the two numbers were computed on different bases. The control is
+    // still disabled (an empty quiz is worse), but the screen now says what
+    // happened: the words WERE missed, and were then revised correctly.
+    useVocabStore.setState({
+      // Missed once, revised correctly: the lifetime ratio remembers the miss,
+      // the review set does not.
+      progress: wordsForDay(31).map((word) => ({
+        wordId: word.id,
+        byDirection: {
+          en_to_ja: NEVER_ANSWERED,
+          ja_to_en: {
+            attempts: 2,
+            correct: 1,
+            lastCorrect: true,
+            lastAnsweredAt: '2026-09-05T00:00:00.000Z',
+          },
+        },
+      })),
+      status: 'ready',
+    });
+    goTo('?day=31');
+    render(<VocabView />);
+
+    expect(
+      await screen.findByText(/このDayに間違えたままの問題はありません/),
+    ).toBeInTheDocument();
+  });
+
+  it('leads with a figure that agrees with 要復習, not with the lifetime ratio', async () => {
+    // 定着 is computed on the same basis as the review set, so 100% and
+    // 「要復習 0語」 are one statement. The lifetime ratio is still reported --
+    // beside the answer count it comes from, labelled 通算 -- because it is a
+    // real fact, just not the one that belongs at the top of a study screen.
+    useVocabStore.setState({
+      progress: wordsForDay(31).map((word) => ({
+        wordId: word.id,
+        byDirection: {
+          en_to_ja: NEVER_ANSWERED,
+          ja_to_en: {
+            attempts: 2,
+            correct: 1,
+            lastCorrect: true,
+            lastAnsweredAt: '2026-09-05T00:00:00.000Z',
+          },
+        },
+      })),
+      status: 'ready',
+    });
+    goTo('?day=31');
+    render(<VocabView />);
+
+    expect(await screen.findByText('定着')).toBeInTheDocument();
+    // 16 of 80 words answered, every one of them last answered correctly.
+    expect(screen.getByText('100%')).toBeInTheDocument();
+    expect(screen.getByText('0語')).toBeInTheDocument();
+    // …while the lifetime ratio, which is what made the screen look broken, is
+    // demoted rather than deleted.
+    expect(screen.getByText(/通算正答率 50%/)).toBeInTheDocument();
+  });
+
   it('offers 「間違えた問題だけ」 once something has been failed, and asks only those', async () => {
     const user = userEvent.setup();
     useVocabStore.setState({
