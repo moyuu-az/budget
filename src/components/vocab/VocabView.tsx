@@ -86,7 +86,25 @@ const SCOPE_LABEL: Record<QuizScope, string> = {
 const SCOPE_HINT: Record<QuizScope, string> = {
   all: 'この Day の全問題です。',
   wrong: '最後に解いたとき間違えた問題だけを出します。復習して正解すると外れます。',
-  weak: `間違えた回数が多い順に最大 ${WEAK_QUIZ_LIMIT}問。復習して正解しても、間違えた履歴は残ります。`,
+  weak: `間違えやすい問題から最大 ${WEAK_QUIZ_LIMIT}問。復習して正解しても消えず、少しずつ順番が下がります。`,
+};
+
+/**
+ * Why the chosen 出題範囲 selected nothing.
+ *
+ * A `Record<QuizScope, string>` rather than a condition per scope: a range that
+ * is empty and does not say why looks like a broken screen, and the range most
+ * likely to be empty is whichever one was added last. The mapped type makes a
+ * new scope answer this question rather than inherit somebody else's answer.
+ *
+ * 'all' cannot actually be empty -- every Day carries sixteen words -- but it
+ * needs a line here anyway, and an honest one: if it ever IS empty, the content
+ * is missing, not the reader's record.
+ */
+const SCOPE_EMPTY_REASON: Record<QuizScope, string> = {
+  all: 'この Day には問題がありません。',
+  wrong: 'この Day に間違えたままの問題はありません。',
+  weak: 'この Day にはまだ間違えた問題がありません。',
 };
 
 /**
@@ -404,6 +422,19 @@ function VocabView(): ReactElement {
               「苦手」 are the pair a reader is most likely to assume are the same
               thing. */}
           <p className="text-[11px] text-[var(--color-content-muted)]">{SCOPE_HINT[scope]}</p>
+
+          {/* AND WHY IT SELECTED NOTHING, when it did.
+
+              A range can be empty while its tab is still selected -- the address
+              carries `?scope=`, and switching Day keeps it, so 「苦手」 chosen on
+              a studied Day survives a tap onto an untouched one. Before this the
+              screen showed 「0問」 and a disabled 「クイズを始める」 with no reason
+              anywhere on it. */}
+          {selected.length === 0 && (
+            <p className="text-[11px] text-[var(--color-content-muted)]">
+              {SCOPE_EMPTY_REASON[scope]}
+            </p>
+          )}
 
           {/* SAY WHY THE CONTROL IS GREYED OUT.
 

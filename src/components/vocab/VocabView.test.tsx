@@ -272,6 +272,86 @@ describe('英単語 の設定', () => {
     expect(await screen.findByText(/Day 31・苦手・手入力・1問/)).toBeInTheDocument();
   });
 
+  it('says what each 出題範囲 selects, in words the reader can tell apart', async () => {
+    // 「間違えた問題だけ」 and 「苦手」 are the pair somebody is most likely to
+    // assume are the same thing, and the line under the tabs is the ONLY thing
+    // distinguishing them. Nothing guarded it: the element could be deleted, or
+    // the two sentences swapped, and every test still passed.
+    const user = userEvent.setup();
+    useVocabStore.setState({
+      progress: [
+        {
+          wordId: 'et-481',
+          byDirection: {
+            en_to_ja: NEVER_ANSWERED,
+            ja_to_en: {
+              attempts: 3,
+              correct: 1,
+              lastCorrect: false,
+              lastAnsweredAt: '2026-09-05T00:00:00.000Z',
+            },
+          },
+        },
+      ],
+      status: 'ready',
+    });
+    goTo('?day=31');
+    render(<VocabView />);
+
+    expect(await screen.findByText(/この Day の全問題です/)).toBeInTheDocument();
+
+    const scopes = screen.getByRole('tablist', { name: '出題範囲' });
+    await user.click(within(scopes).getByRole('tab', { name: '間違えた問題だけ' }));
+    expect(await screen.findByText(/復習して正解すると外れます/)).toBeInTheDocument();
+
+    await user.click(within(scopes).getByRole('tab', { name: '苦手' }));
+    // Explicitly NOT the same sentence: the two ranges differ by which answers
+    // they look at, and that difference is the whole reason both exist.
+    expect(await screen.findByText(/復習して正解しても消えず/)).toBeInTheDocument();
+    expect(screen.queryByText(/復習して正解すると外れます/)).not.toBeInTheDocument();
+  });
+
+  it('says WHY a range selected nothing, rather than showing a bare 0問', async () => {
+    // `?scope=` survives a change of Day, so 「苦手」 chosen on a studied Day
+    // lands on an untouched one with one tap. The screen used to show 「0問」 and
+    // a disabled start button with no reason anywhere on it.
+    goTo('?day=31&scope=weak');
+    render(<VocabView />);
+
+    expect(
+      await screen.findByText(/この Day にはまだ間違えた問題がありません/),
+    ).toBeInTheDocument();
+  });
+
+  it('does not point at 「苦手」 on a Day that has never been missed', async () => {
+    // The other half of the note: a Day answered perfectly has nothing for
+    // 「苦手」 either, so sending the reader there would be a dead end. This
+    // branch had no test at all -- the note could be pinned to either sentence
+    // and everything passed.
+    useVocabStore.setState({
+      progress: wordsForDay(31).map((word) => ({
+        wordId: word.id,
+        byDirection: {
+          en_to_ja: NEVER_ANSWERED,
+          ja_to_en: {
+            attempts: 2,
+            correct: 2,
+            lastCorrect: true,
+            lastAnsweredAt: '2026-09-05T00:00:00.000Z',
+          },
+        },
+      })),
+      status: 'ready',
+    });
+    goTo('?day=31');
+    render(<VocabView />);
+
+    expect(
+      await screen.findByText(/次に間違えたときに選べるようになります/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/「苦手」を選んでください/)).not.toBeInTheDocument();
+  });
+
   it('offers 「間違えた問題だけ」 once something has been failed, and asks only those', async () => {
     const user = userEvent.setup();
     useVocabStore.setState({

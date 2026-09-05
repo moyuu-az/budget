@@ -6,6 +6,7 @@ import {
   indexProgress,
   isWeak,
   isWrong,
+  missRateFor,
   missesFor,
   selectWords,
   statFor,
@@ -145,6 +146,23 @@ describe('missesFor / isWeak', () => {
   });
 });
 
+describe('missRateFor', () => {
+  it('falls when the word is answered correctly, which the raw count never does', () => {
+    const before = indexProgress(progress({ 'et-481': { ja: [2, 1, true] } }));
+    const after = indexProgress(progress({ 'et-481': { ja: [3, 2, true] } }));
+
+    expect(missesFor(before, 'et-481', 'ja_to_en')).toBe(1);
+    expect(missesFor(after, 'et-481', 'ja_to_en')).toBe(1); // unchanged: the freeze
+    expect(missRateFor(after, 'et-481', 'ja_to_en')).toBeLessThan(
+      missRateFor(before, 'et-481', 'ja_to_en'),
+    );
+  });
+
+  it('is zero, not NaN, for a word never answered', () => {
+    expect(missRateFor(indexProgress([]), 'et-481', 'ja_to_en')).toBe(0);
+  });
+});
+
 describe("selectWords('weak')", () => {
   it('keeps a word that was missed and then revised correctly', () => {
     // THE WHOLE REASON THIS SCOPE EXISTS. Everything revised means an empty
@@ -215,6 +233,67 @@ describe("selectWords('weak')", () => {
     expect(picked).toHaveLength(WEAK_QUIZ_LIMIT);
     expect(picked).toEqual([...picked].sort());
     expect(picked).toEqual(day.slice(0, WEAK_QUIZ_LIMIT).map((w) => w.id));
+  });
+
+  it('moves on as the reader revises, instead of asking the same ten for ever', () => {
+    // THE DEFECT THIS RANKING EXISTS TO AVOID.
+    //
+    // Ranked on the raw miss count the mode is frozen: answering correctly adds
+    // one to both `attempts` and `correct`, so the count is unchanged, the same
+    // ten words stay at the top, and words eleventh onwards are never asked --
+    // so they can never rise. buildQuiz's own comment names that failure:
+    // 「asking the same first ten words of a Day every time is how a reader ends
+    // up knowing ten words and believing they know sixteen」.
+    //
+    // Simulated here: every word of Day 31 starts missed once in two answers, so
+    // nothing distinguishes them but the tie-break. Each round answers the
+    // selected ten CORRECTLY, which is what a reader revising actually does.
+    const day = wordsForDay(31);
+    const counts = new Map(day.map((word) => [word.id, { attempts: 2, correct: 1 }]));
+
+    const record = (): VocabProgress =>
+      progress(
+        Object.fromEntries(
+          [...counts].map(([id, c]) => [
+            id,
+            { ja: [c.attempts, c.correct, true] as [number, number, boolean] },
+          ]),
+        ),
+      );
+
+    const asked = new Set<string>();
+    const rounds: string[][] = [];
+    for (let round = 0; round < 4; round++) {
+      const picked = selectWords(day, record(), 'weak', 'ja_to_en').map((w) => w.id);
+      rounds.push(picked);
+      for (const id of picked) {
+        asked.add(id);
+        const c = counts.get(id)!;
+        c.attempts += 1;
+        c.correct += 1;
+      }
+    }
+
+    // The second round is NOT the first one again.
+    expect(rounds[1]).not.toEqual(rounds[0]);
+    // And within a few rounds the whole Day has been covered, rather than six
+    // words never being asked at all.
+    expect(asked.size).toBe(day.length);
+  });
+
+  it('ranks a word missed often above one missed rarely, at equal rates', () => {
+    // The miss COUNT is the tie-break, so 「ミスった回数が多い」 still decides
+    // between two words that are missed equally often. Both are missed half the
+    // time here; only the volume of evidence differs.
+    const day = wordsForDay(31);
+    const record = progress({
+      'et-481': { ja: [2, 1, true] }, // 1 miss of 2
+      'et-482': { ja: [8, 4, true] }, // 4 misses of 8
+    });
+    expect(selectWords(day, record, 'weak', 'ja_to_en').map((w) => w.id)).toEqual([
+      'et-482',
+      'et-481',
+    ]);
   });
 
   it('ignores misses in a direction that is not being practised', () => {
