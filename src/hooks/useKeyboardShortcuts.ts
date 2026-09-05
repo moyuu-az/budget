@@ -16,6 +16,9 @@ const GO_TO_VIEW: Record<string, ViewType> = {
   // 'a' was already taken by 分析; 'w' for wealth keeps every view reachable
   // without renaming a shortcut people have already learnt.
   w: 'assets',
+  // 'v' for vocabulary. Every screen in Navigation has a chord, and one that
+  // does not is a screen people forget exists.
+  v: 'vocab',
 };
 
 const CHORD_TIMEOUT_MS = 1200;

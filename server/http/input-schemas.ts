@@ -9,6 +9,8 @@ import {
 } from '../../shared/asset-fields';
 import { parseRecurrence, type Recurrence } from '../../shared/recurrence';
 import { MAX_MIN_BALANCE_THRESHOLD } from '../../shared/ledger-settings';
+import { isVocabDayId, wordById } from '../../shared/vocabulary';
+import { QUIZ_DIRECTIONS } from '../../shared/vocabulary/types';
 
 // Input validation at the trust boundary.
 //
@@ -248,3 +250,62 @@ export const assetInputSchema = z.object({
   fields: assetFieldValuesSchema.optional(),
 });
 export const assetPatchSchema = assetInputSchema.partial();
+
+// ---------------------------------------------------------------------------
+// 英単語クイズ (user-scoped)
+//
+// The one schema in this file that validates against SOMETHING OTHER THAN a
+// shape: `wordId` is checked for membership in the book. That is deliberate.
+//
+//   `vocab_attempts.word_id` has no foreign key -- the words live in
+//   shared/vocabulary, not in the database (migration 006 explains why). With no
+//   key, nothing else stops a client storing ids that name nothing, and a table
+//   of rows that resolve to no word is a study record whose 正答率 has a
+//   denominator nobody can account for.
+//
+//   Reads already drop what they cannot resolve, so this is not about safety on
+//   the way out. It is about not writing rubbish on the way in, where the caller
+//   can still be told which id was wrong.
+// ---------------------------------------------------------------------------
+
+/**
+ * Largest run this endpoint accepts.
+ *
+ * The longest legitimate submission is one quiz over every word the app knows
+ * (80 today), and the body limit already caps the request at 64 KB. This is the
+ * semantic bound rather than the transport one: a "run" of ten thousand answers
+ * is not a quiz somebody sat, and accepting it would let one request write more
+ * history than a year of real use.
+ */
+const MAX_ATTEMPTS_PER_SUBMISSION = 200;
+
+const vocabWordIdSchema = z
+  .string()
+  .max(64)
+  .refine((id) => wordById(id) !== undefined, {
+    message: '未知の単語 ID です',
+  });
+
+export const vocabAttemptsSchema = z
+  .array(
+    z.object({
+      wordId: vocabWordIdSchema,
+      direction: z.enum(QUIZ_DIRECTIONS),
+      correct: z.boolean(),
+    }),
+  )
+  .max(MAX_ATTEMPTS_PER_SUBMISSION);
+
+/**
+ * The Day to clear, or null for "all of it".
+ *
+ * Nullable rather than optional, and validated against the sections that exist:
+ * a mis-typed `?day=` reaching a DELETE is the one place in this feature where
+ * being permissive destroys data. An unknown Day is refused, never widened to
+ * "everything".
+ */
+export const vocabResetTargetSchema = z
+  .number()
+  .int()
+  .refine((day) => isVocabDayId(day), { message: '未知の Day です' })
+  .nullable();

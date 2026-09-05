@@ -8,8 +8,10 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 // and then the sweep would stop covering it AND resetDb would stop truncating
 // it, both silently, with "we added a guard" as the reason nobody looked.
 import {
-  startTestDb, resetDb, createLedger, raw, LEDGER_SCOPED_TABLES, type TestDb,
+  startTestDb, resetDb, createLedger, createUser, raw,
+  LEDGER_SCOPED_TABLES, USER_SCOPED_TABLES, type TestDb,
 } from '../test/pg';
+import { withUserScope } from './user-scope';
 import { withLedgerScope, withoutLedgerScope } from './ledger-scope';
 import { assertIsolationEnforceable } from './assert-isolation';
 
@@ -738,5 +740,158 @@ describe('isolation guard catches inherited privilege', () => {
       await db.adminPool.query('REVOKE privileged_parent FROM app_user');
       await db.adminPool.query('DROP ROLE privileged_parent');
     }
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// THE SECOND TENANT, AND WHY IT NEEDS ITS OWN GUARD.
+//
+// Everything above is about households. Migration 006 added a table whose tenant
+// is the PERSON (`vocab_attempts`), protected by a different predicate --
+// `app_current_user_id()` rather than `app_current_ledger_id()`.
+//
+// The ledger drift guard cannot cover it: it discovers tables by their
+// `ledger_id` column, which this table does not have. Left at that, a
+// user-scoped table could ship with no policy at all and every existing test
+// would still pass -- and the leak would be one person's study record showing up
+// in the other's accuracy, silently, in a household that shares a ledger by
+// design.
+//
+// Worse than "no policy" is "the WRONG policy": a table given the LEDGER
+// predicate would satisfy every ENABLE/FORCE assertion in this file while
+// filtering by something that has nothing to do with who is asking. So the
+// predicate text is asserted, not just the flags.
+// ---------------------------------------------------------------------------
+
+/**
+ * Tables that carry `user_id` and are deliberately NOT under user isolation,
+ * mapped to the columns they are allowed to hold.
+ *
+ * Same map-not-a-list reasoning as LEDGER_ID_WITHOUT_RLS: exempting a table and
+ * writing down what it may contain is one edit, so an exemption cannot be added
+ * and then left unwatched.
+ *
+ * `ledger_members` answers "may this user open this ledger?", which the
+ * authentication layer has to read BEFORE any scope is opened -- a predicate on
+ * it would make it unable to read the very rows that pick the ledger.
+ */
+const USER_ID_WITHOUT_RLS: Readonly<Record<string, readonly string[]>> = {
+  ledger_members: ['created_at', 'ledger_id', 'role', 'user_id'],
+};
+
+describe('user-level row security', () => {
+  it('covers every table that carries a user_id, not just a hand-kept list', async () => {
+    const rows = await raw<{ tablename: string; enabled: boolean; forced: boolean }>(
+      db.adminPool,
+      `SELECT c.relname               AS tablename,
+              c.relrowsecurity        AS enabled,
+              c.relforcerowsecurity   AS forced
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public'
+          AND c.relkind IN ('r', 'p')
+          AND EXISTS (
+                SELECT 1
+                  FROM pg_attribute a
+                 WHERE a.attrelid = c.oid
+                   AND a.attname  = 'user_id'
+                   AND a.attnum > 0
+                   AND NOT a.attisdropped
+              )`,
+    );
+
+    const exempt = (name: string): boolean =>
+      Object.prototype.hasOwnProperty.call(USER_ID_WITHOUT_RLS, name);
+
+    const discovered = rows.map((r) => r.tablename).filter((name) => !exempt(name)).sort();
+
+    // Both directions, for the same reason as the ledger guard: a table in the
+    // schema but not the list arrived unguarded; a name in the list but not the
+    // schema makes the assertions below pass against nothing.
+    expect(discovered).toEqual([...USER_SCOPED_TABLES].sort());
+
+    for (const row of rows) {
+      if (exempt(row.tablename)) continue;
+      expect(row.enabled, `${row.tablename} ENABLE ROW LEVEL SECURITY`).toBe(true);
+      expect(row.forced, `${row.tablename} FORCE ROW LEVEL SECURITY`).toBe(true);
+    }
+  });
+
+  it('gives every covered table the USER predicate, on read and on write', async () => {
+    const policies = await raw<{ tablename: string; qual: string; with_check: string }>(
+      db.adminPool,
+      `SELECT tablename, qual, with_check
+         FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = ANY($1::text[])`,
+      [[...USER_SCOPED_TABLES]],
+    );
+
+    // Exactly one policy each: a second one is an OR, and an OR with anything is
+    // a way through.
+    expect(policies.map((p) => p.tablename).sort()).toEqual([...USER_SCOPED_TABLES].sort());
+
+    for (const policy of policies) {
+      expect(policy.qual, `${policy.tablename} USING`).toBe('(user_id = app_current_user_id())');
+      expect(policy.with_check, `${policy.tablename} WITH CHECK`).toBe(
+        '(user_id = app_current_user_id())',
+      );
+    }
+  });
+
+  it('shows one person nothing of another, and refuses to write on their behalf', async () => {
+    const alice = await createUser(db.adminPool, 'alice@example.test');
+    const bob = await createUser(db.adminPool, 'bob@example.test');
+
+    await withUserScope(db.pool, alice, async (client) => {
+      await client.query(
+        `INSERT INTO vocab_attempts (user_id, word_id, direction, correct)
+           VALUES ($1, 'et-481', 'en_to_ja', true)`,
+        [alice],
+      );
+    });
+
+    // Bob's scope sees nothing of Alice's, even though the SELECT has no
+    // predicate of its own -- which is the whole point of leaving it out.
+    const seenByBob = await withUserScope(db.pool, bob, async (client) => {
+      const { rows } = await client.query('SELECT * FROM vocab_attempts');
+      return rows;
+    });
+    expect(seenByBob).toEqual([]);
+
+    // WITH CHECK, not just USING. Without it Bob could write a row against
+    // Alice's id -- invisible to him afterwards, and counted in HER accuracy.
+    const sqlstate = await sqlstateOf(() =>
+      withUserScope(db.pool, bob, (client) =>
+        client.query(
+          `INSERT INTO vocab_attempts (user_id, word_id, direction, correct)
+             VALUES ($1, 'et-482', 'en_to_ja', false)`,
+          [alice],
+        ),
+      ),
+    );
+    // 42501 = insufficient_privilege, which is what a WITH CHECK violation
+    // raises.
+    expect(sqlstate).toBe('42501');
+  });
+
+  it('fails closed when no user scope was opened', async () => {
+    const alice = await createUser(db.adminPool, 'alice@example.test');
+    await withUserScope(db.pool, alice, (client) =>
+      client.query(
+        `INSERT INTO vocab_attempts (user_id, word_id, direction, correct)
+           VALUES ($1, 'et-481', 'en_to_ja', true)`,
+        [alice],
+      ),
+    );
+
+    // app_current_user_id() returns NULL when the setting was never set, so the
+    // policy compares `user_id = NULL` -- not TRUE, so no row passes. An empty
+    // result is the correct failure; an unfiltered one would be the disaster.
+    const rows = await withoutLedgerScope(db.pool, async (client) => {
+      const { rows } = await client.query('SELECT * FROM vocab_attempts');
+      return rows;
+    });
+    expect(rows).toEqual([]);
   });
 });

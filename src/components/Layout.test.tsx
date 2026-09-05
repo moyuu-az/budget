@@ -9,6 +9,7 @@ import { useMonthlyStore } from '../stores/useMonthlyStore';
 import { useSessionStore } from '../stores/useSessionStore';
 import { useUIStore } from '../stores/useUIStore';
 import { makeCashAsset, makeCashCategory } from '../test/factories';
+import { VIEW_SEGMENT } from '../app/routes';
 
 // ---------------------------------------------------------------------------
 // The shell, on a phone as well as a desktop.
@@ -106,8 +107,15 @@ describe('both shells', () => {
     // from the accessibility tree and the tab order.
     const navs = screen.getAllByRole('navigation', { name: 'メインナビゲーション' });
     expect(navs).toHaveLength(2);
+
+    // Counted from VIEW_SEGMENT rather than written out. The point of this
+    // assertion is that the two shells offer the SAME screens -- a screen added
+    // to the sidebar and forgotten in the phone's tab bar exists on a desktop
+    // and not on a phone. A hard-coded number turns that into a failure about
+    // arithmetic, which the next person fixes by editing the number.
+    const screens = Object.keys(VIEW_SEGMENT).length;
     for (const nav of navs) {
-      expect(within(nav).getAllByRole('link')).toHaveLength(6);
+      expect(within(nav).getAllByRole('link')).toHaveLength(screens);
     }
   });
 });

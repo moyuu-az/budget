@@ -45,6 +45,7 @@ export const VIEW_SEGMENT = {
   history: 'history',
   analytics: 'analytics',
   assets: 'assets',
+  vocab: 'vocab',
   settings: 'settings',
 } as const satisfies Record<ViewType, string>;
 
@@ -123,6 +124,16 @@ export const matchView = (pathname: string): RouteMatch => {
  *  - entries.month    … the month being edited
  *  - analytics.period … the analysis span (AnalyticsPeriod)
  *  - analytics.month  … the month drilled into from a trend chart
+ *  - vocab.day        … the Day section being studied
+ *  - vocab.dir        … which way round questions are asked (QuizDirectionSetting)
+ *  - vocab.scope      … 全部 or 間違えた問題だけ (QuizScope)
+ *
+ * 英単語 puts its three SETTINGS in the query and its PROGRESS nowhere. Which
+ * Day, which direction, which scope answer "what is on screen" and are worth
+ * sending to somebody; "you are on question 4 of 12 and got 3 right" is not a
+ * filter, it is the middle of an action -- putting it in the address would make
+ * the back button rewind a quiz into a state whose answers were already
+ * recorded.
  */
 export const SEARCH_PARAMS = {
   dashboard: { period: 'period', flow: 'flow' },
@@ -130,6 +141,7 @@ export const SEARCH_PARAMS = {
   history: {},
   analytics: { period: 'period', month: 'month' },
   assets: {},
+  vocab: { day: 'day', dir: 'dir', scope: 'scope' },
   settings: {},
 } as const satisfies Record<ViewType, Readonly<Record<string, string>>>;
 
@@ -166,3 +178,28 @@ export const parseEnumParam =
   <T extends string>(allowed: readonly T[]) =>
   (raw: string | null): T | null =>
     raw !== null && (allowed as readonly string[]).includes(raw) ? (raw as T) : null;
+
+// Only digits, and nothing else.
+//
+// `Number(' 31')` is 31, `Number('31.0')` is 31, and `Number('0x1f')` is 31 --
+// all three would let a hand-edited address reach a Day lookup through a
+// spelling nobody wrote. The regex refuses them before the cast rather than
+// after it, for the same reason YEAR_MONTH bounds the year above.
+const INTEGER = /^\d{1,9}$/;
+
+/**
+ * An integer query parameter restricted to the values a caller says are real.
+ *
+ * The companion to parseEnumParam for parameters that are numbers. The predicate
+ * is passed in rather than being a range, because the meaningful question is
+ * usually membership: `?day=99` is not "out of range", it is a Day that does not
+ * exist, and the screen must fall back rather than render an empty quiz under a
+ * heading nobody wrote.
+ */
+export const parseIntParam =
+  (isAllowed: (value: number) => boolean) =>
+  (raw: string | null): number | null => {
+    if (raw === null || !INTEGER.test(raw)) return null;
+    const value = Number(raw);
+    return isAllowed(value) ? value : null;
+  };

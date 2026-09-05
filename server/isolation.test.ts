@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import type { Hono } from 'hono';
 import { startTestDb, resetDb, raw, LEDGER_SCOPED_TABLES, type TestDb } from './test/pg';
+import type { VocabProgress } from '../shared/types';
 import { createSessionService } from './auth/session';
 import { createApp, LEDGER_HEADER } from './http/app';
 import { METHODS, type DataMethod } from './http/api';
@@ -214,6 +215,22 @@ const ADVERSARIAL_ARGS: { [M in DataMethod]: (victim: Fixture) => unknown[] } = 
   // empty -- and if it somehow did not, the composite foreign key is the second
   // refusal.
   addAsset: (v) => [{ categoryId: v.assetCategoryId, name: 'intruder', value: 1, fields: { f1: 'x' } }],
+
+  // --- User-scoped methods ---
+  //
+  // These take no ledger id, so there is nothing here to point at Bob's ledger.
+  // They are still in the sweep for the two things it asserts unconditionally:
+  // that the call cannot mutate another ledger (a study-record handler reaching
+  // household data at all would be the defect), and that it answers 4xx rather
+  // than 500 when refused.
+  //
+  // The attack these actually have to survive -- Alice reading or clearing BOB's
+  // answers -- is not expressible through arguments, because the person is taken
+  // from the session. It is covered by 「学習記録は人ごとに分かれている」 below,
+  // which is where a change to the user scope will fail.
+  getVocabProgress: () => [],
+  recordVocabAttempts: () => [[{ wordId: 'et-481', direction: 'en_to_ja', correct: true }]],
+  resetVocabProgress: () => [31],
 };
 
 beforeAll(async () => {
@@ -360,5 +377,156 @@ describe('schema drift guard', () => {
         );
       }
     }
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// THE OTHER TENANT.
+//
+// The sweep above is about households. This is about people, and it is the only
+// place the user scope is proven -- the sweep cannot reach it, because which
+// person a request is about comes from the session rather than from anything a
+// caller can put in the arguments.
+//
+// Two members of one household share the 家計 ledger by design. Their STUDY
+// RECORDS must not be shared by the same design, and the failure would be quiet:
+// 「間違えた問題だけ」 would re-ask the questions the other person got wrong, and
+// 正答率 would average two people who never sat the same quiz.
+// ---------------------------------------------------------------------------
+describe('学習記録は人ごとに分かれている', () => {
+  const answer = (wordId: string, correct: boolean) => ({
+    wordId,
+    direction: 'en_to_ja' as const,
+    correct,
+  });
+
+  /** Posts a user-scoped method. The ledger header is sent and must be ignored. */
+  async function postAsUser(method: string, as: string, args: unknown[]): Promise<Response> {
+    const session = await signIn(as);
+    return post(method, as, session.ledgers[0].id, args);
+  }
+
+  it('records answers against the caller, not against the ledger they had open', async () => {
+    // Both write while the SHARED ledger is active -- the case that would leak
+    // if the record hung off the ledger instead of the person.
+    const alice = await signIn(ALICE);
+    const bob = await signIn(BOB);
+    const shared = alice.ledgers.find((l) => l.kind === 'shared')!.id;
+    expect(bob.ledgers.some((l) => l.id === shared)).toBe(true);
+
+    await post('recordVocabAttempts', ALICE, shared, [[answer('et-481', true), answer('et-482', true)]]);
+    await post('recordVocabAttempts', BOB, shared, [[answer('et-481', false)]]);
+
+    const aliceProgress = (await (
+      await post('getVocabProgress', ALICE, shared, [])
+    ).json()) as VocabProgress;
+    const bobProgress = (await (
+      await post('getVocabProgress', BOB, shared, [])
+    ).json()) as VocabProgress;
+
+    expect(aliceProgress.map((s) => s.wordId)).toEqual(['et-481', 'et-482']);
+    expect(aliceProgress[0].byDirection.en_to_ja).toMatchObject({ attempts: 1, correct: 1, lastCorrect: true });
+
+    // Bob answered the same word and got it wrong. If the scope were the ledger,
+    // one of these two assertions would see the other person's outcome.
+    expect(bobProgress.map((s) => s.wordId)).toEqual(['et-481']);
+    expect(bobProgress[0].byDirection.en_to_ja).toMatchObject({ attempts: 1, correct: 0, lastCorrect: false });
+  });
+
+  it("a reset clears only the caller's answers", async () => {
+    await postAsUser('recordVocabAttempts', ALICE, [[answer('et-481', true)]]);
+    await postAsUser('recordVocabAttempts', BOB, [[answer('et-481', true)]]);
+
+    await postAsUser('resetVocabProgress', BOB, [null]);
+
+    const aliceProgress = (await (
+      await postAsUser('getVocabProgress', ALICE, [])
+    ).json()) as VocabProgress;
+    const bobProgress = (await (
+      await postAsUser('getVocabProgress', BOB, [])
+    ).json()) as VocabProgress;
+
+    expect(bobProgress).toEqual([]);
+    // The DELETE carries no `WHERE user_id` -- the policy supplies it. If the
+    // policy were inert this would be empty too, which is exactly the failure
+    // this assertion exists to catch.
+    expect(aliceProgress).toHaveLength(1);
+  });
+
+  it('resets one Day without touching the others', async () => {
+    // et-481 is Day 31, et-497 is Day 32.
+    await postAsUser('recordVocabAttempts', ALICE, [
+      [answer('et-481', true), answer('et-497', false)],
+    ]);
+
+    const left = (await (
+      await postAsUser('resetVocabProgress', ALICE, [31])
+    ).json()) as VocabProgress;
+
+    expect(left.map((s) => s.wordId)).toEqual(['et-497']);
+  });
+
+  it('refuses a word id the book does not carry', async () => {
+    // `vocab_attempts.word_id` has no foreign key (the words live in source, not
+    // in the database), so this schema check is the ONLY thing keeping rows that
+    // resolve to nothing out of the study record.
+    const response = await postAsUser('recordVocabAttempts', ALICE, [
+      [{ wordId: 'et-999', direction: 'en_to_ja', correct: true }],
+    ]);
+    expect(response.status).toBe(400);
+  });
+
+  it('refuses a Day the book does not have, rather than widening it to "all"', async () => {
+    await postAsUser('recordVocabAttempts', ALICE, [[answer('et-481', true)]]);
+
+    const response = await postAsUser('resetVocabProgress', ALICE, [99]);
+    expect(response.status).toBe(400);
+
+    // And nothing was deleted. A mis-typed Day quietly meaning "everything" is
+    // the one place in this feature where being permissive destroys data.
+    const progress = (await (
+      await postAsUser('getVocabProgress', ALICE, [])
+    ).json()) as VocabProgress;
+    expect(progress).toHaveLength(1);
+  });
+
+  it('keeps the two directions apart', async () => {
+    // Recognising a phrase and producing it are different skills, and the second
+    // is reliably the weaker one. Folding them together would make
+    // 「間違えた問題だけ」 re-ask questions the reader already answers correctly.
+    await postAsUser('recordVocabAttempts', ALICE, [
+      [
+        { wordId: 'et-481', direction: 'en_to_ja', correct: true },
+        { wordId: 'et-481', direction: 'ja_to_en', correct: false },
+      ],
+    ]);
+
+    const progress = (await (
+      await postAsUser('getVocabProgress', ALICE, [])
+    ).json()) as VocabProgress;
+
+    expect(progress[0].byDirection.en_to_ja.lastCorrect).toBe(true);
+    expect(progress[0].byDirection.ja_to_en.lastCorrect).toBe(false);
+  });
+
+  it('takes the LAST answer of a run as the most recent, not an arbitrary one', async () => {
+    // Every row of one submission shares an `answered_at`: now() is transaction
+    // start time. Without the identity column as a tie-break, "the most recent
+    // answer" would be whichever row the aggregate happened to visit first -- and
+    // 「間違えた問題だけ」 is built entirely on that value.
+    await postAsUser('recordVocabAttempts', ALICE, [
+      [answer('et-481', false), answer('et-481', true)],
+    ]);
+
+    const progress = (await (
+      await postAsUser('getVocabProgress', ALICE, [])
+    ).json()) as VocabProgress;
+
+    expect(progress[0].byDirection.en_to_ja).toMatchObject({
+      attempts: 2,
+      correct: 1,
+      lastCorrect: true,
+    });
   });
 });
