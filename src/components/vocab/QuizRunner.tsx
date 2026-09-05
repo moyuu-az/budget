@@ -236,9 +236,17 @@ export function QuizRunner({ questions, onFinish, onAbort }: Props): ReactElemen
               </p>
               <p className="text-sm text-[var(--color-content-secondary)]">{word.tip}</p>
             </div>
-            <div className="rounded-[var(--radius-md)] bg-[var(--color-surface-overlay)] p-3">
-              <p className="text-sm text-[var(--color-content-primary)]">{word.example.en}</p>
-              <p className="mt-1 text-xs text-[var(--color-content-muted)]">{word.example.ja}</p>
+            <div>
+              <p className="text-[11px] font-medium text-[var(--color-content-muted)]">例文</p>
+              {/* `surface-base` and a border, NOT `surface-overlay`: in the light
+                  theme the overlay token is white and this block sits inside a
+                  white Card, so the example was indistinguishable from the
+                  paragraph above it. `surface-base` is the page ground, which is
+                  a step away from the card in BOTH themes. */}
+              <div className="mt-1 rounded-[var(--radius-md)] border border-[var(--color-border-subtle)] bg-[var(--color-surface-base)] p-3">
+                <p className="text-sm text-[var(--color-content-primary)]">{word.example.en}</p>
+                <p className="mt-1 text-xs text-[var(--color-content-muted)]">{word.example.ja}</p>
+              </div>
             </div>
           </div>
 
