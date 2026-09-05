@@ -4,6 +4,7 @@ import {
   QUIZ_INPUT_MODES,
   QUIZ_SCOPES,
   VOCAB_DAYS,
+  WEAK_QUIZ_LIMIT,
   VOCAB_WORDS,
   buildQuiz,
   isVocabDayId,
@@ -75,6 +76,35 @@ const QUIZ_DIRECTION: QuizDirectionSetting = 'ja_to_en';
 const SCOPE_LABEL: Record<QuizScope, string> = {
   all: 'すべて',
   wrong: '間違えた問題だけ',
+  // 「苦手」 rather than 「よく間違える問題」: three tabs share one row on a
+  // 390px screen, and the two long labels beside each other wrapped every tab
+  // onto two lines. The line under the tabs says what it means.
+  weak: '苦手',
+};
+
+/** What each 出題範囲 actually selects, in one line, under the tabs. */
+const SCOPE_HINT: Record<QuizScope, string> = {
+  all: 'この Day の全問題です。',
+  wrong: '最後に解いたとき間違えた問題だけを出します。復習して正解すると外れます。',
+  weak: `間違えやすい問題から最大 ${WEAK_QUIZ_LIMIT}問。復習して正解しても消えず、少しずつ順番が下がります。`,
+};
+
+/**
+ * Why the chosen 出題範囲 selected nothing.
+ *
+ * A `Record<QuizScope, string>` rather than a condition per scope: a range that
+ * is empty and does not say why looks like a broken screen, and the range most
+ * likely to be empty is whichever one was added last. The mapped type makes a
+ * new scope answer this question rather than inherit somebody else's answer.
+ *
+ * 'all' cannot actually be empty -- every Day carries sixteen words -- but it
+ * needs a line here anyway, and an honest one: if it ever IS empty, the content
+ * is missing, not the reader's record.
+ */
+const SCOPE_EMPTY_REASON: Record<QuizScope, string> = {
+  all: 'この Day には問題がありません。',
+  wrong: 'この Day に間違えたままの問題はありません。',
+  weak: 'この Day にはまだ間違えた問題がありません。',
 };
 
 /**
@@ -356,11 +386,21 @@ function VocabView(): ReactElement {
                 items={QUIZ_SCOPES.map((value) => ({
                   value,
                   label: SCOPE_LABEL[value],
-                  // Disabled rather than hidden, and only when there is genuinely
-                  // nothing wrong: a control that vanishes leaves the reader
-                  // wondering where it went, and one that starts an empty quiz
-                  // is worse.
-                  disabled: value === 'wrong' && daySummary.wrong === 0,
+                  // Disabled rather than hidden, and only when the scope would
+                  // genuinely select nothing: a control that vanishes leaves the
+                  // reader wondering where it went, and one that starts an empty
+                  // quiz is worse.
+                  //
+                  // The two conditions are different questions and must stay
+                  // that way. 'wrong' empties as soon as everything has been
+                  // revised; 'weak' only empties on a Day where nothing has ever
+                  // been missed. Collapsing them to one check would grey out 苦手
+                  // for exactly the reader it exists for -- the one who revised
+                  // everything and still wants the phrases that keep catching
+                  // them out.
+                  disabled:
+                    (value === 'wrong' && daySummary.wrong === 0) ||
+                    (value === 'weak' && daySummary.weak === 0),
                 }))}
               />
             </div>
@@ -376,6 +416,26 @@ function VocabView(): ReactElement {
             )}
           </p>
 
+          {/* WHAT THE CHOSEN RANGE SELECTS, ALWAYS -- not only when something is
+              wrong. Three ranges that differ by which ANSWERS they look at
+              cannot be told apart from their names, and 「間違えた問題だけ」 and
+              「苦手」 are the pair a reader is most likely to assume are the same
+              thing. */}
+          <p className="text-[11px] text-[var(--color-content-muted)]">{SCOPE_HINT[scope]}</p>
+
+          {/* AND WHY IT SELECTED NOTHING, when it did.
+
+              A range can be empty while its tab is still selected -- the address
+              carries `?scope=`, and switching Day keeps it, so 「苦手」 chosen on
+              a studied Day survives a tap onto an untouched one. Before this the
+              screen showed 「0問」 and a disabled 「クイズを始める」 with no reason
+              anywhere on it. */}
+          {selected.length === 0 && (
+            <p className="text-[11px] text-[var(--color-content-muted)]">
+              {SCOPE_EMPTY_REASON[scope]}
+            </p>
+          )}
+
           {/* SAY WHY THE CONTROL IS GREYED OUT.
 
               A disabled tab explains nothing, and the reason is genuinely not
@@ -384,13 +444,21 @@ function VocabView(): ReactElement {
               「間違えた問題だけ」 selects on the MOST RECENT answer, so a word
               revised correctly leaves the set. Without this line the only other
               number in view was a percentage below 100, and the screen looked
-              broken. The note is only shown once the Day has actually been
-              answered; on an untouched Day the empty review set needs no
-              explanation. */}
+              broken.
+
+              「苦手」 is named separately because it is the answer to this note:
+              it keeps the words that were ever missed, so it is still available
+              when 「間違えた問題だけ」 has emptied. Pointing at it here is the
+              difference between "nothing to do" and "here is the thing to do".
+
+              Only once the Day has actually been answered; on an untouched Day
+              an empty review set needs no explanation. */}
           {daySummary.wrong === 0 && daySummary.answered > 0 && (
             <p className="text-[11px] text-[var(--color-content-muted)]">
               このDayに間違えたままの問題はありません（最後の解答がすべて正解）。
-              「間違えた問題だけ」は、次に間違えたときに選べるようになります。
+              {daySummary.weak > 0
+                ? '過去に間違えた問題を解き直すなら「苦手」を選んでください。'
+                : '「間違えた問題だけ」は、次に間違えたときに選べるようになります。'}
             </p>
           )}
 
