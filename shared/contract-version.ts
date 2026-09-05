@@ -56,8 +56,14 @@
 //          cannot render at all without getVocabProgress, and against an older
 //          revision it would 404 under a matching stamp -- reported as an
 //          ordinary failure of that screen rather than as the version skew it
-//          is. It also changes what a request MEANS: the ledger header is now
-//          ignored for three of the methods, and an older server would apply it.
+//          is.
+//
+//          (An earlier version of this note also claimed the ledger header's
+//          meaning had changed for an older server. It had not: a server that
+//          predates these methods 404s them, so there is no request for it to
+//          apply the header to, and no EXISTING method changed scope. Left here
+//          because a wrong precedent in this list is what the next person will
+//          reason from.)
 // ---------------------------------------------------------------------------
 
 export const CONTRACT_VERSION = 4;

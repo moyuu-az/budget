@@ -76,6 +76,24 @@ export interface VocabWord {
    * cross-references the book prints with ≒.
    */
   jaFull: string;
+  /**
+   * Other Japanese wordings that are the SAME answer.
+   *
+   * The book prints an alternation in brackets -- 「〜する準備［用意］ができている」
+   * means 準備 OR 用意 -- and a reader who types the second one is right.
+   *
+   * WHY THIS IS DATA AND NOT A RULE
+   *   An earlier version derived these by regex: find the bracket, replace the
+   *   text before it. Japanese is not spaced, so "the text before it" cannot be
+   *   read off the string, and the guess was wrong wherever the stem ended in
+   *   kana -- 「〜を見て回る［歩く］」 produced nothing usable, so 「〜を見て歩く」
+   *   was marked WRONG. Four entries were affected, and the failure was exactly
+   *   the one shared/vocabulary/grading.ts exists to prevent.
+   *
+   *   An integrity test requires this field on every entry whose `jaFull`
+   *   carries a bracket alternation, so a new one cannot arrive unnoticed.
+   */
+  jaAlt?: readonly string[];
   /** Why the phrase means what it means. Shown after answering. */
   note: string;
   /** The thing that actually catches people out. Shown after answering. */

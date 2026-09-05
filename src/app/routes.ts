@@ -153,7 +153,6 @@ export const matchView = (pathname: string): RouteMatch => {
  *  - analytics.period … the analysis span (AnalyticsPeriod)
  *  - analytics.month  … the month drilled into from a trend chart
  *  - vocab.day        … the Day section being studied
- *  - vocab.dir        … which way round questions are asked (QuizDirectionSetting)
  *  - vocab.scope      … 全部 or 間違えた問題だけ (QuizScope)
  *  - vocab.input      … 手入力 or 選択肢 で始めるか (QuizInputMode)
  *
@@ -170,7 +169,7 @@ export const SEARCH_PARAMS = {
   history: {},
   analytics: { period: 'period', month: 'month' },
   assets: {},
-  vocab: { day: 'day', dir: 'dir', scope: 'scope', input: 'input' },
+  vocab: { day: 'day', scope: 'scope', input: 'input' },
   settings: {},
 } as const satisfies Record<ViewType, Readonly<Record<string, string>>>;
 

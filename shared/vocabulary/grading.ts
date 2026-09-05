@@ -44,47 +44,25 @@ const BRACKETS: readonly [string, string][] = [
   ['［', '］'],
 ];
 
-// What a bracket REPLACES, guessed two ways.
-//
-// Japanese is not spaced, so "the preceding word" cannot be read off the string.
-// 「〜する準備［用意］ができている」 means 準備 or 用意 -- but the run of Japanese
-// before the bracket is 「する準備」, and replacing all of it gives
-// 「〜用意ができている」, which is not what anybody would type.
-//
-// So both readings are generated: the whole preceding run, and the preceding run
-// of the same SCRIPT as the replacement (kanji for 用意, giving 「する用意…」).
-// Over-generating is safe -- a variant nobody would type is simply never
-// matched, and the "generosity has a limit" test proves none of them collides
-// with another entry's answer.
-const PRECEDING_RUN = /[぀-ヿ一-龯]+$/;
-const PRECEDING_KANJI = /[一-龯]+$/;
-const PRECEDING_KANA = /[぀-ヿ]+$/;
-
-const isKanji = (ch: string): boolean => /[一-龯]/.test(ch);
-
-/** Every guess at "the text this bracket stands in for", most specific first. */
-function substitutions(before: string, inside: string): string[] {
-  const first = inside.charAt(0);
-  const sameScript = isKanji(first) ? PRECEDING_KANJI : PRECEDING_KANA;
-  return [before.replace(sameScript, ''), before.replace(PRECEDING_RUN, '')];
-}
-
 /**
- * Expands a gloss with brackets into every form a reader might type.
+ * Expands a gloss with brackets into the forms a reader might type.
  *
- * The book uses brackets two ways, and only the reader can tell which:
+ * TWO READINGS ONLY: with the group, and without it.
  *
- *   「〜する準備［用意］ができている」 -- 用意 REPLACES 準備, so both
- *                                        「〜する準備が…」 and 「〜する用意が…」
- *                                        are the same answer.
  *   「（買った商品）を（…に）返品する」 -- the parenthesis is a note, so the
  *                                          answer reads the same without it.
  *   「help A (to) do」                  -- `to` is optional in the phrase itself.
  *
- * So each group yields up to three readings -- dropped, kept, and substituted
- * for what precedes it -- and the caller accepts any of them. Over-accepting
- * here costs nothing: these are all things the reader would only type if they
- * knew the entry.
+ * IT DOES NOT TRY TO WORK OUT WHAT A BRACKET REPLACES. An earlier version did,
+ * by stripping the text before the bracket with a regex. Japanese is not spaced,
+ * so there is no such text to find: for 「〜を見て回る［歩く］」 it produced
+ * nothing a reader would write, and 「〜を見て歩く」 -- the correct alternative --
+ * was marked WRONG. It also over-reached in the other direction, collapsing
+ * 「〜する準備［用意］…」 and 「〜の準備［用意］…」 to the same string so that
+ * `be ready to do` and `be ready for` accepted each other's answer.
+ *
+ * The alternation is data now (`VocabWord.jaAlt`), which is the only place it
+ * can be correct. See shared/vocabulary/types.ts.
  */
 function expandBrackets(text: string): string[] {
   let forms = [text];
@@ -104,8 +82,6 @@ function expandBrackets(text: string): string[] {
 
       next.add(before + after); // dropped
       next.add(before + inside + after); // kept, delimiters gone
-      // Substituted: 「する準備［用意］」 -> 「する用意」 and 「用意」.
-      for (const stem of substitutions(before, inside)) next.add(stem + inside + after);
     }
     // Re-run until no group of this kind is left, so nested/repeated groups all
     // expand; bounded by MAX_VARIANTS so a malformed entry cannot loop forever.
@@ -127,11 +103,7 @@ function expandOnce(form: string, open: string, close: string): string[] {
   const before = form.slice(0, start);
   const inside = form.slice(start + open.length, end);
   const after = form.slice(end + close.length);
-  return [
-    before + after,
-    before + inside + after,
-    ...substitutions(before, inside).map((stem) => stem + inside + after),
-  ];
+  return [before + after, before + inside + after];
 }
 
 /**
@@ -144,14 +116,40 @@ function expandOnce(form: string, open: string, close: string): string[] {
  */
 function rawFormsFor(word: VocabWord, direction: QuizDirection): string[] {
   if (direction === 'ja_to_en') return [word.en];
-  return [
-    word.ja,
-    ...word.jaFull
-      .split(/[❶-❿➀-➓①-⑳❶❷❸❹❶❷❸❹]/u)
-      .flatMap((sense) => sense.split('、'))
-      .map((form) => form.trim())
-      .filter((form) => form.length > 0),
-  ];
+
+  const senses = word.jaFull.split(/[❶-❿➀-➓①-⑳]/u);
+  const forms: string[] = [word.ja, ...(word.jaAlt ?? [])];
+
+  for (const sense of senses) {
+    const segments = sense
+      .split('、')
+      .map((segment) => segment.trim())
+      .filter((segment) => segment.length > 0);
+    if (segments.length === 0) continue;
+
+    // THE PARTICLE AT THE FRONT BELONGS TO THE WHOLE SENSE, NOT TO THE FIRST
+    // VERB.
+    //
+    // 「〜を冷やす、冷ます」 is two readings of ONE frame: 「〜を冷やす」 and
+    // 「〜を冷ます」. Splitting on 、 and stopping there accepts 「冷ます」 but
+    // rejects 「〜を冷ます」 -- which is what a reader actually writes, and is
+    // correct. Same for 「〜の世話をする、面倒を見る」 and
+    // 「〜に飽きている、うんざりしている」.
+    //
+    // Unlike the bracket case this IS mechanical: the marker is literally 「〜」
+    // followed by particles at the very start of the sense, so there is nothing
+    // to guess about where it ends.
+    const lead = /^[〜～][をにのがへとでからより]+/u.exec(segments[0])?.[0] ?? '';
+
+    for (const [index, segment] of segments.entries()) {
+      forms.push(segment);
+      if (index > 0 && lead !== '' && !/^[〜～]/u.test(segment)) {
+        forms.push(lead + segment);
+      }
+    }
+  }
+
+  return forms;
 }
 
 /**

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import type { VocabAttemptInput } from '../../types';
 import {
-  QUIZ_DIRECTION_SETTINGS,
   QUIZ_INPUT_MODES,
   QUIZ_SCOPES,
   VOCAB_DAYS,
@@ -50,11 +49,28 @@ import { QuizRunner } from './QuizRunner';
 //   no business waiting on a quiz record to draw a balance.
 // ---------------------------------------------------------------------------
 
-const DIRECTION_LABEL: Record<QuizDirectionSetting, string> = {
-  both: '両方',
-  en_to_ja: '英語 → 日本語',
-  ja_to_en: '日本語 → 英語',
-};
+/**
+ * FOR NOW, EVERY QUESTION IS 日本語 → 英語.
+ *
+ * The contract, the stored record and the quiz builder all still handle both
+ * directions -- `vocab_attempts.direction` has them, `summarize` breaks results
+ * down by them, and `buildQuiz` will mix them on request. What is switched off
+ * is only the OFFER.
+ *
+ * WHY
+ *   The two directions are not equally well served. Asked 「come from」, the
+ *   answer is Japanese, and marking free text against a printed gloss means
+ *   deciding whether 「〜を冷ます」 counts when the book prints 「〜を冷やす、冷ます」,
+ *   or whether 「〜する用意ができている」 counts for 「〜する準備［用意］が…」.
+ *   Every one of those judgements can be wrong about a reader who knew the
+ *   answer, and a wrong one lands in 「間違えた問題だけ」 -- the list they trust
+ *   most. Asked 「〜に由来する」, the answer is `come from`, and there is nothing
+ *   to judge.
+ *
+ *   So the harder half is the one that ships. Turning the other back on is
+ *   restoring this constant to a control; nothing else has to change.
+ */
+const QUIZ_DIRECTION: QuizDirectionSetting = 'ja_to_en';
 
 const SCOPE_LABEL: Record<QuizScope, string> = {
   all: 'すべて',
@@ -89,6 +105,8 @@ function VocabView(): ReactElement {
   const fetchProgress = useVocabStore((s) => s.fetchProgress);
   const recordAttempts = useVocabStore((s) => s.recordAttempts);
   const resetProgress = useVocabStore((s) => s.resetProgress);
+  const pendingAttempts = useVocabStore((s) => s.pendingAttempts);
+  const retryPending = useVocabStore((s) => s.retryPending);
 
   // Fetched on first open rather than at start-up. `status === 'idle'` is the
   // "never asked" state, so this does not re-run after a failure -- LoadGate's
@@ -104,12 +122,7 @@ function VocabView(): ReactElement {
     fallback: VOCAB_DAYS[0].id,
     serialize: String,
   });
-  const [direction, setDirection] = useSearchParam<QuizDirectionSetting>({
-    name: SEARCH_PARAMS.vocab.dir,
-    parse: parseEnumParam(QUIZ_DIRECTION_SETTINGS),
-    fallback: 'both',
-    serialize: (value) => value,
-  });
+  const direction = QUIZ_DIRECTION;
   const [scope, setScope] = useSearchParam<QuizScope>({
     name: SEARCH_PARAMS.vocab.scope,
     parse: parseEnumParam(QUIZ_SCOPES),
@@ -139,7 +152,13 @@ function VocabView(): ReactElement {
     () => summarize(dayWords, progress, direction),
     [dayWords, progress, direction],
   );
-  const overall = useMemo(() => summarize(VOCAB_WORDS, progress, 'both'), [progress]);
+  // THE SAME DIRECTION AS THE DAY CARDS, not 'both'.
+  //
+  // Two figures on one screen computed over different scopes disagree in a way
+  // the reader cannot explain: the header said 「16語に解答」 while every Day
+  // card said 「未挑戦」, because the header counted answers in a direction the
+  // quiz no longer asks. One scope, one set of numbers.
+  const overall = useMemo(() => summarize(VOCAB_WORDS, progress, direction), [progress, direction]);
 
   const start = useCallback(
     (words: readonly (typeof VOCAB_WORDS)[number][]) => {
@@ -175,9 +194,8 @@ function VocabView(): ReactElement {
   );
 
   const retrySave = useCallback(() => {
-    if (!run?.attempts) return;
-    void finish(run.attempts);
-  }, [finish, run]);
+    void retryPending().then((saved) => setRun((current) => (current ? { ...current, saved } : current)));
+  }, [retryPending]);
 
   // --- Running a quiz -------------------------------------------------------
   if (run && run.attempts === null) {
@@ -254,6 +272,23 @@ function VocabView(): ReactElement {
           </div>
         </Card>
 
+        {/* Survives leaving the results screen -- which is the whole point of
+            holding the run in the store. Without this the reader is never told
+            again that answers went unrecorded. */}
+        {pendingAttempts !== null && (
+          <Card padding="md" className="mt-5 space-y-2 border-[var(--color-semantic-danger)]/40">
+            <p className="text-sm font-medium text-[var(--color-semantic-danger)]">
+              記録できていない解答が {pendingAttempts.length}問あります
+            </p>
+            <p className="text-xs text-[var(--color-content-secondary)]">
+              「間違えた問題だけ」にはまだ反映されていません。
+            </p>
+            <Button size="sm" variant="secondary" onClick={() => void retryPending()}>
+              もう一度記録する
+            </Button>
+          </Card>
+        )}
+
         <section aria-label="Day を選ぶ" className="mt-5">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {VOCAB_DAYS.map((day) => (
@@ -270,19 +305,6 @@ function VocabView(): ReactElement {
 
         <Card padding="md" className="mt-5 space-y-4">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-            <div>
-              <p className="mb-1 text-[11px] text-[var(--color-content-muted)]">出題の向き</p>
-              <Tabs
-                ariaLabel="出題の向き"
-                size="sm"
-                value={direction}
-                onChange={setDirection}
-                items={QUIZ_DIRECTION_SETTINGS.map((value) => ({
-                  value,
-                  label: DIRECTION_LABEL[value],
-                }))}
-              />
-            </div>
             <div>
               <p className="mb-1 text-[11px] text-[var(--color-content-muted)]">解答方法</p>
               <Tabs
@@ -317,7 +339,8 @@ function VocabView(): ReactElement {
           </div>
 
           <p className="text-xs text-[var(--color-content-secondary)]">
-            Day {dayId}・{SCOPE_LABEL[scope]}・{INPUT_MODE_LABEL[inputMode]}・{selected.length}問
+            日本語 → 英語・Day {dayId}・{SCOPE_LABEL[scope]}・{INPUT_MODE_LABEL[inputMode]}・
+            {selected.length}問
             {scope === 'wrong' && daySummary.wrong === 0 && (
               <span className="ml-1 text-[var(--color-semantic-success)]">
                 （間違えた問題はありません）

@@ -70,7 +70,7 @@ export function QuizResult({
           </p>
           <p className="text-xs text-[var(--color-content-secondary)]">
             通信に失敗した可能性があります。記録されていないため、「間違えた問題だけ」には
-            反映されていません。
+            反映されていません。この画面を離れても解答は保持され、Day の一覧から再送できます。
           </p>
           <Button size="sm" variant="secondary" onClick={onRetrySave}>
             もう一度記録する
