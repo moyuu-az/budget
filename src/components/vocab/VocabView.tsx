@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactElement } from 're
 import type { VocabAttemptInput } from '../../types';
 import {
   QUIZ_DIRECTION_SETTINGS,
+  QUIZ_INPUT_MODES,
   QUIZ_SCOPES,
   VOCAB_DAYS,
   VOCAB_WORDS,
@@ -11,6 +12,7 @@ import {
   summarize,
   wordsForDay,
   type QuizDirectionSetting,
+  type QuizInputMode,
   type QuizQuestion,
   type QuizScope,
 } from '../../../shared/vocabulary';
@@ -58,6 +60,19 @@ const SCOPE_LABEL: Record<QuizScope, string> = {
   wrong: '間違えた問題だけ',
 };
 
+/**
+ * How a question OPENS. The reader can always fall back to the choices on any
+ * single question without changing this.
+ *
+ * 手入力 is the default because it is the mode that actually tests whether the
+ * phrase can be produced rather than recognised -- and because the fallback is
+ * one click away, defaulting to the harder mode costs nothing.
+ */
+const INPUT_MODE_LABEL: Record<QuizInputMode, string> = {
+  typed: '手入力',
+  choice: '選択肢',
+};
+
 interface Run {
   questions: QuizQuestion[];
   /** Set once the run is finished; null while it is still being answered. */
@@ -98,6 +113,13 @@ function VocabView(): ReactElement {
     name: SEARCH_PARAMS.vocab.scope,
     parse: parseEnumParam(QUIZ_SCOPES),
     fallback: 'all',
+    serialize: (value) => value,
+  });
+
+  const [inputMode, setInputMode] = useSearchParam<QuizInputMode>({
+    name: SEARCH_PARAMS.vocab.input,
+    parse: parseEnumParam(QUIZ_INPUT_MODES),
+    fallback: 'typed',
     serialize: (value) => value,
   });
 
@@ -157,6 +179,7 @@ function VocabView(): ReactElement {
     return (
       <QuizRunner
         questions={run.questions}
+        defaultInputMode={inputMode}
         onFinish={(attempts) => void finish(attempts)}
         onAbort={() => setRun(null)}
       />
@@ -256,6 +279,19 @@ function VocabView(): ReactElement {
               />
             </div>
             <div>
+              <p className="mb-1 text-[11px] text-[var(--color-content-muted)]">解答方法</p>
+              <Tabs
+                ariaLabel="解答方法"
+                size="sm"
+                value={inputMode}
+                onChange={setInputMode}
+                items={QUIZ_INPUT_MODES.map((value) => ({
+                  value,
+                  label: INPUT_MODE_LABEL[value],
+                }))}
+              />
+            </div>
+            <div>
               <p className="mb-1 text-[11px] text-[var(--color-content-muted)]">出題範囲</p>
               <Tabs
                 ariaLabel="出題範囲"
@@ -276,7 +312,7 @@ function VocabView(): ReactElement {
           </div>
 
           <p className="text-xs text-[var(--color-content-secondary)]">
-            Day {dayId}・{SCOPE_LABEL[scope]}・{selected.length}問
+            Day {dayId}・{SCOPE_LABEL[scope]}・{INPUT_MODE_LABEL[inputMode]}・{selected.length}問
             {scope === 'wrong' && daySummary.wrong === 0 && (
               <span className="ml-1 text-[var(--color-semantic-success)]">
                 （間違えた問題はありません）

@@ -9,6 +9,7 @@ export type { QuizDirection, VocabDay, VocabWord } from './types';
 export * from './quiz';
 export * from './stats';
 export * from './progress';
+export * from './grading';
 
 // ---------------------------------------------------------------------------
 // The lookups every consumer needs, built once.

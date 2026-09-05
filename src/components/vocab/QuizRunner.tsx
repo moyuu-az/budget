@@ -1,56 +1,117 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import type { VocabAttemptInput } from '../../types';
-import { wordById, type QuizQuestion } from '../../../shared/vocabulary';
+import {
+  canonicalAnswer,
+  isAcceptedAnswer,
+  wordById,
+  type QuizInputMode,
+  type QuizQuestion,
+} from '../../../shared/vocabulary';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { cn } from '../../lib/cn';
 
 interface Props {
   questions: readonly QuizQuestion[];
+  /**
+   * How each question opens: typing, or the choice list.
+   *
+   * Per QUESTION, not per session -- whichever way a question starts, the reader
+   * can always fall back to the choices for that one without changing the
+   * setting for the rest.
+   */
+  defaultInputMode: QuizInputMode;
   /** Called once, with the whole run, when the last question is answered. */
   onFinish: (attempts: VocabAttemptInput[]) => void;
   onAbort: () => void;
 }
 
 // ---------------------------------------------------------------------------
-// ONE QUESTION AT A TIME, AND THE ANSWER IS NEVER TAKEN BACK.
+// TYPING FIRST, WITH THE CHOICES ONE CLICK AWAY.
 //
-// Choosing reveals the outcome and the explanation, and the choice is then
-// locked. That is the whole design decision in this component:
+// Recognising 「〜に由来する」 among four options and producing `come from` from
+// nothing are different skills, and only the second is what you need in order to
+// use the phrase. So a question opens as an empty box.
 //
-//   An answer that can be changed after the correct one is shown records what
-//   the reader could SEE, not what they KNEW -- and 「間違えた問題だけ」 is built
-//   entirely on that record. A quiz you can undo produces a review list that
-//   quietly empties itself.
+// It does NOT open as an empty box you are stuck in. 「選択肢で答える」 turns the
+// question into the four-option form at any point before answering, because the
+// alternative -- a reader who cannot retrieve the phrase, staring at a blank
+// field -- teaches nothing at all. Falling back is a normal move, not a
+// failure, so nothing about it is discouraged or recorded.
 //
-// THE RUN IS SUBMITTED ONCE, AT THE END. Per-answer requests would make the
-// record depend on the connection holding for all sixteen; a walk into a lift
-// would lose the middle of a session, and the reader would never be told which
-// part.
+// WHY THE FALLBACK IS NOT RECORDED
+//   It is tempting to mark a choice-answered question as "easier" in the study
+//   record. That would mean the stored history depends on how the reader felt
+//   about a question rather than on whether they knew it, and 「間違えた問題だけ」
+//   -- the list built on that history -- would quietly change meaning. What is
+//   recorded is what has always been recorded: right or wrong.
+//
+// AN ANSWER IS NEVER TAKEN BACK.
+//   Once given, the choice is locked and the explanation appears. An answer that
+//   can be changed after the correct one is shown records what the reader could
+//   SEE, not what they knew.
 // ---------------------------------------------------------------------------
 
 /** The number keys, so a desktop reader never has to reach for the mouse. */
 const CHOICE_KEYS = ['1', '2', '3', '4', '5', '6'] as const;
 
-export function QuizRunner({ questions, onFinish, onAbort }: Props): ReactElement {
+/** What the reader gave, and how. `correct` is decided once, at the moment of answering. */
+type Given =
+  | { via: 'choice'; wordId: string; correct: boolean }
+  | { via: 'typed'; text: string; correct: boolean };
+
+export function QuizRunner({
+  questions,
+  defaultInputMode,
+  onFinish,
+  onAbort,
+}: Props): ReactElement {
   const [index, setIndex] = useState(0);
-  const [picked, setPicked] = useState<string | null>(null);
+  const [given, setGiven] = useState<Given | null>(null);
   const [attempts, setAttempts] = useState<VocabAttemptInput[]>([]);
+  const [mode, setMode] = useState<QuizInputMode>(defaultInputMode);
+  const [typed, setTyped] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const question = questions[index];
   const word = wordById(question.wordId);
   const isLast = index === questions.length - 1;
 
-  const choose = useCallback(
+  // Focus the box on every new question, so a reader working through a Day never
+  // has to click before typing.
+  useEffect(() => {
+    if (given === null && mode === 'typed') inputRef.current?.focus();
+  }, [given, index, mode]);
+
+  const answerWithChoice = useCallback(
     (choiceWordId: string) => {
-      // Locked after the first choice; see the header.
-      setPicked((current) => current ?? choiceWordId);
+      setGiven(
+        (current) =>
+          current ?? {
+            via: 'choice',
+            wordId: choiceWordId,
+            correct: choiceWordId === question.answerWordId,
+          },
+      );
     },
-    [],
+    [question.answerWordId],
   );
 
+  const answerWithText = useCallback(() => {
+    if (word === undefined) return;
+    const text = typed.trim();
+    // An empty box is not an answer. Submitting it would record a wrong answer
+    // the reader never gave, and put the word into 「間違えた問題だけ」 for it.
+    if (text.length === 0) return;
+    setGiven((current) => current ?? {
+      via: 'typed',
+      text,
+      correct: isAcceptedAnswer(text, word, question.direction),
+    });
+  }, [question.direction, typed, word]);
+
   const advance = useCallback(() => {
-    if (picked === null) return;
+    if (given === null) return;
 
     const next: VocabAttemptInput[] = [
       ...attempts,
@@ -60,7 +121,7 @@ export function QuizRunner({ questions, onFinish, onAbort }: Props): ReactElemen
         // that recorded the setting would make every answer count towards one
         // direction and the breakdown would be fiction.
         direction: question.direction,
-        correct: picked === question.answerWordId,
+        correct: given.correct,
       },
     ];
 
@@ -69,24 +130,29 @@ export function QuizRunner({ questions, onFinish, onAbort }: Props): ReactElemen
       return;
     }
     setAttempts(next);
-    setPicked(null);
+    setGiven(null);
+    setTyped('');
+    // Back to whatever the reader chose for the session. Falling back to the
+    // choices on one hard question must not silently turn the rest of the run
+    // into multiple choice.
+    setMode(defaultInputMode);
     setIndex((i) => i + 1);
-  }, [attempts, isLast, onFinish, picked, question]);
+  }, [attempts, defaultInputMode, given, isLast, onFinish, question]);
 
-  // Number keys pick, Enter/Space moves on. Bound while this screen is mounted
-  // only, and it stands aside for a modified press so the browser's own
-  // shortcuts still work.
+  // Keyboard. Bound while this screen is mounted only, and it stands aside for a
+  // modified press so the browser's own shortcuts still work.
   useEffect(() => {
     const handler = (event: KeyboardEvent): void => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
 
-      if (picked === null) {
-        // Digits are safe to handle wherever focus is: a focused <button> does
-        // nothing with '1', so there is no native behaviour to collide with.
+      if (given === null) {
+        // While typing, the only key this owns is Enter -- the digits belong to
+        // the text box.
+        if (mode === 'typed') return;
         const slot = CHOICE_KEYS.indexOf(event.key as (typeof CHOICE_KEYS)[number]);
         if (slot >= 0 && slot < question.choices.length) {
           event.preventDefault();
-          choose(question.choices[slot].wordId);
+          answerWithChoice(question.choices[slot].wordId);
         }
         return;
       }
@@ -94,11 +160,10 @@ export function QuizRunner({ questions, onFinish, onAbort }: Props): ReactElemen
       if (event.key === 'Enter' || event.key === ' ') {
         // preventDefault() before advance(), not after.
         //
-        // Space scrolls the page, and Enter or Space on a focused button is
-        // also a click -- so when 次へ has focus this listener and that click
-        // are the same keypress. Cancelling the default action is what keeps
-        // them from both running. (Verified: with it, one press advances once;
-        // it is not decoration.)
+        // Space scrolls the page, and Enter or Space on a focused button is also
+        // a click -- so when 次へ has focus this listener and that click are the
+        // same keypress. Cancelling the default action is what keeps them from
+        // both running.
         event.preventDefault();
         advance();
       }
@@ -106,10 +171,10 @@ export function QuizRunner({ questions, onFinish, onAbort }: Props): ReactElemen
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [advance, choose, picked, question.choices]);
+  }, [advance, answerWithChoice, given, mode, question.choices]);
 
   const correctSoFar = useMemo(() => attempts.filter((a) => a.correct).length, [attempts]);
-  const answeredCorrectly = picked === question.answerWordId;
+  const answeredCorrectly = given?.correct === true;
 
   return (
     <div className="space-y-4">
@@ -135,7 +200,7 @@ export function QuizRunner({ questions, onFinish, onAbort }: Props): ReactElemen
       >
         <div
           className="h-full bg-[var(--color-accent-primary)] transition-[width] duration-300"
-          style={{ width: `${((index + (picked ? 1 : 0)) / questions.length) * 100}%` }}
+          style={{ width: `${((index + (given ? 1 : 0)) / questions.length) * 100}%` }}
         />
       </div>
 
@@ -155,44 +220,94 @@ export function QuizRunner({ questions, onFinish, onAbort }: Props): ReactElemen
         </p>
       </Card>
 
-      <ul className="space-y-2">
-        {question.choices.map((choice, slot) => {
-          const isAnswer = choice.wordId === question.answerWordId;
-          const isPicked = choice.wordId === picked;
-          const revealed = picked !== null;
+      {/* --- Answering by typing --------------------------------------------- */}
+      {given === null && mode === 'typed' && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            answerWithText();
+          }}
+          className="space-y-2"
+        >
+          <label htmlFor="vocab-answer" className="sr-only">
+            答えを入力
+          </label>
+          <input
+            id="vocab-answer"
+            ref={inputRef}
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            // Off on all four: a study field that autocompletes the answer, or
+            // capitalises and "corrects" it, is grading the phone rather than
+            // the reader.
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            placeholder={question.direction === 'en_to_ja' ? '意味を入力' : '英語を入力'}
+            className={cn(
+              'w-full rounded-[var(--radius-md)] border border-[var(--color-border-subtle)]',
+              'bg-[var(--color-surface-raised)] px-4 py-3 text-base',
+              'text-[var(--color-content-primary)] placeholder:text-[var(--color-content-muted)]',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]',
+            )}
+          />
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button type="submit" className="flex-1" disabled={typed.trim().length === 0}>
+              答え合わせ
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setMode('choice')}>
+              選択肢で答える
+            </Button>
+          </div>
+          <p className="text-[11px] text-[var(--color-content-muted)]">
+            〜・記号・前後の空白は無視されます。書籍の別の意味や同義語でも正解になります。
+          </p>
+        </form>
+      )}
 
-          return (
-            <li key={choice.wordId}>
-              <button
-                type="button"
-                disabled={revealed}
-                onClick={() => choose(choice.wordId)}
-                className={cn(
-                  'flex w-full items-center gap-3 rounded-[var(--radius-md)] border px-4 py-3 text-left',
-                  'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]',
-                  // Once revealed, the CORRECT option is marked whether or not it
-                  // was the one chosen. A reader who guessed wrong has to be able
-                  // to see the right answer without hunting for it.
-                  revealed && isAnswer && 'border-[var(--color-semantic-success)] bg-[var(--color-semantic-success)]/10',
-                  revealed && isPicked && !isAnswer && 'border-[var(--color-semantic-danger)] bg-[var(--color-semantic-danger)]/10',
-                  revealed && !isAnswer && !isPicked && 'border-[var(--color-border-subtle)] opacity-60',
-                  !revealed && 'border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] hover:border-[var(--color-border-strong)]',
-                )}
-              >
-                <span
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-border-subtle)] text-[11px] text-[var(--color-content-muted)]"
-                  aria-hidden
+      {/* --- Answering by choosing, and the revealed list --------------------- */}
+      {(mode === 'choice' || given !== null) && (
+        <ul className="space-y-2">
+          {question.choices.map((choice, slot) => {
+            const isAnswer = choice.wordId === question.answerWordId;
+            const isPicked = given?.via === 'choice' && given.wordId === choice.wordId;
+            const revealed = given !== null;
+
+            return (
+              <li key={choice.wordId}>
+                <button
+                  type="button"
+                  disabled={revealed}
+                  onClick={() => answerWithChoice(choice.wordId)}
+                  className={cn(
+                    'flex w-full items-center gap-3 rounded-[var(--radius-md)] border px-4 py-3 text-left',
+                    'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]',
+                    // Once revealed, the CORRECT option is marked whether or not
+                    // it was the one chosen -- and whether or not the reader used
+                    // the list at all. Someone who typed a wrong answer still has
+                    // to be able to see the right one here.
+                    revealed && isAnswer && 'border-[var(--color-semantic-success)] bg-[var(--color-semantic-success)]/10',
+                    revealed && isPicked && !isAnswer && 'border-[var(--color-semantic-danger)] bg-[var(--color-semantic-danger)]/10',
+                    revealed && !isAnswer && !isPicked && 'border-[var(--color-border-subtle)] opacity-60',
+                    !revealed && 'border-[var(--color-border-subtle)] bg-[var(--color-surface-raised)] hover:border-[var(--color-border-strong)]',
+                  )}
                 >
-                  {CHOICE_KEYS[slot] ?? slot + 1}
-                </span>
-                <span className="text-sm text-[var(--color-content-primary)]">{choice.text}</span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+                  <span
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-border-subtle)] text-[11px] text-[var(--color-content-muted)]"
+                    aria-hidden
+                  >
+                    {CHOICE_KEYS[slot] ?? slot + 1}
+                  </span>
+                  <span className="text-sm text-[var(--color-content-primary)]">{choice.text}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
 
-      {picked !== null && word && (
+      {given !== null && word && (
         <Card padding="lg" className="space-y-3">
           <p
             className={cn(
@@ -205,6 +320,22 @@ export function QuizRunner({ questions, onFinish, onAbort }: Props): ReactElemen
           >
             {answeredCorrectly ? '正解' : '不正解'}
           </p>
+
+          {/* What they wrote, echoed back. Without it a reader who mistyped
+              cannot tell whether they had the phrase wrong or the spelling. */}
+          {given.via === 'typed' && (
+            <p className="text-xs text-[var(--color-content-muted)]">
+              あなたの解答: <span className="text-[var(--color-content-secondary)]">{given.text}</span>
+              {!answeredCorrectly && (
+                <>
+                  {' '}／ 正解:{' '}
+                  <span className="text-[var(--color-content-secondary)]">
+                    {canonicalAnswer(word, question.direction)}
+                  </span>
+                </>
+              )}
+            </p>
+          )}
 
           <div>
             <p className="text-lg font-semibold text-[var(--color-content-primary)]">{word.en}</p>

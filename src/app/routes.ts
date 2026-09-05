@@ -127,6 +127,7 @@ export const matchView = (pathname: string): RouteMatch => {
  *  - vocab.day        … the Day section being studied
  *  - vocab.dir        … which way round questions are asked (QuizDirectionSetting)
  *  - vocab.scope      … 全部 or 間違えた問題だけ (QuizScope)
+ *  - vocab.input      … 手入力 or 選択肢 で始めるか (QuizInputMode)
  *
  * 英単語 puts its three SETTINGS in the query and its PROGRESS nowhere. Which
  * Day, which direction, which scope answer "what is on screen" and are worth
@@ -141,7 +142,7 @@ export const SEARCH_PARAMS = {
   history: {},
   analytics: { period: 'period', month: 'month' },
   assets: {},
-  vocab: { day: 'day', dir: 'dir', scope: 'scope' },
+  vocab: { day: 'day', dir: 'dir', scope: 'scope', input: 'input' },
   settings: {},
 } as const satisfies Record<ViewType, Readonly<Record<string, string>>>;
 
