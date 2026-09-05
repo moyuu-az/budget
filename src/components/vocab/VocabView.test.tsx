@@ -194,6 +194,49 @@ describe('クイズを解く', () => {
     ]);
   });
 
+  it('advances once when Enter is pressed on the focused 次へ button', async () => {
+    // A <button> turns Enter into a click, and a window-level handler that also
+    // acts on Enter makes one keypress advance twice. On the last question that
+    // submits the whole run to the server a SECOND time, doubling every attempt
+    // in the study record -- with nothing on screen to show it.
+    const user = userEvent.setup();
+    vi.mocked(api.recordVocabAttempts).mockResolvedValue([]);
+    const word = await startSingleQuestion(user);
+
+    await user.click(await screen.findByRole('button', { name: word.ja }));
+    const next = await screen.findByRole('button', { name: '結果を見る' });
+    next.focus();
+    await user.keyboard('{Enter}');
+
+    expect(api.recordVocabAttempts).toHaveBeenCalledTimes(1);
+  });
+
+  it('advances from the keyboard when nothing is focused', async () => {
+    // The shortcut still has to work -- the guard above must not disable it for
+    // a reader who never touches the mouse.
+    const user = userEvent.setup();
+    vi.mocked(api.recordVocabAttempts).mockResolvedValue([]);
+    const word = await startSingleQuestion(user);
+
+    await user.click(await screen.findByRole('button', { name: word.ja }));
+    (document.activeElement as HTMLElement | null)?.blur();
+    await user.keyboard('{Enter}');
+
+    expect(api.recordVocabAttempts).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('結果')).toBeInTheDocument();
+  });
+
+  it('picks a choice with the number keys', async () => {
+    const user = userEvent.setup();
+    const word = await startSingleQuestion(user);
+
+    const choices = screen.getAllByRole('listitem').map((li) => within(li).getByRole('button'));
+    const slot = choices.findIndex((b) => b.textContent?.includes(word.ja));
+    await user.keyboard(String(slot + 1));
+
+    expect(await screen.findByText('正解')).toBeInTheDocument();
+  });
+
   it('says so when the run could not be recorded', async () => {
     const user = userEvent.setup();
     vi.mocked(api.recordVocabAttempts).mockRejectedValue(new Error('offline'));

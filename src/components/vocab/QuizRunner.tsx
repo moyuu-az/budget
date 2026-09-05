@@ -81,6 +81,8 @@ export function QuizRunner({ questions, onFinish, onAbort }: Props): ReactElemen
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
 
       if (picked === null) {
+        // Digits are safe to handle wherever focus is: a focused <button> does
+        // nothing with '1', so there is no native behaviour to collide with.
         const slot = CHOICE_KEYS.indexOf(event.key as (typeof CHOICE_KEYS)[number]);
         if (slot >= 0 && slot < question.choices.length) {
           event.preventDefault();
@@ -90,6 +92,13 @@ export function QuizRunner({ questions, onFinish, onAbort }: Props): ReactElemen
       }
 
       if (event.key === 'Enter' || event.key === ' ') {
+        // preventDefault() before advance(), not after.
+        //
+        // Space scrolls the page, and Enter or Space on a focused button is
+        // also a click -- so when 次へ has focus this listener and that click
+        // are the same keypress. Cancelling the default action is what keeps
+        // them from both running. (Verified: with it, one press advances once;
+        // it is not decoration.)
         event.preventDefault();
         advance();
       }
