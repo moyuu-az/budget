@@ -155,7 +155,13 @@ const ORDER_LABEL: Record<QuizOrder, string> = {
  */
 const ORDER_HINT: Record<QuizOrder, string> = {
   random: '毎回ちがう順番で出します。順番ごと覚えてしまわないので、ふだんはこちらです。',
-  number: '本の No. 順に出します。本を開きながら進めるとき用です。',
+  // THE COST STAYS ON THIS LINE, and shortening it away was a mistake worth
+  // recording. `<p>{ORDER_HINT[order]}</p>` renders exactly one of these, so the
+  // two were never duplicated for a READER -- only in the source. Deleting the
+  // shared sentence from this branch does not remove a repetition, it removes
+  // the warning from the only branch that needs it: the reader who leaves No.順
+  // on is the one who ends up learning the sequence.
+  number: '本の No. 順に出します。本を開きながら進めるとき用です。同じ順番で繰り返すと順番ごと覚えてしまいます。',
 };
 
 interface Run {

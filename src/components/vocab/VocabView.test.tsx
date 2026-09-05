@@ -429,9 +429,13 @@ describe('英単語 の設定', () => {
     const orders = screen.getByRole('tablist', { name: '出題順' });
     await user.click(within(orders).getByRole('tab', { name: 'No.順' }));
 
+    // Both halves: what No.順 IS, and what it costs. The cost is the half a
+    // reader cannot work out on their own, and it lives only on this branch --
+    // one hint element renders at a time, so leaving it off No.順 would put the
+    // warning exclusively in front of the reader who does not need it.
     expect(await screen.findByText(/本の No\. 順に出します/)).toBeInTheDocument();
-    // And the ランダム line is gone -- the two are one element, not two stacked
-    // ones, so a reader is never told both things at once.
+    expect(screen.getByText(/順番ごと覚えてしまいます/)).toBeInTheDocument();
+    // And only one line shows -- these are one element, not two stacked ones.
     expect(screen.queryByText(/毎回ちがう順番で出します/)).not.toBeInTheDocument();
   });
 
