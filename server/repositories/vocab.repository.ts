@@ -5,17 +5,34 @@ import { QUIZ_DIRECTIONS, type QuizDirection } from '../../shared/vocabulary/typ
 // ---------------------------------------------------------------------------
 // The study record.
 //
-// LIKE EVERY OTHER REPOSITORY HERE, THE READS CARRY NO TENANT PREDICATE.
+// READS CARRY NO TENANT PREDICATE. DELETES DO. The asymmetry is deliberate, and
+// it is about what happens when the policy is NOT there.
 //
-// There is no `WHERE user_id = $1` below, and that is deliberate for exactly the
-// reason set out in repositories/index.ts: the predicate belongs to the
-// row-level security policy (migration 006), and writing it out again here would
-// mean the policy is never exercised -- every query would pass whether or not it
-// was doing anything, and the day someone disables it nothing would fail until
-// one person's answers showed up in the other's accuracy.
+// THE READS
+//   No `WHERE user_id = $1`, for the reason set out in repositories/index.ts:
+//   the predicate belongs to the row-level security policy (migration 006), and
+//   writing it out again here would mean the policy is never exercised -- every
+//   query would pass whether or not it was doing anything. And if the policy
+//   were missing, an unqualified SELECT fails CLOSED-ish: the worst outcome is a
+//   wrong figure on a screen, recoverable by fixing the policy.
 //
-// INSERTs are different: `user_id` is NOT NULL, so a value has to be supplied.
-// It comes from the same `userId` that stamped the transaction (see
+// THE DELETES
+//   `DELETE FROM vocab_attempts` with no predicate is a different kind of
+//   statement. If the policy is missing -- a restore from a database that
+//   predates 006, an operator who ran DISABLE ROW LEVEL SECURITY during an
+//   incident -- then one person pressing 「記録を消す」 erases EVERY person's
+//   study record, with nothing to restore it from. The start-up guard does not
+//   save us either: server/db/assert-isolation.ts checks the connecting role's
+//   attributes, not whether the tables actually carry policies.
+//
+//   So the deletes name the user explicitly. This does not weaken the policy --
+//   it is still what the reads depend on, and server/db/schema.test.ts proves it
+//   works with raw SQL, independently of anything this file does. It only means
+//   the one statement whose failure is unrecoverable does not rely on a single
+//   layer.
+//
+// INSERTs are different again: `user_id` is NOT NULL, so a value has to be
+// supplied. It comes from the same `userId` that stamped the transaction (see
 // withUserRepositories), so the two cannot disagree, and the policy's WITH CHECK
 // rejects the row if they somehow did.
 // ---------------------------------------------------------------------------
@@ -32,9 +49,11 @@ export interface VocabRepository {
 interface ProgressRow {
   word_id: string;
   direction: string;
-  /** COUNT() is BIGINT, which node-postgres hands back as a string. */
-  attempts: string;
-  correct: string;
+  // COUNT() is BIGINT. node-postgres would hand that back as a STRING, but
+  // server/db/pool.ts registers a process-wide INT8 parser that converts it, so
+  // these arrive as numbers like every other count in this codebase.
+  attempts: number;
+  correct: number;
   last_correct: boolean;
   /**
    * ALREADY AN ISO STRING, not a Date.
@@ -59,9 +78,6 @@ interface ProgressRow {
  * the client sent (which is the order the questions were answered), so this
  * ordering is total and picks the answer the reader actually gave last.
  *
- * COUNT(*) and friends come back as strings from node-postgres (BIGINT does not
- * fit a JS number in general), so every count is parsed below rather than being
- * shipped as a string that the client would happily concatenate.
  */
 const PROGRESS_SQL = `
   SELECT word_id,
@@ -103,8 +119,8 @@ function rowsToProgress(rows: readonly ProgressRow[]): VocabProgress {
     }
 
     stat.byDirection[row.direction] = {
-      attempts: Number(row.attempts),
-      correct: Number(row.correct),
+      attempts: row.attempts,
+      correct: row.correct,
       lastCorrect: row.last_correct,
       lastAnsweredAt: row.last_answered_at,
     };
@@ -162,14 +178,20 @@ export function createVocabRepository(client: PoolClient, userId: number): Vocab
      * An EMPTY list deletes nothing, and that is the correct reading: "reset the
      * words of a Day that has none" is a no-op, not "reset everything". Getting
      * this backwards would wipe a whole study record from a mis-typed `?day=`.
+     *
+     * BOTH STATEMENTS NAME THE USER, unlike the reads above. See the header: a
+     * delete that loses its tenant predicate is unrecoverable, and the policy is
+     * one incident-response `DISABLE ROW LEVEL SECURITY` away from not being
+     * there.
      */
     async reset(wordIds) {
       if (wordIds === null) {
-        await client.query('DELETE FROM vocab_attempts');
+        await client.query('DELETE FROM vocab_attempts WHERE user_id = $1', [userId]);
       } else if (wordIds.length > 0) {
-        await client.query('DELETE FROM vocab_attempts WHERE word_id = ANY($1::text[])', [
-          wordIds,
-        ]);
+        await client.query(
+          'DELETE FROM vocab_attempts WHERE user_id = $1 AND word_id = ANY($2::text[])',
+          [userId, wordIds],
+        );
       }
       return progress();
     },

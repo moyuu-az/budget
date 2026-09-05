@@ -21,6 +21,7 @@ import { reportError } from '../../app/reportError';
 import { useSearchParam } from '../../hooks/useRoute';
 import { useVocabStore } from '../../stores/useVocabStore';
 import { Button } from '../ui/Button';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { Card } from '../ui/Card';
 import { LoadGate } from '../ui/LoadGate';
 import { Tabs } from '../ui/Tabs';
@@ -124,6 +125,10 @@ function VocabView(): ReactElement {
   });
 
   const [run, setRun] = useState<Run | null>(null);
+  // 「記録を消す」 asks first. It is one click, it cannot be undone, and what it
+  // destroys is the input to 「間違えた問題だけ」 -- a reader who wipes a Day by
+  // accident has no way to tell which words they still had wrong.
+  const [confirmingReset, setConfirmingReset] = useState(false);
 
   const dayWords = useMemo(() => wordsForDay(dayId), [dayId]);
   const selected = useMemo(
@@ -331,15 +336,26 @@ function VocabView(): ReactElement {
             <Button
               variant="ghost"
               disabled={daySummary.answered === 0}
-              onClick={() => {
-                void resetProgress(dayId);
-              }}
+              onClick={() => setConfirmingReset(true)}
             >
               Day {dayId} の記録を消す
             </Button>
           </div>
         </Card>
       </LoadGate>
+
+      <ConfirmDialog
+        open={confirmingReset}
+        destructive
+        title={`Day ${dayId} の記録を消しますか`}
+        description={`この Day の解答 ${daySummary.attempts}回分が消えます。要復習の ${daySummary.wrong}語も未挑戦に戻り、元には戻せません。`}
+        confirmLabel="消す"
+        onConfirm={() => {
+          setConfirmingReset(false);
+          void resetProgress(dayId);
+        }}
+        onCancel={() => setConfirmingReset(false)}
+      />
     </div>
   );
 }

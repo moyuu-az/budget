@@ -468,7 +468,24 @@ describe('学習記録', () => {
       useVocabStore.setState({ progress: [at('et-481', true)], status: 'ready' });
     });
     await user.click(await screen.findByRole('button', { name: /Day 31 の記録を消す/ }));
+
+    // Asks first. One click, no undo, and what it destroys is the input to
+    // 「間違えた問題だけ」.
+    expect(api.resetVocabProgress).not.toHaveBeenCalled();
+    await user.click(await screen.findByRole('button', { name: '消す' }));
     expect(api.resetVocabProgress).toHaveBeenCalledWith(31);
+  });
+
+  it('does nothing when the confirmation is dismissed', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.resetVocabProgress).mockResolvedValue([]);
+    useVocabStore.setState({ progress: [at('et-481', true)], status: 'ready' });
+
+    render(<VocabView />);
+    await user.click(await screen.findByRole('button', { name: /Day 31 の記録を消す/ }));
+    await user.click(await screen.findByRole('button', { name: 'キャンセル' }));
+
+    expect(api.resetVocabProgress).not.toHaveBeenCalled();
   });
 
   it('shows the failure instead of an empty record when the load fails', async () => {

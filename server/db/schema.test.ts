@@ -818,6 +818,31 @@ describe('user-level row security', () => {
     }
   });
 
+  it('leaves the exempted auth table exempt on purpose, not by omission', async () => {
+    // WITHOUT THIS, THE MAP ABOVE IS A COMMENT AND NOTHING ELSE.
+    //
+    // Its doc-comment promises that exempting a table and writing down what it
+    // may contain are one edit. That promise is only kept if the columns are
+    // actually CHECKED -- otherwise a future exemption removes a table from the
+    // guard entirely and nothing notices it growing a figure or a date, which
+    // would be domain data with no isolation at all.
+    for (const [table, expected] of Object.entries(USER_ID_WITHOUT_RLS)) {
+      const columns = await raw<{ attname: string }>(
+        db.adminPool,
+        `SELECT a.attname
+           FROM pg_attribute a
+           JOIN pg_class c     ON c.oid = a.attrelid
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'public' AND c.relname = $1
+            AND a.attnum > 0 AND NOT a.attisdropped`,
+        [table],
+      );
+
+      expect(columns.length, `${table} exists`).toBeGreaterThan(0);
+      expect(columns.map((c) => c.attname).sort(), `${table} columns`).toEqual([...expected].sort());
+    }
+  });
+
   it('gives every covered table the USER predicate, on read and on write', async () => {
     const policies = await raw<{ tablename: string; qual: string; with_check: string }>(
       db.adminPool,
@@ -873,6 +898,44 @@ describe('user-level row security', () => {
     // 42501 = insufficient_privilege, which is what a WITH CHECK violation
     // raises.
     expect(sqlstate).toBe('42501');
+  });
+
+  it("a reset deletes only the caller's rows even with the policy switched off", async () => {
+    // The policy is the first layer and schema.test proves it works. This is
+    // about the SECOND: `DELETE FROM vocab_attempts` with no predicate is
+    // unrecoverable if the policy is ever missing -- a restore from a database
+    // that predates 006, or an operator who ran DISABLE ROW LEVEL SECURITY
+    // during an incident. The start-up guard does not catch that either; it
+    // checks the role's attributes, not whether the tables carry policies.
+    //
+    // So the deletes name the user, and this is what proves it: run them as the
+    // SUPERUSER, for whom row-level security does not apply at all.
+    const alice = await createUser(db.adminPool, 'alice@example.test');
+    const bob = await createUser(db.adminPool, 'bob@example.test');
+    for (const id of [alice, bob]) {
+      await db.adminPool.query(
+        `INSERT INTO vocab_attempts (user_id, word_id, direction, correct)
+           VALUES ($1, 'et-481', 'en_to_ja', true)`,
+        [id],
+      );
+    }
+
+    const { createVocabRepository } = await import('../repositories/vocab.repository');
+    const client = await db.adminPool.connect();
+    try {
+      // No withUserScope: the GUC is unset AND the role bypasses the policy, so
+      // the only thing standing between Bob's row and this DELETE is the
+      // predicate in the SQL itself.
+      await createVocabRepository(client, bob).reset(null);
+    } finally {
+      client.release();
+    }
+
+    const rows = await raw<{ user_id: string }>(
+      db.adminPool,
+      'SELECT user_id FROM vocab_attempts',
+    );
+    expect(rows.map((r) => Number(r.user_id))).toEqual([alice]);
   });
 
   it('fails closed when no user scope was opened', async () => {

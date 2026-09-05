@@ -103,14 +103,33 @@ REVOKE EXECUTE ON FUNCTION apply_user_isolation(TEXT) FROM PUBLIC;
 --   is what 「間違えた問題だけ」 actually selects on. A word answered wrong four
 --   times and right just now has been learned; a tally says it is 20%.
 --
+--   THE COST IS THAT THIS TABLE ONLY GROWS. Every other table in this schema is
+--   bounded by what a household has -- so many categories, so many holdings --
+--   and this one is bounded by how much studying happens. Two people working
+--   through 80 words is nothing (a submission is capped at 200 answers, and the
+--   aggregate reads one person's rows through an index), so there is no pruning
+--   and no archive table to keep in step. If a reader ever accumulates enough
+--   history for `getVocabProgress` to be slow, the fix is a materialised tally
+--   REFRESHed from these rows -- never a tally written beside them, which is the
+--   two-sources-of-truth this design exists to avoid.
+--
 -- WHY THE PRIMARY KEY IS A SEQUENCE AND NOT (user, word, direction, time)
 --   `answered_at` defaults to now(), and in PostgreSQL now() is TRANSACTION
 --   start time -- so every answer of one submitted quiz carries the SAME
 --   timestamp. Ordering by it alone leaves "the most recent answer" undefined
---   within a run. The id is monotonic in insert order, so `ORDER BY answered_at
---   DESC, id DESC` is total, and the client's submission order (which is the
---   order the questions were answered) decides the tie. Read that ordering as
+--   WITHIN a run, which is the case that actually happens: a reader answers the
+--   same word twice in one session and the second answer is the one that counts.
+--   The id is monotonic in insert order, so `ORDER BY answered_at DESC, id DESC`
+--   resolves that tie the way the reader experienced it. Read that ordering as
 --   load-bearing, not as tidiness.
+--
+--   IT IS NOT A TOTAL ORDER ACROSS TRANSACTIONS. Two submissions that overlap
+--   can have their timestamps and their ids disagree -- the one that began later
+--   may commit its rows first. The window is a single round trip, one person
+--   would have to be answering in two tabs at once, and the consequence is that
+--   one word's 「直近の正誤」 is taken from the wrong one of two answers they gave
+--   seconds apart. Not worth a clock column; worth writing down, so nobody reads
+--   the paragraph above as a stronger guarantee than it is.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS vocab_attempts (
   id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
