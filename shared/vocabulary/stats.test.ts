@@ -1,7 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import type { VocabProgress } from './progress';
 import { wordById, wordsForDay } from './index';
-import { indexProgress, isWrong, selectWords, statFor, summarize } from './stats';
+import {
+  WEAK_QUIZ_LIMIT,
+  indexProgress,
+  isWeak,
+  isWrong,
+  missRateFor,
+  missesFor,
+  selectWords,
+  statFor,
+  summarize,
+} from './stats';
 
 // ---------------------------------------------------------------------------
 // These functions decide two things the reader acts on directly: which questions
@@ -98,6 +108,201 @@ describe('selectWords', () => {
   });
 });
 
+describe('missesFor / isWeak', () => {
+  const index = indexProgress(
+    progress({
+      // Missed twice, revised correctly. `isWrong` has forgotten; this has not.
+      'et-481': { ja: [5, 3, true] },
+      // Never missed.
+      'et-482': { ja: [3, 3, true] },
+      // Missed in the direction NOT being practised.
+      'et-483': { en: [4, 1, false] },
+    }),
+  );
+
+  it('counts every wrong answer, not just the most recent one', () => {
+    expect(missesFor(index, 'et-481', 'ja_to_en')).toBe(2);
+    expect(isWeak(index, 'et-481', 'ja_to_en')).toBe(true);
+    // …while the review set has already let it go. This divergence is why
+    // 'weak' exists as a separate scope.
+    expect(isWrong(index, 'et-481', 'ja_to_en')).toBe(false);
+  });
+
+  it('is zero for a word that has never been missed', () => {
+    expect(missesFor(index, 'et-482', 'ja_to_en')).toBe(0);
+    expect(isWeak(index, 'et-482', 'ja_to_en')).toBe(false);
+  });
+
+  it('is zero for a word missed only in another direction', () => {
+    // The quiz asks one way round; a phrase failed the other way is not the
+    // question being practised.
+    expect(missesFor(index, 'et-483', 'ja_to_en')).toBe(0);
+    expect(missesFor(index, 'et-483', 'en_to_ja')).toBe(3);
+    expect(missesFor(index, 'et-483', 'both')).toBe(3);
+  });
+
+  it('is zero for a word never answered at all', () => {
+    expect(missesFor(index, 'et-499', 'both')).toBe(0);
+  });
+});
+
+describe('missRateFor', () => {
+  it('falls when the word is answered correctly, which the raw count never does', () => {
+    const before = indexProgress(progress({ 'et-481': { ja: [2, 1, true] } }));
+    const after = indexProgress(progress({ 'et-481': { ja: [3, 2, true] } }));
+
+    expect(missesFor(before, 'et-481', 'ja_to_en')).toBe(1);
+    expect(missesFor(after, 'et-481', 'ja_to_en')).toBe(1); // unchanged: the freeze
+    expect(missRateFor(after, 'et-481', 'ja_to_en')).toBeLessThan(
+      missRateFor(before, 'et-481', 'ja_to_en'),
+    );
+  });
+
+  it('is zero, not NaN, for a word never answered', () => {
+    expect(missRateFor(indexProgress([]), 'et-481', 'ja_to_en')).toBe(0);
+  });
+});
+
+describe("selectWords('weak')", () => {
+  it('keeps a word that was missed and then revised correctly', () => {
+    // THE WHOLE REASON THIS SCOPE EXISTS. Everything revised means an empty
+    // 'wrong' set, and a reader in that state still has phrases that keep
+    // catching them out.
+    const revised = progress({ 'et-481': { ja: [5, 3, true] } });
+    expect(selectWords(DAY31, revised, 'wrong', 'ja_to_en')).toEqual([]);
+    expect(selectWords(DAY31, revised, 'weak', 'ja_to_en').map((w) => w.id)).toEqual(['et-481']);
+  });
+
+  it('excludes words that have never been missed', () => {
+    // Otherwise the mode is 「すべて」 wearing a different name.
+    const clean = progress({ 'et-481': { ja: [3, 3, true] }, 'et-482': { ja: [1, 1, true] } });
+    expect(selectWords(DAY31, clean, 'weak', 'ja_to_en')).toEqual([]);
+  });
+
+  it('asks the MOST-missed words when more qualify than it will ask', () => {
+    // The cap is what makes 「苦手」 mean 「よく間違えるものから」 rather than
+    // 「間違えたことがあるものぜんぶ」. Every word of Day 31 has been missed here,
+    // so the ranking is the only thing deciding which ten are asked.
+    //
+    // THE MISS COUNTS RUN AGAINST THE BOOK'S ORDER ON PURPOSE. Ranked ascending
+    // they would coincide with the order the words arrive in, and dropping the
+    // sort entirely would still pass -- the test would be checking the slice and
+    // nothing else. Here the ten that must come back are the LAST ten of the Day.
+    const day = wordsForDay(31);
+    const entries: Record<string, { ja: [number, number, boolean | null] }> = {};
+    day.forEach((word, i) => {
+      // et-481 missed once, et-482 twice, … et-496 sixteen times.
+      const misses = i + 1;
+      entries[word.id] = { ja: [misses + 1, 1, true] };
+    });
+
+    const picked = selectWords(day, progress(entries), 'weak', 'ja_to_en').map((w) => w.id);
+
+    expect(picked).toHaveLength(WEAK_QUIZ_LIMIT);
+    expect(picked).toEqual(
+      day
+        .slice(-WEAK_QUIZ_LIMIT)
+        .reverse()
+        .map((w) => w.id),
+    );
+    // The least-missed word is the one left out, not an arbitrary one.
+    expect(picked).not.toContain('et-481');
+  });
+
+  it('asks fewer than the cap when fewer qualify', () => {
+    const some = progress({
+      'et-481': { ja: [2, 1, true] },
+      'et-482': { ja: [3, 1, false] },
+    });
+    expect(selectWords(DAY31, some, 'weak', 'ja_to_en')).toHaveLength(2);
+  });
+
+  it('breaks a tie on miss count by id, so the same record always asks the same ten', () => {
+    // Every word tied, so ONLY the tie-break decides which ten are asked.
+    // The words are handed over in reverse: without the tie-break the slice
+    // would take them in the order they arrived, and the ten asked would depend
+    // on how the caller happened to have the list. The reader would see the
+    // question count hold at ten while the questions behind it moved.
+    const day = wordsForDay(31);
+    const tied: Record<string, { ja: [number, number, boolean | null] }> = {};
+    for (const word of day) tied[word.id] = { ja: [2, 1, true] };
+    const record = progress(tied);
+
+    const picked = selectWords([...day].reverse(), record, 'weak', 'ja_to_en').map((w) => w.id);
+
+    expect(picked).toHaveLength(WEAK_QUIZ_LIMIT);
+    expect(picked).toEqual([...picked].sort());
+    expect(picked).toEqual(day.slice(0, WEAK_QUIZ_LIMIT).map((w) => w.id));
+  });
+
+  it('moves on as the reader revises, instead of asking the same ten for ever', () => {
+    // THE DEFECT THIS RANKING EXISTS TO AVOID.
+    //
+    // Ranked on the raw miss count the mode is frozen: answering correctly adds
+    // one to both `attempts` and `correct`, so the count is unchanged, the same
+    // ten words stay at the top, and words eleventh onwards are never asked --
+    // so they can never rise. buildQuiz's own comment names that failure:
+    // 「asking the same first ten words of a Day every time is how a reader ends
+    // up knowing ten words and believing they know sixteen」.
+    //
+    // Simulated here: every word of Day 31 starts missed once in two answers, so
+    // nothing distinguishes them but the tie-break. Each round answers the
+    // selected ten CORRECTLY, which is what a reader revising actually does.
+    const day = wordsForDay(31);
+    const counts = new Map(day.map((word) => [word.id, { attempts: 2, correct: 1 }]));
+
+    const record = (): VocabProgress =>
+      progress(
+        Object.fromEntries(
+          [...counts].map(([id, c]) => [
+            id,
+            { ja: [c.attempts, c.correct, true] as [number, number, boolean] },
+          ]),
+        ),
+      );
+
+    const asked = new Set<string>();
+    const rounds: string[][] = [];
+    for (let round = 0; round < 4; round++) {
+      const picked = selectWords(day, record(), 'weak', 'ja_to_en').map((w) => w.id);
+      rounds.push(picked);
+      for (const id of picked) {
+        asked.add(id);
+        const c = counts.get(id)!;
+        c.attempts += 1;
+        c.correct += 1;
+      }
+    }
+
+    // The second round is NOT the first one again.
+    expect(rounds[1]).not.toEqual(rounds[0]);
+    // And within a few rounds the whole Day has been covered, rather than six
+    // words never being asked at all.
+    expect(asked.size).toBe(day.length);
+  });
+
+  it('ranks a word missed often above one missed rarely, at equal rates', () => {
+    // The miss COUNT is the tie-break, so 「ミスった回数が多い」 still decides
+    // between two words that are missed equally often. Both are missed half the
+    // time here; only the volume of evidence differs.
+    const day = wordsForDay(31);
+    const record = progress({
+      'et-481': { ja: [2, 1, true] }, // 1 miss of 2
+      'et-482': { ja: [8, 4, true] }, // 4 misses of 8
+    });
+    expect(selectWords(day, record, 'weak', 'ja_to_en').map((w) => w.id)).toEqual([
+      'et-482',
+      'et-481',
+    ]);
+  });
+
+  it('ignores misses in a direction that is not being practised', () => {
+    const other = progress({ 'et-481': { en: [4, 0, false] } });
+    expect(selectWords(DAY31, other, 'weak', 'ja_to_en')).toEqual([]);
+    expect(selectWords(DAY31, other, 'weak', 'en_to_ja').map((w) => w.id)).toEqual(['et-481']);
+  });
+});
+
 describe('summarize', () => {
   it('reports null accuracy before anything has been answered', () => {
     // NOT 0%. "You have failed everything you have never seen" is a lie the
@@ -163,6 +368,21 @@ describe('summarize', () => {
     );
     expect(summary.attempts).toBe(0);
     expect(summary.accuracy).toBeNull();
+  });
+
+  it('counts the 苦手 POOL, not the number of questions 苦手 would ask', () => {
+    // `weak` is how the screen knows whether the mode has anything to offer.
+    // It must not be shown as a question count: the scope caps at
+    // WEAK_QUIZ_LIMIT, so on a Day where everything has been missed the two
+    // numbers differ, and one label over two facts is how a reader stops
+    // trusting both.
+    const day = wordsForDay(31);
+    const entries: Record<string, { ja: [number, number, boolean | null] }> = {};
+    for (const word of day) entries[word.id] = { ja: [2, 1, true] };
+
+    const summary = summarize(day, progress(entries), 'ja_to_en');
+    expect(summary.weak).toBe(day.length);
+    expect(selectWords(day, progress(entries), 'weak', 'ja_to_en')).toHaveLength(WEAK_QUIZ_LIMIT);
   });
 
   it('reports null retention before anything has been answered', () => {
