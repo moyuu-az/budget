@@ -178,6 +178,33 @@ describe('a screen that is still loading', () => {
     expect(onScreen('英単語')).toBe(false);
   });
 
+  it('does not take the page when its chunk lands during its own exit', async () => {
+    // A different window from the first case. There the chunk landed AFTER the
+    // swap had completed; here it lands while the abandoned screen's wrapper is
+    // still fading out. The wrapper is mounted, so React resolves the Suspense
+    // inside it and 英単語 is briefly on screen at `/analytics` -- and that is
+    // fine as long as it goes away with the wrapper and the swap still ends on
+    // 分析. (This is the window the App.tsx comment means when it says no screen
+    // may write to the address on mount.)
+    const user = await openApp();
+    await clickNav(user, '英単語');
+    await screen.findByRole('status', { name: '画面を読み込み中' }, SCREEN_TIMEOUT);
+
+    await clickNav(user, '分析');
+    // Released immediately, i.e. inside the 300ms exit -- 分析 has not arrived.
+    expect(onScreen('分析')).toBe(false);
+    gate.release();
+
+    expect(
+      await screen.findByRole('heading', { name: '分析' }, SCREEN_TIMEOUT),
+    ).toBeInTheDocument();
+    await settle();
+
+    expect(href()).toBe('/analytics');
+    expect(onScreen('分析')).toBe(true);
+    expect(onScreen('英単語')).toBe(false);
+  });
+
   it('still arrives when nobody moved away', async () => {
     // The other half of the guard above: "the late chunk never wins" must not be
     // implemented by never showing it.
@@ -204,8 +231,13 @@ describe('rapid navigation', () => {
     gate.release();
 
     // Three tabs in a row, each pressed before the previous screen settled.
+    // "Before" is checked, not assumed: with `mode="wait"` the previous screen
+    // cannot have arrived until its predecessor's 300ms exit has run, and a
+    // click takes far less than that.
     await clickNav(user, '資産');
+    expect(onScreen('資産')).toBe(false);
     await clickNav(user, '英単語');
+    expect(onScreen('英単語')).toBe(false);
     await clickNav(user, '履歴');
 
     expect(href()).toBe('/history');
@@ -251,5 +283,28 @@ describe('a screen whose chunk cannot be fetched', () => {
       await screen.findByRole('heading', { name: '分析' }, SCREEN_TIMEOUT),
     ).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('says so again when the screen is reopened, rather than going blank', async () => {
+    // `lazy()` keeps the rejection, so coming back re-throws the same error
+    // without another fetch (ScreenBoundary.tsx explains why the only offer is
+    // a reload). What matters here is that the fresh boundary the new key
+    // creates catches it AGAIN: a boundary that only worked the first time
+    // would give the white page on the second visit.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    gate.fail = true;
+
+    const user = await openApp();
+    await clickNav(user, '英単語');
+    await screen.findByRole('alert', undefined, SCREEN_TIMEOUT);
+    await clickNav(user, '分析');
+    await screen.findByRole('heading', { name: '分析' }, SCREEN_TIMEOUT);
+
+    await clickNav(user, '英単語');
+    expect(
+      await screen.findByRole('alert', undefined, SCREEN_TIMEOUT),
+    ).toHaveTextContent('画面を表示できませんでした');
+    expect(href()).toBe('/vocab');
+    expect(screen.getAllByRole('link', { name: '分析' })[0]).toBeInTheDocument();
   });
 });

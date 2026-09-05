@@ -53,8 +53,9 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 //     turns the third copy into a compile-time check of the other two.
 //
 // The value is a function rather than an element so that nothing but the screen
-// being shown is ever constructed; `lazy()` chunks are still only fetched when
-// their factory is called.
+// being shown is ever constructed. (Constructing an element would not fetch a
+// chunk either -- `lazy()` fetches on first RENDER -- so this is about not
+// building six elements per render, not about the network.)
 // ---------------------------------------------------------------------------
 const SCREENS = {
   dashboard: () => <DashboardView onNavigate={navigateToView} />,
@@ -134,7 +135,7 @@ function App() {
     onShowHelp: () => setHelpOpen(true),
   });
 
-  const screen = SCREENS[currentView];
+  const renderScreen = SCREENS[currentView];
 
   return (
     <>
@@ -164,11 +165,23 @@ function App() {
             the swap always finishes.
 
             The key is the screen, so the boundary (and the ScreenBoundary below
-            it) belong to that screen and are cleared by leaving it. --- */}
+            it) belong to that screen and are cleared by leaving it.
+
+            ONE WINDOW REMAINS, AND IT IS HARMLESS ONLY BECAUSE OF A RULE:
+            a chunk that lands DURING the 300ms exit of its abandoned screen is
+            rendered inside the wrapper that is fading out -- the wrapper is
+            still mounted, so React resolves the Suspense in place -- and its
+            mount effects run, at an address that now names a different screen.
+            It fades away with the wrapper and the swap still completes (also in
+            App.transition.test.tsx). What makes that safe is that NO SCREEN
+            WRITES TO THE ADDRESS ON MOUNT: every setSearchParams call in this
+            app is behind a user action. A screen that "normalised" a missing
+            `?day=` in an effect would, in this window, write 英単語's filter
+            onto `/analytics`. Keep it that way. --- */}
         <AnimatePresence mode="wait">
           <motion.div key={currentView} {...pageTransition}>
             <ScreenBoundary>
-              <Suspense fallback={<ScreenFallback />}>{screen()}</Suspense>
+              <Suspense fallback={<ScreenFallback />}>{renderScreen()}</Suspense>
             </ScreenBoundary>
           </motion.div>
         </AnimatePresence>

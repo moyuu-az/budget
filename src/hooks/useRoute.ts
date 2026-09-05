@@ -63,6 +63,14 @@ export interface SearchParamSpec<T> {
  * The setter is referentially stable across renders even when the spec is
  * written inline, because it reads the spec through a ref. Several of the
  * controls it is handed to are `memo`ised.
+ *
+ * CALL THE SETTER FROM A USER ACTION, NEVER FROM A MOUNT EFFECT. An absent
+ * parameter is already handled by `fallback`; "normalising" it into the address
+ * on mount is not needed, and it is unsafe: a screen whose chunk lands while
+ * it is animating OUT is still mounted for a moment at the address of the
+ * screen that replaced it, and a mount-time write would put this screen's
+ * filter onto that other screen's URL. See the AnimatePresence comment in
+ * src/App.tsx.
  */
 export function useSearchParam<T>(spec: SearchParamSpec<T>): [T, (value: T) => void] {
   const { search } = useLocation();

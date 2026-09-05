@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactElement, type ReactNode } from 'react';
+import { Component, type ReactElement, type ReactNode } from 'react';
 import { Button } from '../ui/Button';
 import { reloadForNewBuild } from '../../app/staleClient';
 
@@ -31,17 +31,31 @@ import { reloadForNewBuild } from '../../app/staleClient';
 //   nothing.
 //
 // WHY THE ONLY OFFER IS A RELOAD
-//   `lazy()` caches the rejected promise. Re-rendering the same lazy component
-//   re-throws the SAME failure without re-fetching anything, so a "retry" button
-//   that only resets this boundary would look like it did something and change
-//   nothing. A reload is what actually asks the server for the current build,
-//   and after a deploy that is also the right answer -- the same one
-//   StaleClientOverlay gives for the same underlying cause.
+//   `lazy()` caches the rejected promise (React keeps the payload's status as
+//   "rejected" and re-throws its error on every later render -- see
+//   lazyInitializer in react/cjs/react.development.js). Re-rendering the same
+//   lazy component re-throws the SAME failure without re-fetching anything, so
+//   a "retry" button that only resets this boundary would look like it did
+//   something and change nothing. Coming BACK to the screen shows the same
+//   error for the same reason (pinned by App.transition.test.tsx). A reload is
+//   what actually asks the server for the current build, and after a deploy
+//   that is also the right answer -- the same one StaleClientOverlay gives for
+//   the same underlying cause.
 //
 // WHY IT IS INSIDE THE ANIMATED WRAPPER
 //   It is keyed by the screen (see App.tsx), so opening a different screen
 //   clears it. A boundary above the router would latch the error over every
 //   subsequent navigation, turning one missing chunk into an app that is stuck.
+//
+// WHY THERE IS NO componentDidCatch
+//   React 19 already reports every error a boundary catches through the root's
+//   `onCaughtError`, whose default is `console.error` in both the development
+//   and the production build (react-dom-client's defaultOnCaughtError), with
+//   the component stack attached in development. Logging here as well printed
+//   the same error twice. And it is not reported through reportError either: a
+//   toast is the wrong shape for this -- the screen behind it is empty, so
+//   there is nothing to return to -- and the message below is already the
+//   user-facing half.
 // ---------------------------------------------------------------------------
 
 interface Props {
@@ -57,14 +71,6 @@ export class ScreenBoundary extends Component<Props, State> {
 
   static getDerivedStateFromError(error: unknown): State {
     return { error: error instanceof Error ? error : new Error(String(error)) };
-  }
-
-  componentDidCatch(error: Error, info: ErrorInfo): void {
-    // Deliberately console rather than reportError: a toast is the wrong shape
-    // for this (the screen behind it is empty, so there is nothing to return
-    // to), and the message below is already the user-facing half. This half is
-    // for whoever opens the console afterwards.
-    console.error('画面の読み込みに失敗しました', error, info.componentStack);
   }
 
   render(): ReactNode {
