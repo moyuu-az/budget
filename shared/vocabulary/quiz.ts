@@ -62,6 +62,31 @@ export const QUIZ_DIRECTION_SETTINGS = ['both', ...QUIZ_DIRECTIONS] as const;
 /** What the reader picked in the direction control. 'both' mixes per question. */
 export type QuizDirectionSetting = QuizDirection | 'both';
 
+/**
+ * The order the questions are ASKED in, as VALUES.
+ *
+ *  - 'random' … 毎回ばらばら。同じ Day を繰り返しても順番で覚えてしまわない
+ *  - 'number' … 本の No. 順（481, 482, 483 …）。本を開きながら進めるとき用
+ *
+ * WHY BOTH EXIST
+ *   Random is the right default and stays it: a fixed order is memorised as an
+ *   order. 「3番目はいつも `be full of`」 is a fact about the list, not about the
+ *   phrase, and it reads as knowledge right up until the phrase is met anywhere
+ *   else. But a reader working through the printed book alongside the app wants
+ *   the two to line up -- No.481 から順に -- and forcing them to hunt for each
+ *   entry is the sort of friction that ends the habit.
+ *
+ * 'random' IS FIRST because it is the default, and because the tab order is
+ * read off this tuple: the default belongs where the eye lands first.
+ *
+ * A tuple because the list is needed at runtime by the control itself and by the
+ * validator for `?order=`.
+ */
+export const QUIZ_ORDERS = ['random', 'number'] as const;
+
+/** What the reader picked in the 出題順 control. */
+export type QuizOrder = (typeof QUIZ_ORDERS)[number];
+
 export interface QuizChoice {
   wordId: string;
   text: string;
@@ -95,6 +120,14 @@ export interface BuildQuizOptions {
    */
   distractorPool: readonly VocabWord[];
   direction: QuizDirectionSetting;
+  /**
+   * What order to ASK them in. Default 'random', which is the behaviour every
+   * caller had before this option existed.
+   *
+   * It does NOT choose which words are asked -- `words` and `limit` do that.
+   * See the note on `buildQuiz` for why the two must stay separate.
+   */
+  order?: QuizOrder;
   /** How many options each question offers, including the answer. Default 4. */
   choiceCount?: number;
   /** Cap on the number of questions. Undefined asks about every word. */
@@ -130,6 +163,26 @@ function shuffled<T>(items: readonly T[], rng: () => number): T[] {
   }
   return out;
 }
+
+/**
+ * The book's own order: the printed number, then the id.
+ *
+ * TOTAL, on purpose. `Array.prototype.sort` is stable, so a comparator that
+ * returned 0 for two entries would fall back to whatever order the CALLER
+ * happened to hand over -- and by the time this runs the caller's order is a
+ * SHUFFLE. 「No.順」 whose ties land differently on every run is not an order the
+ * reader can predict.
+ *
+ * The numbers are unique today (`words.test.ts` pins 481-560 gapless, and `id`
+ * is derived from `number`), so the second term is unreachable through the book.
+ * It is here because that is a property of the transcription rather than of this
+ * code, and because the failure it would cause is invisible on screen. It is
+ * exercised directly instead, with two synthetic entries sharing a number --
+ * see 「breaks a tie on the id」 in quiz.test.ts. A defence nothing exercises is
+ * a defence nobody can tell has stopped working.
+ */
+const byBookNumber = (a: VocabWord, b: VocabWord): number =>
+  a.number - b.number || a.id.localeCompare(b.id);
 
 /**
  * Whether `candidate` would ALSO be right for a question whose answer is
@@ -209,22 +262,46 @@ function buildChoices(
 /**
  * Turns a set of words into a quiz.
  *
- * The questions are shuffled, then capped by `limit` -- in that order, so a
- * capped quiz is a random sample of the set rather than always its first N
- * entries. Asking the same first ten words of a Day every time is how a reader
- * ends up knowing ten words and believing they know sixteen.
+ * SAMPLE FIRST, THEN ORDER. The two are different decisions and the order of
+ * the steps is the whole point:
+ *
+ *   1. shuffle, and 2. cap by `limit`. In THAT order, so a capped quiz is a
+ *      random sample of the set rather than always its first N entries. Asking
+ *      the same first ten words of a Day every time is how a reader ends up
+ *      knowing ten words and believing they know sixteen.
+ *   3. arrange the sample for asking, per `order`.
+ *
+ * Doing step 3 by skipping step 1 -- sorting `words` and slicing that -- would
+ * make 「No.順」 mean 「常に最初の N 問」 and reintroduce exactly the defect step 1
+ * exists to prevent. As written, a capped 「No.順」 run is a different sample
+ * every time, merely presented in the book's order.
+ *
+ * The shuffle also runs for `order: 'number'` even when nothing is capped, and
+ * that is not waste worth removing: it is what makes the two settings ask the
+ * SAME questions for a given seed and differ only in the order they come in.
+ * Skipping it for 'number' would leave the generator at a different position and
+ * silently change which words a capped run selected.
+ *
+ * What the setting does NOT do is fix the choice list of a given word. The
+ * distractors are drawn as the questions are built, so a word asked third gets
+ * different distractors from the same word asked ninth. That is fine -- every
+ * such list is built by the same rule (`buildChoices`) and is equally valid --
+ * but it is why the tests compare SETS of question ids across the two settings
+ * and not the questions themselves.
  */
 export function buildQuiz({
   words,
   distractorPool,
   direction,
+  order = 'random',
   choiceCount = 4,
   limit,
   seed,
 }: BuildQuizOptions): QuizQuestion[] {
   const rng = createRng(seed);
-  const order = shuffled(words, rng);
-  const asked = limit === undefined ? order : order.slice(0, Math.max(0, limit));
+  const sample = shuffled(words, rng);
+  const capped = limit === undefined ? sample : sample.slice(0, Math.max(0, limit));
+  const asked = order === 'number' ? capped.slice().sort(byBookNumber) : capped;
 
   return asked.map((word) => {
     const questionDirection: QuizDirection =
