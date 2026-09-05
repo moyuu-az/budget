@@ -90,9 +90,56 @@ describe('英単語 の設定', () => {
   it('falls back instead of trusting a hand-edited address', async () => {
     // `?day=99` names a Day that does not exist. Honouring it would render an
     // empty quiz under a heading nobody wrote.
-    goTo('?day=99&scope=nonsense&input=telepathy');
+    goTo('?day=99&scope=nonsense&input=telepathy&order=alphabetical');
     render(<VocabView />);
-    expect(await screen.findByText(/Day 31・すべて・手入力・16問/)).toBeInTheDocument();
+    expect(await screen.findByText(/Day 31・すべて・手入力・ランダム・16問/)).toBeInTheDocument();
+  });
+
+  it('reads the 出題順 from the address', async () => {
+    goTo('?day=31&order=number');
+    render(<VocabView />);
+
+    expect(await screen.findByText(/Day 31・すべて・手入力・No\.順・16問/)).toBeInTheDocument();
+  });
+
+  it('defaults to ランダム, so a bookmark made before the option keeps its behaviour', async () => {
+    // No `?order=` at all -- which is every link anybody saved before this
+    // control existed. Defaulting to No.順 would silently change what those
+    // links do.
+    goTo('?day=31');
+    render(<VocabView />);
+
+    expect(await screen.findByText(/Day 31・すべて・手入力・ランダム・16問/)).toBeInTheDocument();
+  });
+
+  it('writes the chosen 出題順 back to the address', async () => {
+    const user = userEvent.setup();
+    render(<VocabView />);
+
+    const orders = await screen.findByRole('tablist', { name: '出題順' });
+    await user.click(within(orders).getByRole('tab', { name: 'No.順' }));
+
+    expect(new URLSearchParams(window.location.search).get('order')).toBe('number');
+    expect(await screen.findByText(/・No\.順・/)).toBeInTheDocument();
+  });
+
+  // END TO END, because the wiring is what breaks: the setting is read from the
+  // address, carried into buildQuiz, and only then decides what the reader is
+  // shown. A unit test of buildQuiz passes happily while the screen forgets to
+  // pass the option at all.
+  //
+  // TWO DAYS, and that is not padding. A screen that dropped the setting would
+  // start a RANDOM run, whose first question is the Day's first entry one time
+  // in sixteen -- often enough for a single-Day check to wave the defect
+  // through. Requiring both makes that one time in 256.
+  it.each([31, 35])('asks Day %i from its first entry when No.順 is chosen', async (day) => {
+    const user = userEvent.setup();
+    goTo(`?day=${day}&order=number&input=choice`);
+    render(<VocabView />);
+
+    await user.click(await screen.findByRole('button', { name: 'クイズを始める' }));
+
+    expect(await screen.findByText(wordsForDay(day)[0].ja)).toBeInTheDocument();
   });
 
   it('writes the chosen Day back to the address so the screen can be shared', async () => {
@@ -207,7 +254,7 @@ describe('英単語 の設定', () => {
     expect(weak).toBeEnabled();
     await user.click(weak);
 
-    expect(await screen.findByText(/Day 31・苦手・手入力・1問/)).toBeInTheDocument();
+    expect(await screen.findByText(/Day 31・苦手・手入力・ランダム・1問/)).toBeInTheDocument();
   });
 
   it('refuses 「苦手」 on a Day where nothing has ever been missed', async () => {
@@ -269,7 +316,24 @@ describe('英単語 の設定', () => {
     goTo('?day=31&scope=weak');
     render(<VocabView />);
 
-    expect(await screen.findByText(/Day 31・苦手・手入力・1問/)).toBeInTheDocument();
+    expect(await screen.findByText(/Day 31・苦手・手入力・ランダム・1問/)).toBeInTheDocument();
+  });
+
+  it('says what each 出題順 does, so No.順 is not chosen blind', async () => {
+    // The two names describe the ORDER and say nothing about what it costs. A
+    // reader who leaves 「No.順」 on and studies the same Day nightly learns the
+    // sequence, and finds out only when the phrase turns up somewhere else.
+    // Nothing else on the screen would ever tell them.
+    const user = userEvent.setup();
+    render(<VocabView />);
+
+    expect(await screen.findByText(/毎回ちがう順番で出します/)).toBeInTheDocument();
+
+    const orders = screen.getByRole('tablist', { name: '出題順' });
+    await user.click(within(orders).getByRole('tab', { name: 'No.順' }));
+
+    expect(await screen.findByText(/本の No\. 順に出します/)).toBeInTheDocument();
+    expect(screen.getByText(/順番ごと覚えてしまう/)).toBeInTheDocument();
   });
 
   it('says what each 出題範囲 selects, in words the reader can tell apart', async () => {
@@ -367,7 +431,7 @@ describe('英単語 の設定', () => {
     // One word was failed; the word answered correctly is NOT in the set, even
     // though 「間違えた問題だけ」 on a fresh account would otherwise quietly mean
     // 「全部」.
-    expect(await screen.findByText(/Day 31・間違えた問題だけ・手入力・1問/)).toBeInTheDocument();
+    expect(await screen.findByText(/Day 31・間違えた問題だけ・手入力・ランダム・1問/)).toBeInTheDocument();
   });
 });
 
