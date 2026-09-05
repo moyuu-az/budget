@@ -28,6 +28,10 @@ const EntriesView = lazy(() => import('./components/entries/EntriesView'));
 const HistoryView = lazy(() => import('./components/history/HistoryView'));
 const AnalyticsView = lazy(() => import('./components/analytics/AnalyticsView'));
 const AssetsView = lazy(() => import('./components/assets/AssetsView'));
+// 英単語 carries the whole word list (80 entries with their notes and examples),
+// which nothing else on any other screen reads. Eager-loading it would put a
+// study aid into the bundle of somebody standing in a shop checking a balance.
+const VocabView = lazy(() => import('./components/vocab/VocabView'));
 const SettingsView = lazy(() => import('./components/settings/SettingsView'));
 import ParticleBackground from './components/ParticleBackground';
 import ShortcutHelpDialog from './components/layout/ShortcutHelpDialog';
@@ -125,6 +129,11 @@ function App() {
           {currentView === 'assets' && (
             <motion.div key="assets" {...pageTransition}>
               <AssetsView />
+            </motion.div>
+          )}
+          {currentView === 'vocab' && (
+            <motion.div key="vocab" {...pageTransition}>
+              <VocabView />
             </motion.div>
           )}
           {currentView === 'settings' && (

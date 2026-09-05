@@ -50,9 +50,17 @@
 //     2 -- migration 005: EntryTemplate.dayOfMonth -> EntryTemplate.recurrence.
 //     3 -- getLedgerSettings / updateLedgerSettings added, and the dashboard
 //          cannot render its judgements without the first of them.
+//     4 -- the 英単語 screen and its three user-scoped methods
+//          (getVocabProgress / recordVocabAttempts / resetVocabProgress).
+//          Bumped under the "a method the client REQUIRES" rule: the screen
+//          cannot render at all without getVocabProgress, and against an older
+//          revision it would 404 under a matching stamp -- reported as an
+//          ordinary failure of that screen rather than as the version skew it
+//          is. It also changes what a request MEANS: the ledger header is now
+//          ignored for three of the methods, and an older server would apply it.
 // ---------------------------------------------------------------------------
 
-export const CONTRACT_VERSION = 3;
+export const CONTRACT_VERSION = 4;
 
 /**
  * Lower-cased because Hono's `c.req.header()` matches case-insensitively but the

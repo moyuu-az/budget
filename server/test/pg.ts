@@ -49,6 +49,22 @@ export const LEDGER_SCOPED_TABLES = [
   'asset_categories',
 ] as const;
 
+/**
+ * Tables holding USER-scoped data -- one person's, not one household's.
+ *
+ * Separate from LEDGER_SCOPED_TABLES because the two are protected by different
+ * predicates (`app_current_user_id()` vs `app_current_ledger_id()`), and a table
+ * checked against the wrong one would still look guarded in every ENABLE/FORCE
+ * assertion. Keeping the lists apart is what lets each drift guard demand its
+ * OWN predicate.
+ *
+ * `resetDb` already truncates `users` with CASCADE, which would take these with
+ * it. They are named anyway: a table that is only cleared as a side effect of a
+ * foreign key stops being cleared the day someone drops the key, and the failure
+ * would show up as tests that pass alone and fail together.
+ */
+export const USER_SCOPED_TABLES = ['vocab_attempts'] as const;
+
 export interface TestDb {
   /** Connects as a non-superuser, non-owner role: row-level security applies. */
   pool: Pool;
@@ -164,8 +180,17 @@ export async function startTestDb(options: StartTestDbOptions = {}): Promise<Tes
 /** Removes all ledger data and the ledgers/users themselves. Admin-only. */
 export async function resetDb(adminPool: Pool): Promise<void> {
   await adminPool.query(
-    `TRUNCATE ${LEDGER_SCOPED_TABLES.join(', ')}, ledger_members, ledgers, users RESTART IDENTITY CASCADE`,
+    `TRUNCATE ${LEDGER_SCOPED_TABLES.join(', ')}, ${USER_SCOPED_TABLES.join(', ')}, ledger_members, ledgers, users RESTART IDENTITY CASCADE`,
   );
+}
+
+/** Creates a user directly, standing in for the auth layer's provisioning. */
+export async function createUser(adminPool: Pool, email: string): Promise<number> {
+  const { rows } = await adminPool.query<{ id: number }>(
+    'INSERT INTO users (google_sub, email, display_name) VALUES ($1, $2, $3) RETURNING id',
+    [`sub:${email}`, email, email.split('@')[0]],
+  );
+  return rows[0].id;
 }
 
 /** Creates a ledger directly, standing in for the auth layer's provisioning. */

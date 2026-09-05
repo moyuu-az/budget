@@ -9,6 +9,7 @@ import { useMonthlyStore } from '../stores/useMonthlyStore';
 import { useSessionStore } from '../stores/useSessionStore';
 import { useUIStore } from '../stores/useUIStore';
 import { makeCashAsset, makeCashCategory } from '../test/factories';
+import { VIEW_SEGMENT } from '../app/routes';
 
 // ---------------------------------------------------------------------------
 // The shell, on a phone as well as a desktop.
@@ -94,6 +95,30 @@ describe('both shells', () => {
     expect((await screen.findAllByText('今月のサマリー')).length).toBeGreaterThanOrEqual(2);
   });
 
+  it('repeats the household figures above the content on a phone', () => {
+    render(
+      <Layout currentView="dashboard" onNavigate={noop}>
+        <div />
+      </Layout>,
+    );
+    // Twice: the sidebar's copy and the phone header's. Exactly one of the two
+    // is displayed in a browser; JSDOM applies no stylesheet and sees both.
+    expect(screen.getAllByText('現在の残高').length).toBe(2);
+  });
+
+  it('leaves them out on a screen that shows none of the ledger, so the content is not pushed below the fold', () => {
+    // 英単語 is the person's study record, not the household's money. On a
+    // 390px viewport that block is the difference between the question being on
+    // screen and being scrolled to.
+    render(
+      <Layout currentView="vocab" onNavigate={noop}>
+        <div />
+      </Layout>,
+    );
+    // Only the desktop sidebar's copy remains.
+    expect(screen.getAllByText('現在の残高').length).toBe(1);
+  });
+
   it('names the phone navigation for a screen reader', () => {
     render(
       <Layout currentView="dashboard" onNavigate={noop}>
@@ -106,8 +131,15 @@ describe('both shells', () => {
     // from the accessibility tree and the tab order.
     const navs = screen.getAllByRole('navigation', { name: 'メインナビゲーション' });
     expect(navs).toHaveLength(2);
+
+    // Counted from VIEW_SEGMENT rather than written out. The point of this
+    // assertion is that the two shells offer the SAME screens -- a screen added
+    // to the sidebar and forgotten in the phone's tab bar exists on a desktop
+    // and not on a phone. A hard-coded number turns that into a failure about
+    // arithmetic, which the next person fixes by editing the number.
+    const screens = Object.keys(VIEW_SEGMENT).length;
     for (const nav of navs) {
-      expect(within(nav).getAllByRole('link')).toHaveLength(6);
+      expect(within(nav).getAllByRole('link')).toHaveLength(screens);
     }
   });
 });

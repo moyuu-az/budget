@@ -63,6 +63,14 @@ export const createMockApi = (): AppApi => ({
   updateAsset: vi.fn().mockResolvedValue(undefined),
   deleteAsset: vi.fn().mockResolvedValue(undefined),
 
+  // --- 英単語クイズ (user-scoped) ---
+  // An empty progress list is what a person who has never taken a quiz really
+  // gets, and it is the case every screen has to render correctly: 「まだ解いて
+  // いません」 rather than 0%.
+  getVocabProgress: vi.fn().mockResolvedValue([]),
+  recordVocabAttempts: vi.fn().mockResolvedValue([]),
+  resetVocabProgress: vi.fn().mockResolvedValue([]),
+
   getSession: vi.fn().mockResolvedValue({
     user: { id: 1, email: 'test@example.com', displayName: 'test' },
     ledgers: [{ id: 1, slug: 'shared', name: '家計', kind: 'shared' }],

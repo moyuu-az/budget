@@ -45,8 +45,37 @@ export const VIEW_SEGMENT = {
   history: 'history',
   analytics: 'analytics',
   assets: 'assets',
+  vocab: 'vocab',
   settings: 'settings',
 } as const satisfies Record<ViewType, string>;
+
+/**
+ * Whether a screen is about the HOUSEHOLD's money.
+ *
+ * WHAT READS THIS
+ *   The phone layout has no sidebar, so it repeats the balance and this month's
+ *   summary above the content (src/components/Layout.tsx). Those are ledger
+ *   figures, and on a screen that shows none of the ledger's data they are not
+ *   merely redundant -- they occupy the top of a 390px viewport and push the
+ *   actual content below the fold.
+ *
+ * WHY A TABLE AND NOT `view !== 'vocab'`
+ *   `satisfies Record<ViewType, boolean>` makes a NEW screen answer the question
+ *   here rather than inheriting an answer from a comparison someone wrote for a
+ *   different screen. The default a bare `!==` gives is "yes, show the household
+ *   figures", which is the wrong default for anything that is not about money.
+ */
+export const VIEW_SHOWS_LEDGER_FIGURES = {
+  dashboard: true,
+  entries: true,
+  history: true,
+  analytics: true,
+  assets: true,
+  settings: true,
+  // 英単語 is the signed-in person's study record. A balance above it is another
+  // household's business at best and noise at worst.
+  vocab: false,
+} as const satisfies Record<ViewType, boolean>;
 
 /**
  * Where `/`, an unknown path, and a link to a screen that no longer exists all
@@ -123,6 +152,17 @@ export const matchView = (pathname: string): RouteMatch => {
  *  - entries.month    … the month being edited
  *  - analytics.period … the analysis span (AnalyticsPeriod)
  *  - analytics.month  … the month drilled into from a trend chart
+ *  - vocab.day        … the Day section being studied
+ *  - vocab.dir        … which way round questions are asked (QuizDirectionSetting)
+ *  - vocab.scope      … 全部 or 間違えた問題だけ (QuizScope)
+ *  - vocab.input      … 手入力 or 選択肢 で始めるか (QuizInputMode)
+ *
+ * 英単語 puts its three SETTINGS in the query and its PROGRESS nowhere. Which
+ * Day, which direction, which scope answer "what is on screen" and are worth
+ * sending to somebody; "you are on question 4 of 12 and got 3 right" is not a
+ * filter, it is the middle of an action -- putting it in the address would make
+ * the back button rewind a quiz into a state whose answers were already
+ * recorded.
  */
 export const SEARCH_PARAMS = {
   dashboard: { period: 'period', flow: 'flow' },
@@ -130,6 +170,7 @@ export const SEARCH_PARAMS = {
   history: {},
   analytics: { period: 'period', month: 'month' },
   assets: {},
+  vocab: { day: 'day', dir: 'dir', scope: 'scope', input: 'input' },
   settings: {},
 } as const satisfies Record<ViewType, Readonly<Record<string, string>>>;
 
@@ -166,3 +207,28 @@ export const parseEnumParam =
   <T extends string>(allowed: readonly T[]) =>
   (raw: string | null): T | null =>
     raw !== null && (allowed as readonly string[]).includes(raw) ? (raw as T) : null;
+
+// Only digits, and nothing else.
+//
+// `Number(' 31')` is 31, `Number('31.0')` is 31, and `Number('0x1f')` is 31 --
+// all three would let a hand-edited address reach a Day lookup through a
+// spelling nobody wrote. The regex refuses them before the cast rather than
+// after it, for the same reason YEAR_MONTH bounds the year above.
+const INTEGER = /^\d{1,9}$/;
+
+/**
+ * An integer query parameter restricted to the values a caller says are real.
+ *
+ * The companion to parseEnumParam for parameters that are numbers. The predicate
+ * is passed in rather than being a range, because the meaningful question is
+ * usually membership: `?day=99` is not "out of range", it is a Day that does not
+ * exist, and the screen must fall back rather than render an empty quiz under a
+ * heading nobody wrote.
+ */
+export const parseIntParam =
+  (isAllowed: (value: number) => boolean) =>
+  (raw: string | null): number | null => {
+    if (raw === null || !INTEGER.test(raw)) return null;
+    const value = Number(raw);
+    return isAllowed(value) ? value : null;
+  };
