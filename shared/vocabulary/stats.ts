@@ -95,7 +95,16 @@ export interface VocabSummary {
   attempts: number;
   correct: number;
   /**
-   * correct / attempts, or null when nothing has been answered yet.
+   * correct / attempts, or null when nothing has been answered yet -- the
+   * LIFETIME ratio, counting every answer ever given.
+   *
+   * DO NOT LEAD A STUDY SCREEN WITH THIS. It answers "how often were you right
+   * while learning", which is a fact about the past: it can only fall as the
+   * reader practises, and once a word has been missed it can never return to
+   * 100% however well they know it now. Pairing it with 「間違えた問題だけ」
+   * produced a screen nobody could reconcile -- 90.6% at the top, and the
+   * review control greyed out because every word's most recent answer was
+   * right. That is what `retention` below is for.
    *
    * NULL, NOT ZERO. A 0% accuracy and "not started" look identical as a number
    * and are opposite facts; showing 0% for an untouched Day would tell the
@@ -104,6 +113,27 @@ export interface VocabSummary {
   accuracy: number | null;
   /** Words whose most recent answer was wrong, in any covered direction. */
   wrong: number;
+  /**
+   * Words answered at least once whose most recent answer was RIGHT.
+   *
+   * `mastered + wrong === answered`, always. That identity is what lets the
+   * headline figure and the 「間違えた問題だけ」 control describe one situation
+   * instead of two, and stats.test.ts pins it.
+   */
+  mastered: number;
+  /**
+   * mastered / answered, or null when nothing has been answered yet.
+   *
+   * THE FIGURE A STUDY SCREEN SHOULD LEAD WITH, because it is computed on the
+   * same basis as the review set: 100% means exactly 「間違えたままの問題は無い」
+   * and nothing else. It goes UP when the reader fixes a word, which is the
+   * behaviour they expect from a number that is meant to reward revision.
+   *
+   * Denominator is `answered`, not `total`: a Day half-opened would otherwise
+   * read as half-forgotten, when the untouched half is merely unseen (`unseen`
+   * is the figure for that).
+   */
+  retention: number | null;
   /** Words never answered in any covered direction. */
   unseen: number;
 }
@@ -120,6 +150,7 @@ export function summarize(
   let attempts = 0;
   let correct = 0;
   let answered = 0;
+  let mastered = 0;
 
   for (const word of words) {
     let touched = false;
@@ -129,7 +160,13 @@ export function summarize(
       correct += stat.correct;
       if (stat.attempts > 0) touched = true;
     }
-    if (touched) answered += 1;
+    if (touched) {
+      answered += 1;
+      // Derived from isWrong rather than from `answered - wrong`, so that the
+      // identity the two figures are supposed to satisfy is something a test
+      // can actually check instead of something arithmetic makes true.
+      if (!isWrong(index, word.id, setting)) mastered += 1;
+    }
   }
 
   return {
@@ -142,6 +179,8 @@ export function summarize(
     // ONE phrase to revise, and counting it twice would make 「残り」 disagree
     // with the number of questions the 'wrong' scope actually produces.
     wrong: words.filter((word) => isWrong(index, word.id, setting)).length,
+    mastered,
+    retention: answered === 0 ? null : mastered / answered,
     unseen: words.filter((word) =>
       directions.every((d) => statFor(index, word.id, d).attempts === 0),
     ).length,

@@ -165,6 +165,71 @@ describe('summarize', () => {
     expect(summary.accuracy).toBeNull();
   });
 
+  it('reports null retention before anything has been answered', () => {
+    // Same reason accuracy is null: 0% 定着 and 「まだ解いていない」 look the
+    // same and mean opposite things.
+    expect(summarize(DAY31, []).retention).toBeNull();
+  });
+
+  it('keeps 定着 and 要復習 describing one situation, never two', () => {
+    // THE POINT OF `mastered`/`retention` EXISTING.
+    //
+    // `accuracy` counts every answer ever given, so it falls when a word is
+    // missed and can never climb back to 100%. `wrong` counts the words whose
+    // MOST RECENT answer was wrong, so it empties as soon as they are revised.
+    // Leading the screen with the first while gating 「間違えた問題だけ」 on the
+    // second produced 「正答率 67%」 above a greyed-out review control, with
+    // nothing to explain the gap. This is that exact history.
+    const revised = summarize(
+      [wordById('et-481')!, wordById('et-482')!],
+      progress({
+        // Missed twice, then revised correctly.
+        'et-481': { ja: [3, 1, true] },
+        'et-482': { ja: [1, 1, true] },
+      }),
+      'ja_to_en',
+    );
+
+    expect(revised.accuracy).toBeCloseTo(0.5); // 2 of 4 answers
+    expect(revised.wrong).toBe(0);
+    // The figure the screen leads with agrees with the empty review set.
+    expect(revised.retention).toBe(1);
+    expect(revised.mastered).toBe(2);
+  });
+
+  it('splits every answered word into mastered or wrong, and nothing else', () => {
+    // The identity the screen depends on: 定着 and 要復習 partition 解答した単語.
+    // Computed independently in summarize (not as `answered - wrong`), so this
+    // can fail.
+    const summary = summarize(
+      DAY31,
+      progress({
+        'et-481': { ja: [2, 1, true] },
+        'et-482': { ja: [1, 0, false] },
+        'et-483': { ja: [4, 4, true] },
+        'et-484': { ja: [2, 0, false] },
+        // Answered in the OTHER direction only -- still an answered word.
+        'et-485': { en: [1, 1, true] },
+      }),
+      'both',
+    );
+
+    expect(summary.answered).toBe(5);
+    expect(summary.mastered + summary.wrong).toBe(summary.answered);
+    expect(summary.mastered).toBe(3);
+    expect(summary.wrong).toBe(2);
+    expect(summary.retention).toBeCloseTo(3 / 5);
+  });
+
+  it('measures 定着 against the words ANSWERED, not the whole Day', () => {
+    // A Day one question in is not 「94% 忘れている」. What has not been opened is
+    // unseen, which is what `unseen` reports.
+    const summary = summarize(DAY31, progress({ 'et-481': { ja: [1, 1, true] } }), 'ja_to_en');
+    expect(summary.answered).toBe(1);
+    expect(summary.retention).toBe(1);
+    expect(summary.unseen).toBe(15);
+  });
+
   it('ignores a row whose word the book no longer carries', () => {
     // `vocab_attempts` outlives the content it references, so this is a real
     // shape rather than a hypothetical one.

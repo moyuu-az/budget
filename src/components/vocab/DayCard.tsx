@@ -21,8 +21,16 @@ const percent = (ratio: number): string => `${Math.round(ratio * 100)}%`;
  * One Day in the picker, carrying the two figures that decide whether to open
  * it: how much of it has been answered, and how much of it is still wrong.
  *
- * ACCURACY IS ABSENT UNTIL SOMETHING HAS BEEN ANSWERED, rather than shown as 0%.
- * The two look identical as a number and mean opposite things, and 0% on a Day
+ * THE BADGE IS 定着率, NOT 通算正答率. Both are in the summary; only one of them
+ * can be read alongside 「要復習 N問」 without contradicting it. 定着率 counts the
+ * words whose MOST RECENT answer was right, which is the same basis the review
+ * set uses, so 100% and 「要復習 0問」 are the same statement. The lifetime ratio
+ * cannot return to 100% once a word has ever been missed, so a fully-revised Day
+ * would have shown 「正答率 81%」 next to nothing left to revise. See the note on
+ * `accuracy` in shared/vocabulary/stats.ts.
+ *
+ * IT IS ABSENT UNTIL SOMETHING HAS BEEN ANSWERED, rather than shown as 0%. The
+ * two look identical as a number and mean opposite things, and 0% on a Day
  * nobody has opened would tell the reader they had failed sixteen questions they
  * have never seen.
  */
@@ -47,7 +55,7 @@ export function DayCard({ day, summary, selected, onSelect }: Props): ReactEleme
           Day {day.id}
         </span>
         <Badge tone={tone}>
-          {summary.accuracy === null ? '未挑戦' : `正答率 ${percent(summary.accuracy)}`}
+          {summary.retention === null ? '未挑戦' : `定着 ${percent(summary.retention)}`}
         </Badge>
       </div>
 
