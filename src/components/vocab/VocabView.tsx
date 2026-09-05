@@ -247,13 +247,34 @@ function VocabView(): ReactElement {
       </header>
 
       <LoadGate status={status} height={360} label="学習記録" onRetry={fetchProgress}>
+        {/* --- THE HEADLINE FIGURE IS 定着, AND THAT IS A CORRECTION.
+
+            It used to be 全体の正答率 -- correct answers over every answer ever
+            given -- shown directly above 要復習 and beside the 「間違えた問題だけ」
+            control. The two cannot be read together. Someone who missed ten
+            questions and then revised every one of them correctly sees 90%,
+            while 要復習 is 0 and the review control is greyed out, and there is
+            nothing on the screen that explains why. It is not recoverable
+            either: the lifetime ratio can never return to 100% once a word has
+            been missed, so that state is permanent.
+
+            定着 counts the words whose MOST RECENT answer was right, over the
+            words answered -- the same basis 「間違えた問題だけ」 selects on. 100%
+            and 「要復習 0語」 are now the same statement, and the number goes UP
+            when the reader fixes something, which is what they are revising for.
+
+            The lifetime ratio is still shown, next to the answer count it is
+            derived from and labelled 通算, because "how often was I right while
+            learning this" is a real question -- just not the one the top of a
+            study screen should be answering. --- */}
         <Card padding="md" className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
           <div>
-            <p className="text-[11px] text-[var(--color-content-muted)]">全体の正答率</p>
+            <p className="text-[11px] text-[var(--color-content-muted)]">定着</p>
             <p className="text-2xl font-semibold text-[var(--color-content-primary)]">
-              {overall.accuracy === null
-                ? '—'
-                : `${Math.round(overall.accuracy * 100)}%`}
+              {overall.retention === null ? '—' : `${Math.round(overall.retention * 100)}%`}
+            </p>
+            <p className="text-[10px] text-[var(--color-content-muted)]">
+              最後の解答が正解だった語の割合
             </p>
           </div>
           <div>
@@ -268,7 +289,14 @@ function VocabView(): ReactElement {
           </div>
           <div>
             <p className="text-[11px] text-[var(--color-content-muted)]">総解答数</p>
-            <p className="text-sm text-[var(--color-content-secondary)]">{overall.attempts}回</p>
+            <p className="text-sm text-[var(--color-content-secondary)]">
+              {overall.attempts}回
+              {overall.accuracy !== null && (
+                <span className="ml-1 text-[var(--color-content-muted)]">
+                  ・通算正答率 {Math.round(overall.accuracy * 100)}%
+                </span>
+              )}
+            </p>
           </div>
         </Card>
 
@@ -347,6 +375,24 @@ function VocabView(): ReactElement {
               </span>
             )}
           </p>
+
+          {/* SAY WHY THE CONTROL IS GREYED OUT.
+
+              A disabled tab explains nothing, and the reason is genuinely not
+              obvious: the reader may well remember getting questions wrong in
+              this Day. What matters is that they went back and fixed them --
+              「間違えた問題だけ」 selects on the MOST RECENT answer, so a word
+              revised correctly leaves the set. Without this line the only other
+              number in view was a percentage below 100, and the screen looked
+              broken. The note is only shown once the Day has actually been
+              answered; on an untouched Day the empty review set needs no
+              explanation. */}
+          {daySummary.wrong === 0 && daySummary.answered > 0 && (
+            <p className="text-[11px] text-[var(--color-content-muted)]">
+              このDayに間違えたままの問題はありません（最後の解答がすべて正解）。
+              「間違えた問題だけ」は、次に間違えたときに選べるようになります。
+            </p>
+          )}
 
           <div className="flex flex-col gap-2 sm:flex-row">
             <Button
