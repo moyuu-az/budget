@@ -44,6 +44,61 @@ describe('every entry accepts its own answer', () => {
   });
 });
 
+describe('the book\'s bracket alternations are all accepted', () => {
+  // THE TEST THAT WAS MISSING.
+  //
+  // The first version of this module guessed what a bracket replaced, using a
+  // regex over the text before it. Japanese is not spaced, so the guess was
+  // wrong wherever the stem ended in kana, and FOUR entries rejected their own
+  // alternative reading -- 「〜を見て歩く」, 「〜する予定である」,
+  // 「〜して残念に思う」, 「AをBに持って行く」. Every existing test passed,
+  // because none of them tried the alternative.
+  //
+  // Now the alternation is data (`jaAlt`), and this is what keeps it honest:
+  // an entry whose gloss carries 「［…］」 must declare it, and what it declares
+  // must be accepted.
+  const BRACKETED = VOCAB_WORDS.filter((word) => /［[^］]+］/u.test(word.jaFull));
+
+  it('finds the entries that have one, so this suite cannot silently cover nothing', () => {
+    expect(BRACKETED.length).toBeGreaterThanOrEqual(9);
+  });
+
+  it.each(BRACKETED.map((w) => [w.id, w.jaFull] as const))(
+    '%s 「%s」 declares its alternative reading',
+    (id) => {
+      const word = wordById(id)!;
+      // 521 is the one exception the rule has to allow: its bracket sits inside
+      // a ≒ cross-reference (「≒ begin doing［to do］」), not in the gloss, so
+      // there is no second reading of the ANSWER to declare.
+      if (!/≒/u.test(word.jaFull.replace(/^[^（]*/u, ''))) {
+        expect(word.jaAlt, `${id} has a bracket alternation but no jaAlt`).toBeDefined();
+      }
+      for (const alt of word.jaAlt ?? []) {
+        expect(
+          isAcceptedAnswer(alt, word, 'en_to_ja'),
+          `${id} rejects its own declared alternative 「${alt}」`,
+        ).toBe(true);
+      }
+    },
+  );
+
+  it.each([
+    ['et-487', '〜を見て歩く'],
+    ['et-497', 'AをBに持って行く'],
+    ['et-520', '〜する予定である'],
+    ['et-538', '〜する用意ができている'],
+    ['et-540', '〜して残念に思う'],
+    ['et-543', 'ちゃんと〜する'],
+    ['et-546', '〜が上手である'],
+    ['et-554', '〜の用意ができている'],
+    ['et-556', '〜を欠勤している'],
+  ])('%s accepts 「%s」', (id, typed) => {
+    // Named one by one, so a regression fails with the actual wording rather
+    // than with "some entry".
+    expect(isAcceptedAnswer(typed, wordById(id)!, 'en_to_ja')).toBe(true);
+  });
+});
+
 describe('generosity has a limit', () => {
   it('never accepts another entry\'s answer unless it would equally answer the prompt', () => {
     // The failure this prevents: an over-eager normalisation collapsing two
@@ -59,6 +114,34 @@ describe('generosity has a limit', () => {
             isAcceptedAnswer(answerTextFor(other, direction), word, direction),
             `${word.id} accepted ${other.id}'s answer 「${answerTextFor(other, direction)}」`,
           ).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('never lets two different entries accept the same wording', () => {
+    // STRONGER THAN THE TEST ABOVE, and it had to be.
+    //
+    // That one tries each entry's own answer against every other entry. It
+    // cannot see a collision between two DERIVED forms -- which is exactly what
+    // the old bracket heuristic produced: `be ready to do` and `be ready for`
+    // both accepted 「用意ができている」, erasing the distinction the book draws
+    // between them (and which their tips cross-reference).
+    //
+    // Comparing the whole accepted SETS is what catches that.
+    for (const direction of QUIZ_DIRECTIONS) {
+      const sets = VOCAB_WORDS.map(
+        (word) => [word, new Set(acceptedAnswers(word, direction))] as const,
+      );
+      for (const [word, accepted] of sets) {
+        for (const [other, otherAccepted] of sets) {
+          if (other.id === word.id) continue;
+          if (isEquallyCorrect(other, word, direction)) continue;
+          const shared = [...accepted].filter((form) => otherAccepted.has(form));
+          expect(
+            shared,
+            `${word.id} and ${other.id} both accept ${JSON.stringify(shared)}`,
+          ).toEqual([]);
         }
       }
     }
@@ -116,6 +199,23 @@ describe('what a reader may leave out', () => {
   it('accepts a near-equivalent the book prints after 、', () => {
     // 484 get back: 「戻る、帰る」
     expect(isAcceptedAnswer('帰る', wordById('et-484')!, 'en_to_ja')).toBe(true);
+  });
+
+  it.each([
+    ['et-493', '〜を冷ます'],
+    ['et-482', '〜を伐採する'],
+    ['et-490', '〜の代金を払う'],
+    ['et-491', '〜をしまう'],
+    ['et-494', '〜の面倒を見る'],
+    ['et-545', '〜に遅れる'],
+    ['et-548', '〜と違う'],
+    ['et-558', '〜にうんざりしている'],
+  ])('%s accepts 「%s」 — the particle carries across the 、', (id, typed) => {
+    // 「〜を冷やす、冷ます」 is two readings of ONE frame. Splitting on 、 and
+    // stopping there accepts 「冷ます」 but rejects 「〜を冷ます」, which is what
+    // a reader actually writes -- the same shape of defect as the bracket
+    // heuristic, found by typing into the real screen.
+    expect(isAcceptedAnswer(typed, wordById(id)!, 'en_to_ja')).toBe(true);
   });
 
   it('does not require the parenthetical notes the book prints', () => {

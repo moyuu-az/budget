@@ -34,7 +34,7 @@ const NEVER_ANSWERED = { attempts: 0, correct: 0, lastCorrect: null, lastAnswere
 const at = (
   wordId: string,
   lastCorrect: boolean,
-  direction: 'en_to_ja' | 'ja_to_en' = 'en_to_ja',
+  direction: 'en_to_ja' | 'ja_to_en' = 'ja_to_en',
 ): VocabProgress[number] => ({
   wordId,
   byDirection: {
@@ -68,24 +68,29 @@ afterEach(() => {
 });
 
 describe('英単語 の設定', () => {
-  it('reads the Day, direction and scope from the address', async () => {
-    goTo('?day=33&dir=ja_to_en&scope=all');
+  it('reads the Day and scope from the address', async () => {
+    goTo('?day=33&scope=all');
     render(<VocabView />);
 
     // Day 33 is 「動詞句6」. If the address were ignored the screen would open on
     // Day 31 and the reader's bookmark would be a lie.
-    expect(await screen.findByText(/Day 33・すべて・手入力・16問/)).toBeInTheDocument();
-    const tabs = screen.getByRole('tablist', { name: '出題の向き' });
-    expect(within(tabs).getByRole('tab', { name: '日本語 → 英語' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
+    expect(await screen.findByText(/Day 33・すべて・手入力・/)).toBeInTheDocument();
+  });
+
+  it('asks only 日本語 → 英語 for now', async () => {
+    // The other direction is switched off at the offer, not removed from the
+    // contract: marking free-text Japanese against a printed gloss can be wrong
+    // about a reader who knew the answer, and a wrong one lands in
+    // 「間違えた問題だけ」.
+    render(<VocabView />);
+    expect(await screen.findByText(/日本語 → 英語・Day 31/)).toBeInTheDocument();
+    expect(screen.queryByRole('tablist', { name: '出題の向き' })).not.toBeInTheDocument();
   });
 
   it('falls back instead of trusting a hand-edited address', async () => {
     // `?day=99` names a Day that does not exist. Honouring it would render an
     // empty quiz under a heading nobody wrote.
-    goTo('?day=99&dir=sideways&scope=nonsense&input=telepathy');
+    goTo('?day=99&scope=nonsense&input=telepathy');
     render(<VocabView />);
     expect(await screen.findByText(/Day 31・すべて・手入力・16問/)).toBeInTheDocument();
   });
@@ -110,7 +115,7 @@ describe('英単語 の設定', () => {
       progress: [at('et-481', false), at('et-482', true)],
       status: 'ready',
     });
-    goTo('?day=31&dir=en_to_ja');
+    goTo('?day=31');
     render(<VocabView />);
 
     const scopes = await screen.findByRole('tablist', { name: '出題範囲' });
@@ -140,7 +145,7 @@ describe('クイズを解く', () => {
       progress: [at(day31[0].id, false)],
       status: 'ready',
     });
-    goTo(`?day=31&dir=en_to_ja&scope=wrong&input=${input}`);
+    goTo(`?day=31&scope=wrong&input=${input}`);
     render(<VocabView />);
     await user.click(await screen.findByRole('button', { name: 'クイズを始める' }));
     return day31[0];
@@ -150,12 +155,12 @@ describe('クイズを解く', () => {
   const choiceButtons = () =>
     screen.getAllByRole('listitem').map((li) => within(li).getByRole('button'));
 
-  it('shows the English and asks for the Japanese', async () => {
+  it('shows the Japanese and asks for the English', async () => {
     const user = userEvent.setup();
     const word = await startSingleQuestion(user);
 
-    expect(await screen.findByText(word.en)).toBeInTheDocument();
-    expect(screen.getByText('英語 → 日本語')).toBeInTheDocument();
+    expect(await screen.findByText(word.ja)).toBeInTheDocument();
+    expect(screen.getByText('日本語 → 英語')).toBeInTheDocument();
     expect(screen.getByText('1 / 1 問目・ここまで 0問正解')).toBeInTheDocument();
   });
 
@@ -167,7 +172,7 @@ describe('クイズを解く', () => {
     // meaning, which is the answer.
     expect(screen.queryByText('解説')).not.toBeInTheDocument();
 
-    await user.click(await screen.findByRole('button', { name: word.ja }));
+    await user.click(await screen.findByRole('button', { name: word.en }));
 
     expect(await screen.findByText('解説')).toBeInTheDocument();
     expect(screen.getByText('ワンポイント・アドバイス')).toBeInTheDocument();
@@ -182,7 +187,7 @@ describe('クイズを解く', () => {
     const word = await startSingleQuestion(user);
 
     const choices = choiceButtons();
-    const wrong = choices.find((button) => button.textContent?.includes(word.ja) === false)!;
+    const wrong = choices.find((button) => button.textContent?.includes(word.en) === false)!;
     await user.click(wrong);
 
     // An answer that can be changed after the correct one is shown records what
@@ -197,13 +202,31 @@ describe('クイズを解く', () => {
     vi.mocked(api.recordVocabAttempts).mockResolvedValue([]);
     const word = await startSingleQuestion(user);
 
-    await user.click(await screen.findByRole('button', { name: word.ja }));
+    await user.click(await screen.findByRole('button', { name: word.en }));
     await user.click(await screen.findByRole('button', { name: '結果を見る' }));
 
     expect(api.recordVocabAttempts).toHaveBeenCalledTimes(1);
     expect(api.recordVocabAttempts).toHaveBeenCalledWith([
-      { wordId: word.id, direction: 'en_to_ja', correct: true } satisfies VocabAttemptInput,
+      { wordId: word.id, direction: 'ja_to_en', correct: true } satisfies VocabAttemptInput,
     ]);
+  });
+
+  it('lets the keyboard reach 中断する after answering', async () => {
+    // The window listener used to swallow Enter and Space wherever focus was, so
+    // 中断する was unreachable for anyone not using a mouse: pressing Enter on it
+    // advanced to the next question instead of leaving the quiz.
+    const user = userEvent.setup();
+    vi.mocked(api.recordVocabAttempts).mockResolvedValue([]);
+    const word = await startSingleQuestion(user);
+
+    await user.click(await screen.findByRole('button', { name: word.en }));
+    const abort = screen.getByRole('button', { name: '中断する' });
+    abort.focus();
+    await user.keyboard('{Enter}');
+
+    // Back on the setup screen, and nothing was recorded.
+    expect(await screen.findByRole('button', { name: 'クイズを始める' })).toBeInTheDocument();
+    expect(api.recordVocabAttempts).not.toHaveBeenCalled();
   });
 
   it('advances once when Enter is pressed on the focused 次へ button', async () => {
@@ -215,7 +238,7 @@ describe('クイズを解く', () => {
     vi.mocked(api.recordVocabAttempts).mockResolvedValue([]);
     const word = await startSingleQuestion(user);
 
-    await user.click(await screen.findByRole('button', { name: word.ja }));
+    await user.click(await screen.findByRole('button', { name: word.en }));
     const next = await screen.findByRole('button', { name: '結果を見る' });
     next.focus();
     await user.keyboard('{Enter}');
@@ -230,7 +253,7 @@ describe('クイズを解く', () => {
     vi.mocked(api.recordVocabAttempts).mockResolvedValue([]);
     const word = await startSingleQuestion(user);
 
-    await user.click(await screen.findByRole('button', { name: word.ja }));
+    await user.click(await screen.findByRole('button', { name: word.en }));
     (document.activeElement as HTMLElement | null)?.blur();
     await user.keyboard('{Enter}');
 
@@ -242,7 +265,7 @@ describe('クイズを解く', () => {
     const user = userEvent.setup();
     const word = await startSingleQuestion(user);
 
-    const slot = choiceButtons().findIndex((b) => b.textContent?.includes(word.ja));
+    const slot = choiceButtons().findIndex((b) => b.textContent?.includes(word.en));
     await user.keyboard(String(slot + 1));
 
     expect(await screen.findByText('正解')).toBeInTheDocument();
@@ -253,7 +276,7 @@ describe('クイズを解く', () => {
     vi.mocked(api.recordVocabAttempts).mockRejectedValue(new Error('offline'));
     const word = await startSingleQuestion(user);
 
-    await user.click(await screen.findByRole('button', { name: word.ja }));
+    await user.click(await screen.findByRole('button', { name: word.en }));
     await user.click(await screen.findByRole('button', { name: '結果を見る' }));
 
     // Showing only the score would let the reader move on believing their review
@@ -267,7 +290,7 @@ describe('クイズを解く', () => {
     vi.mocked(api.recordVocabAttempts).mockRejectedValue(new Error('offline'));
     const word = await startSingleQuestion(user);
 
-    await user.click(choiceButtons().find((b) => b.textContent?.includes(word.ja) === false)!);
+    await user.click(choiceButtons().find((b) => b.textContent?.includes(word.en) === false)!);
     await user.click(await screen.findByRole('button', { name: '結果を見る' }));
 
     // The set would be rebuilt from a record the server never received, so the
@@ -284,7 +307,7 @@ describe('クイズを解く', () => {
     vi.mocked(api.recordVocabAttempts).mockResolvedValue([]);
     const word = await startSingleQuestion(user);
 
-    await user.click(choiceButtons().find((b) => b.textContent?.includes(word.ja) === false)!);
+    await user.click(choiceButtons().find((b) => b.textContent?.includes(word.en) === false)!);
     await user.click(await screen.findByRole('button', { name: '結果を見る' }));
 
     expect(await screen.findByText('間違えた 1問')).toBeInTheDocument();
@@ -296,8 +319,8 @@ describe('クイズを解く', () => {
     // 「〜してうれしい」→英語 with both on screen, the reader has two right
     // answers and is marked wrong for picking one.
     const user = userEvent.setup();
-    useVocabStore.setState({ progress: [at('et-541', false, 'ja_to_en')], status: 'ready' });
-    goTo('?day=34&dir=ja_to_en&scope=wrong&input=choice');
+    useVocabStore.setState({ progress: [at('et-541', false)], status: 'ready' });
+    goTo('?day=34&scope=wrong&input=choice');
     render(<VocabView />);
     await user.click(await screen.findByRole('button', { name: 'クイズを始める' }));
 
@@ -312,9 +335,9 @@ describe('手入力で答える', () => {
     const day31 = wordsForDay(31);
     // Failed in ja_to_en specifically: the review set is per direction, so a
     // fixture that recorded the other direction would leave nothing to ask.
-    useVocabStore.setState({ progress: [at(day31[0].id, false, 'ja_to_en')], status: 'ready' });
+    useVocabStore.setState({ progress: [at(day31[0].id, false)], status: 'ready' });
     // ja_to_en: the answer is English, which is what typing is really for.
-    goTo('?day=31&dir=ja_to_en&scope=wrong&input=typed');
+    goTo('?day=31&scope=wrong&input=typed');
     render(<VocabView />);
     await user.click(await screen.findByRole('button', { name: 'クイズを始める' }));
     return day31[0];
@@ -402,10 +425,10 @@ describe('手入力で答える', () => {
     const user = userEvent.setup();
     const day31 = wordsForDay(31);
     useVocabStore.setState({
-      progress: [at(day31[0].id, false, 'ja_to_en'), at(day31[1].id, false, 'ja_to_en')],
+      progress: [at(day31[0].id, false), at(day31[1].id, false)],
       status: 'ready',
     });
-    goTo('?day=31&dir=ja_to_en&scope=wrong&input=typed');
+    goTo('?day=31&scope=wrong&input=typed');
     render(<VocabView />);
     await user.click(await screen.findByRole('button', { name: 'クイズを始める' }));
 
@@ -423,8 +446,8 @@ describe('手入力で答える', () => {
     // choice list deliberately shows only one of them, so the reader has no way
     // to know which row the quiz picked -- typing the other must be correct.
     const user = userEvent.setup();
-    useVocabStore.setState({ progress: [at('et-541', false, 'ja_to_en')], status: 'ready' });
-    goTo('?day=34&dir=ja_to_en&scope=wrong&input=typed');
+    useVocabStore.setState({ progress: [at('et-541', false)], status: 'ready' });
+    goTo('?day=34&scope=wrong&input=typed');
     render(<VocabView />);
     await user.click(await screen.findByRole('button', { name: 'クイズを始める' }));
 
@@ -437,13 +460,82 @@ describe('手入力で答える', () => {
   it('starts in the choice list when the reader asked for that', async () => {
     const user = userEvent.setup();
     const day31 = wordsForDay(31);
-    useVocabStore.setState({ progress: [at(day31[0].id, false, 'ja_to_en')], status: 'ready' });
-    goTo('?day=31&dir=ja_to_en&scope=wrong&input=choice');
+    useVocabStore.setState({ progress: [at(day31[0].id, false)], status: 'ready' });
+    goTo('?day=31&scope=wrong&input=choice');
     render(<VocabView />);
     await user.click(await screen.findByRole('button', { name: 'クイズを始める' }));
 
     expect(screen.getAllByRole('listitem').length).toBeGreaterThan(1);
     expect(screen.queryByLabelText('答えを入力')).not.toBeInTheDocument();
+  });
+});
+
+describe('「分からない」', () => {
+  async function startOne(user: ReturnType<typeof userEvent.setup>, input: 'typed' | 'choice') {
+    const day31 = wordsForDay(31);
+    useVocabStore.setState({ progress: [at(day31[0].id, false)], status: 'ready' });
+    goTo(`?day=31&scope=wrong&input=${input}`);
+    render(<VocabView />);
+    await user.click(await screen.findByRole('button', { name: 'クイズを始める' }));
+    return day31[0];
+  }
+
+  it.each(['typed', 'choice'] as const)('is offered in %s mode', async (input) => {
+    const user = userEvent.setup();
+    await startOne(user, input);
+    expect(await screen.findByRole('button', { name: '分からない' })).toBeInTheDocument();
+  });
+
+  it('reveals the answer and the explanation without guessing', async () => {
+    const user = userEvent.setup();
+    const word = await startOne(user, 'typed');
+
+    await user.click(await screen.findByRole('button', { name: '分からない' }));
+
+    // Its own wording: what happened was not a wrong answer, it was no answer.
+    expect(await screen.findByText('答えられなかった')).toBeInTheDocument();
+    expect(screen.getByText(word.note)).toBeInTheDocument();
+    expect(screen.getByText(/正解:/)).toHaveTextContent(word.en);
+  });
+
+  it('records it as wrong, so the word comes back in 「間違えた問題だけ」', async () => {
+    // The whole reason not to guess: a lucky click on four options marks a word
+    // learned one time in four, and the review list is built on that record.
+    const user = userEvent.setup();
+    vi.mocked(api.recordVocabAttempts).mockResolvedValue([]);
+    const word = await startOne(user, 'choice');
+
+    await user.click(await screen.findByRole('button', { name: '分からない' }));
+    await user.click(await screen.findByRole('button', { name: '結果を見る' }));
+
+    expect(api.recordVocabAttempts).toHaveBeenCalledWith([
+      { wordId: word.id, direction: 'ja_to_en', correct: false },
+    ]);
+  });
+});
+
+describe('未記録の解答', () => {
+  it('survives leaving the results screen, and can be re-sent from the Day list', async () => {
+    // It used to live only in the results component's state, so 「Day を選び直す」
+    // -- the button directly under 「記録できませんでした」 -- destroyed the only
+    // copy of the run.
+    const user = userEvent.setup();
+    vi.mocked(api.recordVocabAttempts).mockRejectedValue(new Error('offline'));
+    const day31 = wordsForDay(31);
+    useVocabStore.setState({ progress: [at(day31[0].id, false)], status: 'ready' });
+    goTo('?day=31&scope=wrong&input=choice');
+    render(<VocabView />);
+    await user.click(await screen.findByRole('button', { name: 'クイズを始める' }));
+    await user.click(await screen.findByRole('button', { name: '分からない' }));
+    await user.click(await screen.findByRole('button', { name: '結果を見る' }));
+
+    await user.click(await screen.findByRole('button', { name: 'Day を選び直す' }));
+
+    expect(await screen.findByText(/記録できていない解答が 1問あります/)).toBeInTheDocument();
+
+    vi.mocked(api.recordVocabAttempts).mockResolvedValue([]);
+    await user.click(screen.getByRole('button', { name: 'もう一度記録する' }));
+    expect(api.recordVocabAttempts).toHaveBeenCalledTimes(2);
   });
 });
 

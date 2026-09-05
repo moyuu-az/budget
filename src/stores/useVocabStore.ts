@@ -38,6 +38,18 @@ interface VocabState {
    * showing has gone away.
    */
   saving: boolean;
+  /**
+   * A finished run that could NOT be written, kept so it can be sent again.
+   *
+   * WHY IT LIVES HERE AND NOT IN THE SCREEN
+   *   It used to live in the results component's state, which meant the only
+   *   copy of sixteen answers disappeared the moment the reader pressed
+   *   「Day を選び直す」 -- the button sitting directly beneath 「記録できません
+   *   でした」. The browser's back button and the `g v` shortcut destroyed it
+   *   just as quietly. Holding it in the store lets the reader wander off and
+   *   still get their answers recorded.
+   */
+  pendingAttempts: readonly VocabAttemptInput[] | null;
   fetchProgress: () => Promise<void>;
   /**
    * Records a finished run. Resolves to whether it was stored.
@@ -50,12 +62,17 @@ interface VocabState {
    */
   recordAttempts: (attempts: readonly VocabAttemptInput[]) => Promise<boolean>;
   resetProgress: (day: number | null) => Promise<boolean>;
+  /** Re-sends whatever failed to save. No-op when nothing is pending. */
+  retryPending: () => Promise<boolean>;
+  /** Throws the unsaved run away, once the reader has been told it will be lost. */
+  discardPending: () => void;
 }
 
-export const useVocabStore = create<VocabState>((set) => ({
+export const useVocabStore = create<VocabState>((set, get) => ({
   progress: [],
   status: 'idle',
   saving: false,
+  pendingAttempts: null,
 
   fetchProgress: async () => {
     set({ status: 'loading' });
@@ -82,14 +99,23 @@ export const useVocabStore = create<VocabState>((set) => ({
       // accuracy is exactly the person who would notice and have no way to tell
       // which figure was wrong.
       const progress = await getApi().recordVocabAttempts(attempts);
-      set({ progress, status: 'ready', saving: false });
+      set({ progress, status: 'ready', saving: false, pendingAttempts: null });
       return true;
     } catch (e) {
-      set({ saving: false });
+      // Kept, not dropped. This is the only copy of the run.
+      set({ saving: false, pendingAttempts: attempts });
       reportError(e);
       return false;
     }
   },
+
+  retryPending: async () => {
+    const pending = get().pendingAttempts;
+    if (pending === null) return true;
+    return get().recordAttempts(pending);
+  },
+
+  discardPending: () => set({ pendingAttempts: null }),
 
   resetProgress: async (day) => {
     try {

@@ -55,10 +55,20 @@ interface Props {
 /** The number keys, so a desktop reader never has to reach for the mouse. */
 const CHOICE_KEYS = ['1', '2', '3', '4', '5', '6'] as const;
 
-/** What the reader gave, and how. `correct` is decided once, at the moment of answering. */
+/**
+ * What the reader gave, and how. `correct` is decided once, at the moment of
+ * answering.
+ *
+ * 'unknown' IS AN ANSWER, not a skip. 「分からない」 records a wrong answer,
+ * because that is what it is -- and recording it is the point: it puts the word
+ * into 「間違えた問題だけ」, which is exactly where a phrase you could not
+ * retrieve belongs. The alternative, guessing at four options, has a 25% chance
+ * of marking a word learned that the reader cannot produce at all.
+ */
 type Given =
   | { via: 'choice'; wordId: string; correct: boolean }
-  | { via: 'typed'; text: string; correct: boolean };
+  | { via: 'typed'; text: string; correct: boolean }
+  | { via: 'unknown'; correct: false };
 
 export function QuizRunner({
   questions,
@@ -110,6 +120,10 @@ export function QuizRunner({
     });
   }, [question.direction, typed, word]);
 
+  const giveUp = useCallback(() => {
+    setGiven((current) => current ?? { via: 'unknown', correct: false });
+  }, []);
+
   const advance = useCallback(() => {
     if (given === null) return;
 
@@ -158,12 +172,19 @@ export function QuizRunner({
       }
 
       if (event.key === 'Enter' || event.key === ' ') {
-        // preventDefault() before advance(), not after.
+        // A FOCUSED CONTROL KEEPS ITS OWN KEYS.
         //
-        // Space scrolls the page, and Enter or Space on a focused button is also
-        // a click -- so when 次へ has focus this listener and that click are the
-        // same keypress. Cancelling the default action is what keeps them from
-        // both running.
+        // This listener used to swallow Enter and Space wherever focus was, so
+        // after answering, tabbing to 「中断する」 and pressing Enter advanced to
+        // the next question instead of leaving the quiz -- the button was
+        // unreachable for anyone not using a mouse. Standing aside lets the
+        // browser turn the keypress into a click on whatever is focused, which
+        // is right for 次へ as well as for 中断する.
+        const target = event.target as HTMLElement | null;
+        const tag = target?.tagName;
+        if (tag === 'BUTTON' || tag === 'A' || tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+        // Nothing focused: Space would scroll the page, so cancel before acting.
         event.preventDefault();
         advance();
       }
@@ -259,6 +280,9 @@ export function QuizRunner({
             <Button type="button" variant="secondary" onClick={() => setMode('choice')}>
               選択肢で答える
             </Button>
+            <Button type="button" variant="ghost" onClick={giveUp}>
+              分からない
+            </Button>
           </div>
           <p className="text-[11px] text-[var(--color-content-muted)]">
             〜・記号・前後の空白は無視されます。書籍の別の意味や同義語でも正解になります。
@@ -307,6 +331,15 @@ export function QuizRunner({
         </ul>
       )}
 
+      {/* Also offered beside the choices: guessing at four options marks a word
+          learned one time in four, and 「間違えた問題だけ」 is built on that
+          record. Saying so is more useful than a lucky click. */}
+      {given === null && mode === 'choice' && (
+        <Button variant="ghost" onClick={giveUp} className="w-full">
+          分からない
+        </Button>
+      )}
+
       {given !== null && word && (
         <Card padding="lg" className="space-y-3">
           <p
@@ -314,12 +347,26 @@ export function QuizRunner({
               'text-sm font-semibold',
               answeredCorrectly
                 ? 'text-[var(--color-semantic-success)]'
-                : 'text-[var(--color-semantic-danger)]',
+                : given.via === 'unknown'
+                  ? 'text-[var(--color-semantic-warning)]'
+                  : 'text-[var(--color-semantic-danger)]',
             )}
             role="status"
           >
-            {answeredCorrectly ? '正解' : '不正解'}
+            {/* Its own wording, not 「不正解」. It is recorded the same way, but
+                「答えられなかった」 is what happened, and a reader looking back
+                at the results deserves the distinction. */}
+            {answeredCorrectly ? '正解' : given.via === 'unknown' ? '答えられなかった' : '不正解'}
           </p>
+
+          {given.via === 'unknown' && (
+            <p className="text-xs text-[var(--color-content-muted)]">
+              正解:{' '}
+              <span className="text-[var(--color-content-secondary)]">
+                {canonicalAnswer(word, question.direction)}
+              </span>
+            </p>
+          )}
 
           {/* What they wrote, echoed back. Without it a reader who mistyped
               cannot tell whether they had the phrase wrong or the spelling. */}

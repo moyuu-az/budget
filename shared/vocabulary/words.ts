@@ -112,6 +112,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
     en: 'look around',
     ja: '〜を見て回る',
     jaFull: '〜を見て回る［歩く］',
+    jaAlt: ['〜を見て歩く'],
     note: 'look（見る）＋ around（周囲を）。ぐるりと見渡す、店や街を見て回る。',
     tip: '目的語なしでも使えて「あたりを見回す」。買い物で「見ているだけです」は I\'m just looking around.',
     example: {
@@ -199,7 +200,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
     note: 'cool（冷たくする）＋ down（下へ）。温度を下げる。',
     tip: '他動詞（〜を冷やす）でも自動詞（冷める）でも使える。人が主語なら「頭を冷やす・落ち着く」（Cool down!）。',
     example: {
-      en: 'Let the soup cool down before you eat it.',
+      en: 'Cool the soup down before you eat it.',
       ja: '食べる前にスープを冷ましなさい。',
     },
   },
@@ -254,6 +255,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
     en: 'take A to B',
     ja: 'AをBに連れて行く',
     jaFull: 'AをBに連れて［持って］行く',
+    jaAlt: ['AをBに持って行く'],
     note: 'take は「話し手から離れる方向へ持って行く」。B が行き先。',
     tip: 'bring は「話し手のいる方へ持って来る」。相手のいる場所へ向かうときは英語では bring を選ぶことがある（I\'ll bring the wine.）。',
     example: {
@@ -540,7 +542,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
     tip: 'enjoy to do は誤り。enjoy oneself で「楽しむ」（Did you enjoy yourself?）。',
     example: {
       en: 'I enjoy listening to music before bed.',
-      ja: '寝る前に音楽を聴くのが楽しみだ。',
+      ja: '寝る前に音楽を聴くのが楽しい。',
     },
   },
   {
@@ -556,6 +558,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
       en: "I'd like to reserve a table for two.",
       ja: '2名で席を予約したいのですが。',
     },
+    synonymIds: ['et-523'],
   },
   {
     id: 'et-519',
@@ -564,8 +567,8 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
     en: 'love doing',
     ja: '〜するのが大好きである',
     jaFull: '〜するのが大好きである（love to do も可）',
-    note: 'like より強い。習慣として好きなら doing が自然。',
-    tip: 'love to do も使える。一般的な好みは doing、特定の機会には to do という傾向がある。',
+    note: 'like より強い。活動そのものを楽しんでいるときは doing が自然。',
+    tip: 'love to do も使える。英では「その活動が楽しい」＝ doing、「そうするのがよいと思ってそうしている（方針・習慣）」＝ to do の傾向。米語では to do も広く使われるので、どちらでも誤りにはならない。',
     example: {
       en: 'She loves cooking for her family.',
       ja: '彼女は家族に料理を作るのが大好きだ。',
@@ -578,6 +581,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
     en: 'plan to do',
     ja: '〜するつもりである',
     jaFull: '〜するつもり［予定］である',
+    jaAlt: ['〜する予定である'],
     note: 'plan は to do を取る。',
     tip: '名詞の plan は for 〜 と to do の両方を取る（a plan for the trip / a plan to move）。',
     example: {
@@ -592,7 +596,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
     en: 'start doing',
     ja: '〜し始める',
     jaFull: '〜し始める（≒ begin doing［to do］）',
-    note: 'start は doing も to do も取れる、珍しく寛容な動詞。',
+    note: 'start は doing も to do も取れる（begin / continue / like なども同じ）。',
     tip: '進行形のときは to do を選ぶ。It\'s starting to rain. のほうが -ing が続かず読みやすい。',
     example: {
       en: 'He started learning Spanish last month.',
@@ -607,7 +611,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
     ja: '〜し終える',
     jaFull: '〜し終える',
     note: 'finish は doing のみ。to do は取らない。',
-    tip: 'enjoy / finish / stop / keep は doing 専用。まとめて覚えると効率がいい。',
+    tip: 'enjoy / finish / keep / stop は目的語に doing しか取らない。stop to do の to do は目的語ではなく「〜するために」の副詞句なので別物（524）。',
     example: {
       en: 'Have you finished writing the report?',
       ja: '報告書は書き終わった？',
@@ -626,6 +630,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
       en: 'I hope to see you again soon.',
       ja: 'また近いうちにお会いしたいです。',
     },
+    synonymIds: ['et-518'],
   },
   {
     id: 'et-524',
@@ -726,6 +731,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
       en: 'My parents want me to become a teacher.',
       ja: '両親は私に教師になってほしいと思っている。',
     },
+    synonymIds: ['et-535'],
   },
   {
     id: 'et-531',
@@ -796,6 +802,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
       en: "I'd like you to check this document.",
       ja: 'この書類を確認していただきたいのですが。',
     },
+    synonymIds: ['et-530'],
   },
   {
     id: 'et-536',
@@ -832,6 +839,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
     en: 'be ready to do',
     ja: '〜する準備ができている',
     jaFull: '〜する準備［用意］ができている',
+    jaAlt: ['〜する用意ができている'],
     note: 'ready（用意ができた）＋ to do。',
     tip: '後ろが名詞なら be ready for（554）。to do か for かは後ろの品詞で決まる。',
     example: {
@@ -860,6 +868,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
     en: 'be sorry to do',
     ja: '〜して気の毒に思う',
     jaFull: '〜して気の毒［残念］に思う',
+    jaAlt: ['〜して残念に思う'],
     note: 'sorry は「すまない」だけでなく「気の毒だ・残念だ」。',
     tip: "I'm sorry to hear that. は相手の不幸への定番の応答で、謝罪ではない。",
     example: {
@@ -904,6 +913,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
     en: 'be sure to do',
     ja: '必ず〜する',
     jaFull: '必ず［ちゃんと］〜する',
+    jaAlt: ['ちゃんと〜する'],
     note: '話し手から見て「間違いなくそうなる」。',
     tip: '命令文だと「必ず〜してね」（Be sure to lock the door.）。be sure of / about ＋ 名詞 は「〜を確信している」で別物。',
     example: {
@@ -948,6 +958,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
     en: 'be good at',
     ja: '〜が得意である',
     jaFull: '〜が得意［上手］である',
+    jaAlt: ['〜が上手である'],
     note: 'at が「一点」を指し、その分野で良い、という組み立て。',
     tip: 'at の後ろは名詞か doing（good at cooking）。反対は be bad［poor］at。',
     example: {
@@ -1061,6 +1072,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
     en: 'be ready for',
     ja: '〜の準備ができている',
     jaFull: '〜の準備［用意］ができている',
+    jaAlt: ['〜の用意ができている'],
     note: '後ろが名詞のときは for。',
     tip: '動詞が続くなら be ready to do（538）。for か to do かは後ろの品詞で決まる。',
     example: {
@@ -1089,6 +1101,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
     en: 'be absent from',
     ja: '〜を欠席している',
     jaFull: '〜を欠席［欠勤］している',
+    jaAlt: ['〜を欠勤している'],
     note: 'absent（不在の）＋ from（〜から離れて）。',
     tip: '反対は be present at。口語で「休む」は take a day off。',
     example: {
@@ -1122,7 +1135,7 @@ export const VOCAB_WORDS: readonly VocabWord[] = [
     tip: 'be tired from は「〜で疲れている」（肉体的）。of と from で意味が変わるので、前置詞まで込みで覚えること。',
     example: {
       en: "I'm tired of eating the same lunch every day.",
-      ja: '毎日同じ昼食で飽きている。',
+      ja: '毎日同じ昼食を食べるのに飽きている。',
     },
   },
   {
