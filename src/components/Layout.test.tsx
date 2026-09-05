@@ -95,6 +95,30 @@ describe('both shells', () => {
     expect((await screen.findAllByText('今月のサマリー')).length).toBeGreaterThanOrEqual(2);
   });
 
+  it('repeats the household figures above the content on a phone', () => {
+    render(
+      <Layout currentView="dashboard" onNavigate={noop}>
+        <div />
+      </Layout>,
+    );
+    // Twice: the sidebar's copy and the phone header's. Exactly one of the two
+    // is displayed in a browser; JSDOM applies no stylesheet and sees both.
+    expect(screen.getAllByText('現在の残高').length).toBe(2);
+  });
+
+  it('leaves them out on a screen that shows none of the ledger, so the content is not pushed below the fold', () => {
+    // 英単語 is the person's study record, not the household's money. On a
+    // 390px viewport that block is the difference between the question being on
+    // screen and being scrolled to.
+    render(
+      <Layout currentView="vocab" onNavigate={noop}>
+        <div />
+      </Layout>,
+    );
+    // Only the desktop sidebar's copy remains.
+    expect(screen.getAllByText('現在の残高').length).toBe(1);
+  });
+
   it('names the phone navigation for a screen reader', () => {
     render(
       <Layout currentView="dashboard" onNavigate={noop}>

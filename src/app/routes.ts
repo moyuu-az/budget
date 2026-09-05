@@ -50,6 +50,34 @@ export const VIEW_SEGMENT = {
 } as const satisfies Record<ViewType, string>;
 
 /**
+ * Whether a screen is about the HOUSEHOLD's money.
+ *
+ * WHAT READS THIS
+ *   The phone layout has no sidebar, so it repeats the balance and this month's
+ *   summary above the content (src/components/Layout.tsx). Those are ledger
+ *   figures, and on a screen that shows none of the ledger's data they are not
+ *   merely redundant -- they occupy the top of a 390px viewport and push the
+ *   actual content below the fold.
+ *
+ * WHY A TABLE AND NOT `view !== 'vocab'`
+ *   `satisfies Record<ViewType, boolean>` makes a NEW screen answer the question
+ *   here rather than inheriting an answer from a comparison someone wrote for a
+ *   different screen. The default a bare `!==` gives is "yes, show the household
+ *   figures", which is the wrong default for anything that is not about money.
+ */
+export const VIEW_SHOWS_LEDGER_FIGURES = {
+  dashboard: true,
+  entries: true,
+  history: true,
+  analytics: true,
+  assets: true,
+  settings: true,
+  // 英単語 is the signed-in person's study record. A balance above it is another
+  // household's business at best and noise at worst.
+  vocab: false,
+} as const satisfies Record<ViewType, boolean>;
+
+/**
  * Where `/`, an unknown path, and a link to a screen that no longer exists all
  * land. The dashboard, because it is the screen the app opens on and the only
  * one that states nothing about a *particular* month.
